@@ -1,13 +1,28 @@
 # SESSION HANDOFF
 
-**Updated 2026-09-10 (Batch H — the VAT rate as one object, an invoice-totals
-assert, and the payment-mode guard; the three 2026-09-09 sessions are the
-sections below it), every figure re-measured this turn.** Rewritten fresh at
+**Updated 2026-09-10 (Batch K — three live-database harnesses on one shared
+target guard; Batch H and the three 2026-09-09 sessions are the sections below
+it), every figure re-measured this turn.** Rewritten fresh at
 `2318055` on 2026-09-08 from a 1301-line predecessor; **nothing was lost, it is
 `e93baec:.planning/HANDOFF.md`, and every unit's reasoning lives in its own commit
 message**, which is where `CLAUDE.md` §5 says detail belongs. This file is
 STATE — what is true now, what is open, and what comes next. Rules are in
 `CLAUDE.md`; domain law is in `.claude/skills/aquafleet-domain/SKILL.md`.
+
+**THE DATABASE'S OWN MONEY LOGIC IS NOW UNDER TEST — 293 ASSERTIONS AGAINST A
+LIVE POSTGRES, NOT A MOCK.** `test:money` has always tested the TypeScript half;
+until Batch K nothing exercised the RPCs, and the RPCs are where the money
+actually moves. Three harnesses in `scripts/db/`, chained into `npm run
+test:db`. **They connect to `aquafleet-test` and to nothing else** — a four-string
+target guard in `scripts/db/harness.ts` refuses to open a socket otherwise. See
+Harnesses and Completed this session.
+
+**A GREEN HARNESS IS A CLAIM UNTIL YOU HAVE SEEN IT GO RED.** Every assertion in
+all three was proven able to fail: mutate to simulate the real regression, watch
+it turn red, restore, confirm byte-identical with `git hash-object`. **Do not add
+an assertion to these files without doing
+the same** — the failure mode they exist to prevent is a suite that pins what the
+code DID rather than what it must ADD UP TO, and that suite reads green forever.
 
 **THE VAT RATE IS ONE OBJECT, AND `confirm_invoice` NOW REFUSES TOTALS THAT DO
 NOT ADD UP.** `0190` put `public.vat_rate()` behind the five money objects that
@@ -54,7 +69,7 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Git
 
-- **`main` was at `0b20721` when this line was written, and the commit carrying
+- **`main` was at `41904c3` when this line was written, and the commit carrying
   this file is its child.** Measured with `git rev-parse HEAD`.
 - **Level with origin, measured BOTH required ways**: the BRANCH line of
   `git status -sb` reads `## main...origin/main` with no ahead/behind marker,
@@ -264,6 +279,32 @@ Re-run today. Three findings, and **only one of them is work**:
   `(today, today + 3]`. **It holds no DB connection by design, so it cannot
   notice the view growing a TWELFTH branch**; that degrades to a label-only row
   in the browser via `detailLine`'s default arm, not to a red test.
+- **`npm run test:db` — GREEN, 3 harnesses, 293 assertions, ~66s.** It is the
+  only suite that opens a socket, which is why it is slow and why it is `&&`
+  chained rather than looped — a connection failure must stop the run, not be
+  counted as a pass. Per-harness counts, and how to re-measure them:
+  ```sh
+  npm run test:db | awk '/DB checks/{print $0, n; n=0} /^  ok  /{n++}'
+  ```
+  `confirm-invoice-check` **30** · `invoice-lifecycle-check` **110** ·
+  `inventory-money-check` **153**.
+- **It runs against `aquafleet-test` (`vlyxazfinmlanjdttavg`) and CANNOT reach
+  production.** `scripts/db/harness.ts` holds ONE copy of a four-string target
+  guard — the whole env file scanned for the prod ref, the `TEST_SUPABASE_URL`
+  ref, the `TEST_DB_URL` host, and the service-role JWT's `ref` and `role`
+  claims. **One copy on purpose: two copies of a safety device drift, and the
+  copy that drifts is the one nobody re-reads.** The guard was re-proven in its
+  new home with three poisoned env files when it moved there.
+- **Nothing is committed to the test database.** One transaction per harness,
+  a savepoint per case, `rollback` in a `finally`. Each ends by re-taking a
+  row census **on a FRESH connection**, so it cannot read its own uncommitted
+  work, and asserts it is identical to the census it opened with.
+- **Every assertion in all three has been proven able to fail** — 5 negative
+  controls on the lifecycle harness, 6 on the inventory one, plus the guard's
+  own three. **Restoration was verified with `git hash-object`, not by eye.**
+- **These test the DATABASE, so a passing run says nothing about the app.** The
+  TS money engine is `test:money`'s job; the two suites overlap nowhere and
+  neither substitutes for the other.
 - **`scripts/code-grep.ts` is the tool that settles "is the identifier gone"**
   (`CLAUDE.md` §5). Directory arguments work since `8dea137`; exit 2 means the
   run produced no evidence and is never a pass.
@@ -388,7 +429,91 @@ before running any build while dev is up.
 
 ---
 
-## Completed this session (2026-09-10, Batch H — VAT constant + totals assert, `876bc0b` → `0b20721`)
+## Completed this session (2026-09-10, Batch K — live-DB harnesses, `0b20721` → `41904c3`)
+
+| Hash | What |
+| --- | --- |
+| `158fd7b` | **Pass 1 — `scripts/db/confirm-invoice-check.ts`**, 482 lines as committed. Pins `0191`'s three assert tiers at the confirm/freeze point. **30 assertions.** Also added `pg` + `@types/pg` + the supabase CLI, created the `test:db` script, and ignored `supabase/.temp/`. **It did NOT add the env ignore** — `.env*.local` was already `.gitignore` line 3 from the Next.js default, which is what keeps `.env.test.local` out of history (`git log --all -- .env.test.local` is empty; verified this turn). |
+| `4052871` | **Pass 2 — `scripts/db/invoice-lifecycle-check.ts`**, plus the **shared-guard refactor**: `scripts/db/harness.ts` extracted from pass 1, which now imports it and shrank to 374 lines. Pins `pay_invoice` / `unpay_invoice` / `void_invoice`. **110 assertions**, 6 cases and 12 message-matched refusals. |
+| `41904c3` | **Pass 3 — `scripts/db/inventory-money-check.ts`**. Pins FIFO lot consumption, `add_price_lot` and the `return_customer_balance` refund gate. **153 assertions**, 5 cases and 20 refusals. |
+
+Sizes at `41904c3`, re-measure rather than quote: `harness.ts` 142 lines,
+`confirm-invoice-check.ts` 374, `invoice-lifecycle-check.ts` 719,
+`inventory-money-check.ts` 839.
+```sh
+for f in scripts/db/*.ts; do printf "%-40s " "$f"; git show HEAD:"$f" | wc -l; done
+```
+
+**THE FIFO FIXTURE IS BUILT TO DISCRIMINATE, AND THAT IS THE WHOLE VALUE OF
+PASS 3.** Three lots whose `received_on` order, `created_at` order and price
+order **all disagree on the first lot**, so consuming nine has three
+right-looking answers — **420.00** by `received_on` (correct), 370.00 by
+`created_at`, 320.00 cheapest-first — and the harness asserts the three
+orderings genuinely differ BEFORE it asserts the outcome. **A fixture where they
+coincide passes under all three rules and proves nothing.** It asserts the
+per-lot UNIT COST, not the quantity alone: a quantity-only check goes green on a
+walk that took the right amounts from the wrong lots.
+
+**IT ENTERS FROM THE TOP, THROUGH `start_work_order`.** The TS layer never names
+`deduct_work_order_parts`, `consume_work_order_line` or `consume_from_lots`, so a
+harness calling the inner function directly would prove the walk orders correctly
+and prove nothing about the figure that reaches the work order. One case calls
+`consume_from_lots` directly ON TOP of that, because it carries its own copy of
+the `ORDER BY` and the two drifting apart is exactly the bug the wrapper hides.
+
+**THREE THINGS THE ERROR TEXT DOES NOT ADMIT, measured and asserted as behavior
+rather than as they ought to read.** Each is pinned separately, so a change that
+alters one leaves the other failing:
+
+- **The drift guard exists TWICE with two different messages, and the OUTER one
+  fires first.** `consume_work_order_line` walks the lots to record the split
+  before `consume_from_lots` walks them to decrement, so the work-order path
+  raises `for work order %` and the part-level `short by % for part %` is
+  reachable only by calling the inner function directly.
+- **On the work-order path an OVER-REQUEST is reported as DRIFT.** Ask for more
+  than exists and the recording loop runs out of lots first, so the operator is
+  told the ledger has drifted when the stock is simply absent;
+  `'Not enough stock on hand'` never fires there. **Recorded, not endorsed** —
+  changing the message is separate work.
+- **`return_customer_balance`'s already-refunded guard does NOT fire on an
+  ordinary double refund.** It sits behind the amount-is-positive guard, and the
+  first refund is itself subtracted from the balance, so the second call is
+  turned away by `'holds no balance to return'`. The already-refunded guard is
+  reachable in exactly ONE shape — refunded, then **funded again** — which is
+  also the only shape where it stops a second cash payout. Both are asserted;
+  neither alone proves the double payout is closed. **Found by the harness going
+  red on its first run**, which is the only reason it is written down.
+
+**THE DEBTOR-REFUND GATE IS THE ONE THAT WOULD COST REAL MONEY.**
+`v_customer_amount_payable` returns the prepaid RUNNING BALANCE, negative when
+the customer OWES us (domain skill, "Amount Payable ≠ the prepaid BALANCE").
+Flip that comparison and the RPC pays a debtor their own debt, in cash, and
+freezes the figure into `customer_balance_returns` where nothing re-derives it.
+Pinned with an archived debtor at −115.00 and an archived postpaid customer,
+both refused by message.
+
+**FOURTEEN NEGATIVE CONTROLS ARE ON THE RECORD, each restored byte-clean** — five
+on pass 2, six on pass 3, and the target guard re-proven with three poisoned env
+files when it moved into `harness.ts`. **That is the count this file can source,
+not necessarily the count that was run**: pass 1's controls predate the batch
+being written up, so do not read fourteen as pass 1 having had none. **The
+strongest was `grant execute … to anon` inside the transaction** — the exact
+`CLAUDE.md` §6 regression — which
+turned the anon check red and rolled back clean: all six functions read back
+denied afterwards via `has_function_privilege`, and the schema-wide count of
+non-trigger anon-executable functions is still **0**.
+
+**Pay moving the pool by 0.00 is CORRECT, not a missing assertion.** Model A
+deducts at DELIVERY; `v_customer_prepaid_balance` has no `paid` term. Pass 2
+asserts the zero deliberately — an assertion that the pool does NOT move is the
+one that catches a well-meaning "fix" adding a second deduction at payment.
+
+**The test database is not empty and must not be wiped.** It carries 1 customer /
+1 project / 1 trip / 1 top-up / 1 commission-history row from the earlier `0190`
+unblock; **removing them re-blocks a migration replay.** The harnesses'
+censuses are written against that baseline, not against zero.
+
+## Completed earlier the same day (2026-09-10, Batch H — VAT constant + totals assert, `876bc0b` → `0b20721`)
 
 | Hash | What |
 | --- | --- |
@@ -1003,6 +1128,21 @@ the three survivors in (a), two are console clicks and the third is a convention
 to write down or not — none is work. **Agenda 2 and 3 are now unblocked** — the
 reason this section used to say "do not start on top of an unresolved parked
 list" was to avoid another 1301-line handoff, and that risk is spent.
+
+**THE DB-HARNESS BATCH IS CLOSED AT THREE PASSES, AND THE COVERAGE IS 10 OF 65.**
+Re-measured this turn: `public` holds **65 non-trigger functions**, and the three
+harnesses drive **ten** of them — `confirm_invoice`, `pay_invoice`,
+`unpay_invoice`, `void_invoice`, `start_work_order`, `deduct_work_order_parts`,
+`consume_work_order_line`, `consume_from_lots`, `add_price_lot`,
+`return_customer_balance`. **Read 293 assertions as deep, not broad.** The ones
+worth a pass 4, in the order they would earn it: **`issue_driver_payslip`** (the
+definer money RPC that was anon-callable until `0163`), the **reverse stock
+path** — `return_to_lots`, `receive_purchase_order`, `reject_stock_receipt` —
+which puts cost back and is the mirror of everything pass 3 proved, and the
+**reserve-at-draft chain** `create_draft_invoice` / `sync_draft_reservation` /
+`discard_invoice`. **None is started and none is owed** — this is a menu, not a
+backlog. The pattern to copy is in `scripts/db/harness.ts`; do not write a fourth
+copy of the target guard.
 
 **THE TIMEZONE WORK IS DONE IN ALL THREE PARTS, and none is on this list any
 more.** `e147373` applied+verified `0189` in the DB, `00cfb9e` moved the app off
