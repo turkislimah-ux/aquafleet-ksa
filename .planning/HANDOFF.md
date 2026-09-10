@@ -754,36 +754,93 @@ how it stays unanswered.**
 it.** That entry is deferred by an owner's decision, not parked for want of a
 fix — the fix is known and stated.
 
-1. **POST-DEPLOY — THE MIGRATION SET IS NOT SELF-REBUILDABLE.** A fresh replay of
-   `0001..0191` onto an empty project fails at
-   `0111_backfill_trip_filling_cost.sql:83`, on `validate constraint
-   water_stations_offers_at_least_one_type`. `0110` adds that constraint
-   `not valid`, its own comment saying a later migration validates it *"once the
-   UI has been used"* — so **`0111` depends on station prices an operator typed
-   through the UI between the two migrations.** A clean rebuild has NULL-price
-   seed stations, which violate it.
+1. **POST-DEPLOY — THE MIGRATION SET IS NOT SELF-REBUILDABLE. SIX instances,
+   every one measured 2026-09-10** by replaying `0001..0191` onto the throwaway
+   `aquafleet-test` project (ref `vlyxazfinmlanjdttavg`). **Production was never
+   touched** — every command was host-guarded on
+   `db.vlyxazfinmlanjdttavg.supabase.co` with the production ref asserted absent.
 
-   **Measured 2026-09-10** on the throwaway `aquafleet-test` project (ref
-   `vlyxazfinmlanjdttavg`; production was never touched): 110 of 189 applied,
-   ledger `max = '0110'`, `0111` wrote nothing — the failure is atomic and the
-   push is safe to resume. All 3 seeded stations (`manfuhah_station`,
-   `olaya_filling_point`, `umm_al_hamam_station`) carry both
-   `fill_cost_potable_sar` and `fill_cost_non_potable_sar` NULL, so 3 of 3 rows
-   violate: `SQLSTATE 23514`. **A pre-identified risk died here too — the
-   `begin;`/`commit;` in the 147 pre-0173 files did NOT choke `db push`;** 110
-   files carrying them applied cleanly.
+   **The set DID reach 189/189, and that is the finding, not a reassurance:** it
+   only got there because the ENVIRONMENT was patched four times underneath it.
+   A rebuild nobody is babysitting stops at the first of these.
 
-   **NOT a deploy or wipe blocker.** Production's schema is already built, and a
-   data wipe deletes ROWS while keeping the schema, so nothing re-runs `0111`.
-   What it costs is **disaster recovery and any new environment** — including the
-   DB-connected money harness (Batch K), which is blocked on exactly this today.
+   | # | Site | What it depends on that the set never creates |
+   |---|---|---|
+   | 1 | `0111:83` | operator-entered station prices — `validate constraint water_stations_offers_at_least_one_type` |
+   | 2 | `0150` | asserts 0 anon-executable, but a FRESH Supabase project grants `anon` EXECUTE on functions by default |
+   | 3 | `0152` | hardcoded production row counts: `trips=836 delivered=759 stampable=757 no_project=1 no_driver=1` |
+   | 4 | `0190` | value-preservation guards that refuse a vacuous diff, so they need rows a fresh DB has none of |
+   | 5 | `stock_receipt_approvals` | RLS + policy that exist on production but in NO migration |
+   | 6 | `create_purchase_order` | a stale 6-arg overload the set creates and never drops |
 
-   **Proper fix:** move embedded business-seed data (the stations, plus an audit
-   of any other operator-data dependency in the chain) out of the migrations into
-   a seed step, so the set replays clean. **Check for further instances beyond
-   `0111`** — the replay stops at the FIRST one, so it cannot have found the
-   later ones, and "it got past 0111" is not evidence there are none.
-   **Deferred by Turki 2026-09-10.**
+   **1 — `0111`.** `0110` adds the constraint `not valid`, its own comment saying
+   a later migration validates it *"once the UI has been used"*, so `0111`
+   depends on prices an operator typed between the two. **Correction to this
+   note's first revision, which said "3 of 3 stations NULL":** by the time the
+   push resumed, all 3 (`manfuhah_station`, `olaya_filling_point`,
+   `umm_al_hamam_station`) read `5.00 / 5.00`, patched out-of-band on the test
+   project to unblock it. The ledger proves no migration wrote them. **The
+   mechanism is unchanged and the defect stands** — a clean rebuild still has
+   NULL-price seed stations and still raises `SQLSTATE 23514`.
+
+   **2 — `0150`, and this is the one that generalises.** Supabase's fresh-project
+   bootstrap carries `alter default privileges in schema public grant execute on
+   functions to anon`; **the set never revokes it.** So every function the replay
+   creates arrives anon-executable — 49 of them — and `0150`'s posture assert
+   rolls the migration back. Cleared on test by revoking the default plus the 49
+   NON-TRIGGER functions; blanket-revoking would have made trigger functions
+   diverge from production and corrupted the very diff this project exists for.
+
+   **3 — `0152`.** Anchors pin production's shape against a fresh DB's zeros.
+   Cleared by zeroing the `_0152_anchor` block, pushing, and reverting the file
+   in the same turn — blob hash `9673b02e…` identical either side. **It is the
+   only remaining file of that shape**; `0153`–`0191` carry none.
+
+   **4 — `0190`.** Its guards refuse to compare an empty snapshot, correctly:
+   *"a zero-row diff would report green"*. Cleared by seeding one customer,
+   project, delivered trip and top-up — **a real rate, not a placeholder**, so
+   `trip_consumption_sar = 115.00` and the `* 1.15` path `0190` rewrites is
+   actually exercised. A customer with no work would have satisfied the guard
+   while comparing nothing, which is passing the letter and failing the point.
+   **Those rows are still on the test project**; wiping them re-blocks a replay.
+
+   **5 — `stock_receipt_approvals`. NOT hygiene — a SECURITY control that no
+   rebuild reproduces.** Production has RLS ON with
+   `authenticated_all_stock_receipt_approvals` [ALL, `authenticated`,
+   `using(true) check(true)`] (architect-measured). **Five migrations touch the
+   table — `0057`, `0058`, `0094`, `0096`, `0172` — and not one enables RLS or
+   creates a policy.** The replay lands it with RLS OFF and zero policies, which
+   is what the count deltas were: 86 of 87 RLS, 88 policies against production's
+   87 and 89. Production is protected by a manual toggle; **a rebuilt environment
+   ships that table unprotected.**
+
+   **6 — `create_purchase_order`.** The set creates a 6-arg overload
+   `(uuid,uuid,jsonb,date,text,text)` and never drops it. Production carries only
+   the 9-arg, the 6-arg having been dropped by hand, so **a replay resurrects an
+   orphan overload** that production does not have.
+
+   **What the replay could and could not find, stated so the count is not
+   over-read:** 1–4 are where it STOPPED, so they were unavoidable. 5 and 6 came
+   from DIFFING the finished result against production — a class the replay
+   cannot surface by running, because nothing raises. **An earlier revision here
+   warned "the replay stops at the FIRST one, so it cannot have found the later
+   ones." That is now spent for 1–4 and still live for 5–6:** six is what two
+   methods found, not a proof there is no seventh.
+
+   **NOT a deploy or wipe blocker.** Production's schema is built, and a data wipe
+   deletes ROWS while keeping the schema, so nothing re-runs any of these. What
+   it costs is **disaster recovery, any new environment, and — for #5 — the
+   security posture of the rebuilt one.**
+
+   **Proper fix, ONE coherent "replay-clean" pass in step 3, not six patches:**
+   move station seed data out of the migrations into a seed step; revoke the
+   fresh-project `anon` default IN-SET; make `0152`'s anchors conditional or drop
+   them; make `0190`'s guards no-op on empty rather than raise; add a migration
+   enabling RLS + policy on `stock_receipt_approvals`; drop the orphan
+   `create_purchase_order` overload. **Then re-replay onto a FRESH project and
+   prove it** — the pass is not done because the diff is clean, it is done
+   because an unattended replay reaches 0191 by itself. **Nothing drafted yet, by
+   instruction. Deferred by Turki 2026-09-10.**
 
 **Both 2026-09-09 entries are CLOSED. Kept below so they are not reopened.**
 
