@@ -46,7 +46,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createPlainClient } from "@supabase/supabase-js";
-import { isNavRoute } from "@/lib/nav";
+import { isLandingRoute } from "@/lib/nav";
 import {
   isLanguageValue, validateAvatarFile, validateNewPassword,
   type ProfileFields,
@@ -230,11 +230,18 @@ export async function saveProfile(input: {
       return { error: "Language must be English or Arabic." };
     }
 
-    // VALIDATED AT WRITE TIME, against the same NAV the sidebar renders. The
-    // read side falls back independently — see resolveLandingRoute. Both ends
-    // are required and neither substitutes for the other.
+    // VALIDATED AT WRITE TIME, against the same LANDING_HREFS the picker builds
+    // its options from. The read side falls back independently — see
+    // resolveLandingRoute. Both ends are required and neither substitutes for
+    // the other.
+    //
+    // Landing-eligible is NARROWER than "in the sidebar": the three deferred
+    // pages are sidebar routes but not valid landing pages, because arriving on
+    // a coming-soon page straight after sign-in reads as a broken app. The
+    // picker already omits them, so reaching this branch means a hand-posted
+    // form — which is exactly what a write-time check is for.
     const defaultRoute = blankToNull(f.default_route ?? null);
-    if (defaultRoute !== null && !isNavRoute(defaultRoute)) {
+    if (defaultRoute !== null && !isLandingRoute(defaultRoute)) {
       return { error: "That landing page is not one of the sidebar pages." };
     }
 

@@ -19,7 +19,9 @@ import {
   Boxes, FileBarChart, Activity, MapPin, Archive, PackageMinus,
   type LucideIcon,
 } from "lucide-react";
-import { NAV_HREFS, type NavHref } from "@/lib/routes";
+// DEFERRED_HREFS is imported, not just re-exported: the dev-only agreement
+// check at the foot of this file reads it at runtime.
+import { NAV_HREFS, DEFERRED_HREFS, type NavHref } from "@/lib/routes";
 // TYPE-ONLY, and it has to stay that way. The block above explains why this
 // module must not drag anything extra into the edge bundle; `import type` is
 // erased entirely at compile time, so this adds no runtime edge and no import.
@@ -93,8 +95,12 @@ export const NAV: NavItem[] = [
 // So the strings live in a leaf module with no imports, and this file depends on
 // IT. Re-exported below so UI code still has a single nav import.
 // ---------------------------------------------------------------------------
-export { NAV_HREFS, type NavHref };
-export { DEFAULT_LANDING_ROUTE, isNavRoute, resolveLandingRoute } from "@/lib/routes";
+export { NAV_HREFS, DEFERRED_HREFS, type NavHref };
+export {
+  DEFAULT_LANDING_ROUTE, LANDING_HREFS,
+  isLandingRoute, resolveLandingRoute,
+  type DeferredHref, type LandingHref,
+} from "@/lib/routes";
 
 // BOTH DIRECTIONS OF THE NAV / NAV_HREFS AGREEMENT ARE CHECKED.
 //
@@ -103,16 +109,35 @@ export { DEFAULT_LANDING_ROUTE, isNavRoute, resolveLandingRoute } from "@/lib/ro
 //
 // The reverse is not expressible while NAV stays a mutable NavItem[], so it is
 // asserted at module load in development instead. It is the direction that
-// matters: an orphan in NAV_HREFS passes isNavRoute for a page that no longer
-// renders, which would defeat the read-side fallback and 404 someone at login —
-// the one failure with no way out, since it happens before they can reach
-// Settings to change the preference.
+// matters: an orphan in NAV_HREFS passes isLandingRoute for a page that no
+// longer renders, which would defeat the read-side fallback and 404 someone at
+// login — the one failure with no way out, since it happens before they can
+// reach Settings to change the preference.
 if (process.env.NODE_ENV !== "production") {
   const orphans = NAV_HREFS.filter((h) => !NAV.some((n) => n.href === h));
   if (orphans.length) {
     console.error(
       `[nav] NAV_HREFS lists ${orphans.join(", ")} but NAV does not render them. ` +
         `A stored landing preference could resolve to a page that no longer exists.`,
+    );
+  }
+
+  // THE OTHER PAIR THAT CAN DRIFT, and this is the only file that can see both
+  // halves of it. `group: "soon"` decides what the SIDEBAR says about a page;
+  // DEFERRED_HREFS decides whether a user can BOOT into it. They mean the same
+  // thing and are declared in two places, so a fourth deferred page added to
+  // NAV alone would be fenced off visually while staying landing-eligible —
+  // the exact combination Batch B4 removed.
+  //
+  // Dev-only console, matching the check above: routes.ts cannot import NAV
+  // (that is the whole point of the split), so this cannot be a type.
+  const unfenced = NAV.filter(
+    (n) => n.group === "soon" && !(DEFERRED_HREFS as readonly string[]).includes(n.href),
+  );
+  if (unfenced.length) {
+    console.error(
+      `[nav] ${unfenced.map((n) => n.href).join(", ")} sits under the "Coming Soon" ` +
+        `heading but is missing from DEFERRED_HREFS, so it is still selectable as a landing page.`,
     );
   }
 }

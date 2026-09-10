@@ -32,6 +32,87 @@ export const dict = {
     main: { en: "Main", ar: "الرئيسية" },
     soon: { en: "Coming Soon", ar: "قريبًا" },
   },
+  /**
+   * Copy for the three DEFERRED PAGES (/predictive, /routes, /iot), rendered
+   * through components/ComingSoon.tsx.
+   *
+   * THE ONE RULE THIS BLOCK EXISTS TO ENFORCE: no string in here contains a
+   * DIGIT, and every capability sentence is in the FUTURE TENSE. Those two
+   * properties are what make the page honest, and they are properties of the
+   * COPY, not of the component — a present-tense sentence or a stray figure
+   * would re-create exactly what these pages were gutted for, with the layout
+   * still looking correct.
+   *
+   * Until 2026-09-10 all three pages rendered a complete, convincing product
+   * built entirely on lib/mock-data.ts: an invented "Estimated Savings" in SAR,
+   * an invented "Cost saved" in SAR, model precision/recall figures, a live
+   * sensor grid with a hardcoded "Updated: 8s". None of it was real and none of
+   * it was labelled as unreal. The pages stay in the nav as roadmap; what they
+   * show is now this.
+   *
+   * `soon.badge` is deliberately NOT reused from `navLandmark.soon` even though
+   * both currently read "Coming Soon". The nav heading names a GROUP OF LINKS;
+   * this names the STATE OF ONE PAGE. Same words today, two different things
+   * being described — the same reasoning kept `dashboard.summaries.comingSoon`
+   * separate (see the duplicate-strings note further down this file).
+   */
+  soon: {
+    badge: { en: "Coming Soon", ar: "قريبًا" },
+    /**
+     * The sentence that does the actual work. It is stated on every one of the
+     * three pages, in the same words, because a user who has seen it once
+     * should recognise it instantly on the other two.
+     */
+    noData: {
+      en: "Nothing on this page is estimated, simulated, or filled in. It shows no figures because there are none yet.",
+      ar: "لا شيء في هذه الصفحة مُقدَّر أو محاكى أو مُعبَّأ. لا تعرض أرقاماً لأنه لا توجد أرقام بعد.",
+    },
+    plannedHeading: { en: "What it will do", ar: "ما الذي سيقوم به" },
+    meanwhileHeading: { en: "In the meantime", ar: "في هذه الأثناء" },
+    predictive: {
+      lede: { en: "Catch a failing part before it fails.", ar: "اكتشاف القطعة قبل تعطّلها." },
+      body: {
+        en: "Predictive AI will read component condition from each truck and raise a part before it breaks, so the repair is scheduled instead of the truck stopping on the road. It depends on the sensor feed, which is not connected yet.",
+        ar: "سيقرأ الذكاء التنبؤي حالة المكوّنات من كل شاحنة وينبّه إلى القطعة قبل تعطّلها، ليُجدول الإصلاح بدل توقّف الشاحنة في الطريق. يعتمد ذلك على تغذية المستشعرات، وهي غير موصولة بعد.",
+      },
+      p1: { en: "Condition tracked per major component", ar: "متابعة حالة كل مكوّن رئيسي" },
+      p2: { en: "An alert raised ahead of failure, with the reading behind it", ar: "تنبيه يُرفع قبل العطل، مع القراءة التي أطلقته" },
+      p3: { en: "A work order opened straight from an alert", ar: "فتح أمر عمل مباشرة من التنبيه" },
+    },
+    routes: {
+      lede: { en: "Plan the day's runs before dispatch.", ar: "تخطيط رحلات اليوم قبل الانطلاق." },
+      body: {
+        en: "Route Optimization will group the day's trips and order their stops, then show the planned run against the one actually driven. It depends on live vehicle positions, which are not connected yet.",
+        ar: "سيجمع تحسين المسارات رحلات اليوم ويرتّب محطاتها، ثم يعرض المسار المخطَّط مقابل المسار الذي سُلك فعلاً. يعتمد ذلك على مواقع المركبات اللحظية، وهي غير موصولة بعد.",
+      },
+      p1: { en: "Trips grouped and sequenced per truck", ar: "تجميع الرحلات وترتيبها لكل شاحنة" },
+      p2: { en: "The planned route compared against the driven one", ar: "مقارنة المسار المخطَّط بالمسار المسلوك" },
+      p3: { en: "Distance and fuel effects measured from real trips, never estimated", ar: "قياس أثر المسافة والوقود من رحلات حقيقية، لا بالتقدير" },
+    },
+    iot: {
+      lede: { en: "Read each truck while it is still on the road.", ar: "قراءة حالة الشاحنة وهي في الطريق." },
+      body: {
+        en: "IoT Monitoring will stream engine, tyre, battery and tank readings from each truck and raise an alert when one leaves its safe range. No sensor hardware is connected yet, so there is nothing to stream.",
+        ar: "ستنقل مراقبة المستشعرات قراءات المحرك والإطارات والبطارية والخزان من كل شاحنة، وترفع تنبيهاً عند خروج أي قراءة عن نطاقها الآمن. لا توجد مستشعرات موصولة بعد، فلا شيء يُبثّ.",
+      },
+      p1: { en: "Readings per truck, updated as they arrive", ar: "قراءات لكل شاحنة تُحدَّث فور وصولها" },
+      p2: { en: "Safe ranges that raise an alert on their own", ar: "نطاقات آمنة تُطلق التنبيه من تلقائها" },
+      p3: { en: "Sensor history kept against each truck record", ar: "سجل المستشعرات محفوظ مع سجل كل شاحنة" },
+    },
+    /**
+     * Destinations offered under `meanwhileHeading`. Every one is a REAL page
+     * reading REAL rows — that is the whole point of the section, and it is
+     * why these pages carry links instead of the disabled buttons the two
+     * natural-language seams use. A dead end becomes a signpost, and no
+     * control on the page does nothing.
+     */
+    go: {
+      fleet: { en: "Trucks, drivers and utilisation, live today", ar: "الشاحنات والسائقون والاستخدام، متاحة اليوم" },
+      maintenance: { en: "Work orders and service history, live today", ar: "أوامر العمل وسجل الصيانة، متاحة اليوم" },
+      trips: { en: "Every delivered and scheduled trip, live today", ar: "كل رحلة مُسلَّمة ومجدولة، متاحة اليوم" },
+      reports: { en: "Distance, cost and revenue reporting, live today", ar: "تقارير المسافة والتكلفة والإيرادات، متاحة اليوم" },
+    },
+  },
   status: {
     active: { en: "Active", ar: "نشط" },
     idle: { en: "Idle", ar: "متوقف" },

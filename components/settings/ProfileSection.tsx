@@ -46,7 +46,7 @@ import { useRouter } from "next/navigation";
 import { Check, Trash2, Upload, UserRound, KeyRound } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { NAV } from "@/lib/nav";
+import { NAV, isLandingRoute } from "@/lib/nav";
 import { t } from "@/lib/i18n";
 import {
   fetchProfile, saveProfile, changePassword, uploadAvatar, removeAvatar,
@@ -475,8 +475,17 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                   >
                     <option value="">{t("settings.profile.noPreference", lang)}</option>
                     {/* Built from the SAME NAV the sidebar renders, so the list
-                        cannot offer a page that does not exist. */}
-                    {NAV.map((n) => (
+                        cannot offer a page that does not exist — then filtered
+                        by the SAME predicate the server validates with, so it
+                        cannot offer a page the save will reject either.
+
+                        What that removes is the deferred trio (Route
+                        Optimization, Predictive AI, IoT Monitoring). They are
+                        real sidebar routes and stay one click away; they are
+                        just not somewhere to be dropped at sign-in, before
+                        you have asked for anything. See LANDING_HREFS in
+                        lib/routes.ts for the full reasoning. */}
+                    {NAV.filter((n) => isLandingRoute(n.href)).map((n) => (
                       <option key={n.href} value={n.href}>
                         {n.label ?? (n.key ? t(`nav.${n.key}`, lang) : n.href)}
                       </option>
