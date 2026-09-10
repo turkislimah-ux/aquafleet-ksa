@@ -69,7 +69,7 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Git
 
-- **`main` was at `41904c3` when this line was written, and the commit carrying
+- **`main` was at `410de67` when this line was written, and the commit carrying
   this file is its child.** Measured with `git rev-parse HEAD`.
 - **Level with origin, measured BOTH required ways**: the BRANCH line of
   `git status -sb` reads `## main...origin/main` with no ahead/behind marker,
@@ -1095,14 +1095,18 @@ how it stays unanswered.**
    claim it was the only open security item; it was not, it was the only one
    anybody had measured.**
 
-### (b) Doable FIX — ONE entry, POST-DEPLOY, opened 2026-09-10
+### (b) Doable FIX — TWO entries, both opened 2026-09-10
 
-**This section read "EMPTY again" from 2026-09-09 until the entry below opened
-it.** That entry is deferred by an owner's decision, not parked for want of a
-fix — the fix is known and stated.
+**This section read "EMPTY again" from 2026-09-09 until entry 1 opened it.**
+Entry 1 is now PART-DONE, entry 2 is a documentation correction nobody has
+acted on. Neither is parked for want of a fix; both fixes are known and stated.
 
 1. **POST-DEPLOY — THE MIGRATION SET IS NOT SELF-REBUILDABLE. SIX instances,
-   every one measured 2026-09-10** by replaying `0001..0191` onto the throwaway
+   every one measured 2026-09-10. FOUR ARE NOW EDITED IN THE FILES (`410de67`),
+   TWO REMAIN, AND NONE IS PROVEN** — the proof is a pristine unattended replay
+   onto a fresh project, which has NOT been re-run. See "Where this stands" at
+   the end of this entry before quoting any of it as closed. Measured by
+   replaying `0001..0191` onto the throwaway
    `aquafleet-test` project (ref `vlyxazfinmlanjdttavg`). **Production was never
    touched** — every command was host-guarded on
    `db.vlyxazfinmlanjdttavg.supabase.co` with the production ref asserted absent.
@@ -1111,14 +1115,18 @@ fix — the fix is known and stated.
    only got there because the ENVIRONMENT was patched four times underneath it.
    A rebuild nobody is babysitting stops at the first of these.
 
-   | # | Site | What it depends on that the set never creates |
-   |---|---|---|
-   | 1 | `0111:83` | operator-entered station prices — `validate constraint water_stations_offers_at_least_one_type` |
-   | 2 | `0150` | asserts 0 anon-executable, but a FRESH Supabase project grants `anon` EXECUTE on functions by default |
-   | 3 | `0152` | hardcoded production row counts: `trips=836 delivered=759 stampable=757 no_project=1 no_driver=1` |
-   | 4 | `0190` | value-preservation guards that refuse a vacuous diff, so they need rows a fresh DB has none of |
-   | 5 | `stock_receipt_approvals` | RLS + policy that exist on production but in NO migration |
-   | 6 | `create_purchase_order` | a stale 6-arg overload the set creates and never drops |
+   | # | Site | What it depends on that the set never creates | Edit |
+   |---|---|---|---|
+   | 1 | `0111` | operator-entered station prices — `validate constraint water_stations_offers_at_least_one_type` | EDITED `410de67` |
+   | 2 | `0150` | asserts 0 anon-executable, but a FRESH Supabase project grants `anon` EXECUTE on functions by default | EDITED `410de67`, in `0083` |
+   | 3 | `0152` | hardcoded production row counts: `trips=836 delivered=759 stampable=757 no_project=1 no_driver=1` | EDITED `410de67` |
+   | 4 | `0190` | value-preservation guards that refuse a vacuous diff, so they need rows a fresh DB has none of | EDITED `410de67` |
+   | 5 | `stock_receipt_approvals` | RLS + policy that exist on production but in NO migration | OPEN — needs a new migration |
+   | 6 | `create_purchase_order` | a stale 6-arg overload the set creates and never drops | OPEN — needs a new migration |
+
+   **The `0111:83` address in an earlier revision of this table is spent** — the
+   edit added an UPDATE above the validate, which now sits at `:130`. Grep
+   `validate constraint`, never the address (§5).
 
    **1 — `0111`.** `0110` adds the constraint `not valid`, its own comment saying
    a later migration validates it *"once the UI has been used"*, so `0111`
@@ -1130,6 +1138,33 @@ fix — the fix is known and stated.
    mechanism is unchanged and the defect stands** — a clean rebuild still has
    NULL-price seed stations and still raises `SQLSTATE 23514`.
 
+   **EDITED `410de67`, in `0111`, and THIS IS THE ONE THAT SEEDS DATA.** The
+   ranked principle for this pass was: a data-AWARE guard beats seeding
+   placeholder rows, and seed only where no data-aware form exists. There is
+   none here — a constraint cannot be validated around rows that violate it.
+   So, immediately before the validate: `update public.water_stations set
+   fill_cost_non_potable_sar = 0.00 where fill_cost_potable_sar is null and
+   fill_cost_non_potable_sar is null;`. Non-potable because it is the type every
+   live station actually prices and it makes the SMALLER claim, one type rather
+   than both, which is exactly what `0110` was protecting; `0.00` because it is
+   a REAL price in this model, not a placeholder — `0110` records that
+   company-owned stations fill free and production's `furaian` is genuinely
+   `0.00 / 0.00`.
+   **The file choice was forced, not preferred.** Seeding in `0014` is not
+   executable: the price columns do not exist for another 96 files, `0110` adds
+   them. And `0110` must not seed them either — its stated thesis is that
+   filling both types from the old flat `fill_cost` would make the database
+   assert every station offers both, "which is exactly the thing nobody knows
+   yet." That leaves `0111`, which is also the file at fault: it validates a
+   constraint whose precondition it neither establishes nor checks.
+   **`0111`'s own "0.00 claims the fill was FREE" argument does not bite** —
+   that is about TRIPS, and a rebuild has none. The operator corrects prices in
+   the stations UI before the first trip; the snapshot freeze does the rest.
+   **No-op on production, measured 2026-09-10:** 5 stations — `furaian`
+   0.00/0.00, `manfuhah` 5.00/0.00, `olaya` NULL/80.00, `shas` 80.00/50.00,
+   `umm_al_hamam` NULL/10.00 — and ZERO with both prices NULL, so the UPDATE
+   matches no row there. The constraint is already `convalidated = true`.
+
    **2 — `0150`, and this is the one that generalises.** Supabase's fresh-project
    bootstrap carries `alter default privileges in schema public grant execute on
    functions to anon`; **the set never revokes it.** So every function the replay
@@ -1138,12 +1173,67 @@ fix — the fix is known and stated.
    NON-TRIGGER functions; blanket-revoking would have made trigger functions
    diverge from production and corrupted the very diff this project exists for.
 
+   **EDITED `410de67` — in `0083`, NOT in `0150`.** `0150`'s assertion is
+   correct and reports the posture accurately; weakening it to accommodate a
+   broken upstream revoke would be the hack. The file whose logic is wrong is
+   `0083`, whose loop ran `revoke execute on function %s from public` and whose
+   header claims the result is that "anon can no longer call any RPC in this app
+   at all". **THAT CLAIM WAS FALSE ON A FRESH PROJECT, AND HAD BEEN SINCE THE
+   FILE WAS WRITTEN.** It held on PRODUCTION, which is the only place it was
+   ever measured — the file's own header says it was written after the fact
+   against the live DB. Two distinct grants make a function anon-executable and
+   `0083` removed one: the implicit PUBLIC entry (empty grantee, `=X/postgres`),
+   and an EXPLICIT `anon=X/postgres` entry handed out by default privileges at
+   CREATE time. `revoke ... from public` does not touch the second.
+   **Sharper than this note's first revision, which said the bootstrap "carries
+   `alter default privileges ... grant execute on functions to anon`".** The
+   mechanism is a default ACL keyed on the CREATING role. Measured on BOTH
+   projects 2026-09-10, `pg_default_acl` still shows the fingerprint:
+   `postgres`/`public`/`S` STILL grants anon, `postgres`/`public`/`r` no longer
+   does (`0161` stripped it), `postgres`/`public`/`f` no longer does (`0192`
+   stripped it) — a fresh project granting anon on tables, sequences AND
+   functions, stripped file by file since. A separate `supabase_admin`-grantor
+   entry for `public`/functions still grants anon on both projects; `0192`
+   explicitly could not alter it ("not a member").
+   The edit is one word plus a predicate: `from public, anon`, scoped with
+   `and p.prorettype <> 'trigger'::regtype`. **Trigger-scoped deliberately** —
+   it restates `0192`'s predicate character for character and preserves
+   production's END STATE exactly. Measured 2026-09-10: production has precisely
+   4 anon-executable functions and all 4 are triggers —
+   `record_project_commission_change()`, `record_salary_change()`,
+   `set_updated_at()`, `trips_station_offers_water_type()`. Blanket-revoking
+   would strip those on a rebuild, the same divergence the manual test-project
+   fix already avoided. **No-op on production:** 0 anon-executable NON-TRIGGER
+   functions there already, and the revoke is idempotent per the file's own
+   comment.
+
    **3 — `0152`.** Anchors pin production's shape against a fresh DB's zeros.
    Cleared by zeroing the `_0152_anchor` block, pushing, and reverting the file
    in the same turn — blob hash `9673b02e…` identical either side. **It is the
    only remaining file of that shape**; `0153`–`0194` carry none (re-verified
    this turn — `0192`, `0193` and `0194` hold no `_anchor` block and no
    `begin;`/`commit;`).
+
+   **EDITED `410de67`, in `0152`: block (c2) demoted from `raise exception` to
+   `raise notice`, counts still printed, drafted figures still named. The
+   `_0152_anchor` temp table and blocks (c3), (c4), (f1), (f2) are untouched.**
+   Those five numbers were never an invariant — they are a DRAFTING-TIME
+   STALENESS TRIPWIRE, and the error text said so itself ("this is DRIFT, NOT A
+   DEFECT"). **They were already stale against PRODUCTION, before replay was
+   ever a concern:** measured 2026-09-10, prod stands at
+   `981 / 904 / 902 / 1 / 1` against the `836 / 759 / 757 / 1 / 1` drafted.
+   **NOT replaced with `stampable <= delivered <= total`, and that decision is
+   the point of the entry.** All three counts come from one
+   `count(*) filter (...)` pass over nested-superset predicates, so the ordering
+   holds on `981/904/902`, on `0/0/0` and on a corrupted table alike — it cannot
+   fail, which makes it a dead guard rather than a cure for one. Per the user
+   memory rule, prove a guard CAN fail before trusting it green. The failable
+   guards here are (c3) and (c4), plus (f1) and (f2) in the verification
+   section; all four are already scale-free and all four still raise.
+   **No-op on production:** the block writes nothing, it is pure assertion, so
+   demoting it moves no row. Prod re-measured green on every guard that
+   remains — 902 stamped, 0 missed, 0 delivered-with-NULL-commission,
+   0 undelivered-with-non-NULL, `sum(commission_sar) = 18,322.84`.
 
    **4 — `0190`.** Its guards refuse to compare an empty snapshot, correctly:
    *"a zero-row diff would report green"*. Cleared by seeding one customer,
@@ -1152,6 +1242,25 @@ fix — the fix is known and stated.
    actually exercised. A customer with no work would have satisfied the guard
    while comparing nothing, which is passing the letter and failing the point.
    **Those rows are still on the test project**; wiping them re-blocks a replay.
+
+   **EDITED `410de67`, in `0190`: both empty-snapshot guards now `raise notice`
+   and SKIP the value diff instead of aborting.** What changed is the VERDICT on
+   empty, not the guard — the empty case still refuses to report green, it now
+   says out loud that it compared nothing. The row-count check and the
+   per-column diff are unchanged and moved into the `else` branch; proven by
+   normalising whitespace on both sides of the diff, **45 statement lines
+   identical**, indentation the only difference.
+   **No-op on production, measured 2026-09-10:** 9 customers (8 active), 9 rows
+   in `v_customer_prepaid_balance` and 9 in `v_customer_amount_payable`, so
+   `v_before = 9` at both guards, the `else` branch is taken, and the guard is
+   fully armed wherever there is money.
+   **Blocks 5b/5c/5d were never affected and are untouched** — they are
+   data-independent, so even on an empty replay `0190` still PROVES the five
+   rewritten objects reference `vat_rate()` and carry no bare VAT literal, the
+   four EXECUTE grants, and the two view security footers. **That is why the
+   seeded test-project rows are no longer load-bearing for the replay** — they
+   remain useful for exercising the `* 1.15` path deliberately, which the notice
+   branch by definition does not.
 
    **5 — `stock_receipt_approvals`. NOT hygiene — a SECURITY control that no
    rebuild reproduces.** Production has RLS ON with
@@ -1181,16 +1290,92 @@ fix — the fix is known and stated.
    it costs is **disaster recovery, any new environment, and — for #5 — the
    security posture of the rebuilt one.**
 
-   **Proper fix, ONE coherent "replay-clean" pass in step 3, not six patches:**
-   move station seed data out of the migrations into a seed step; revoke the
-   fresh-project `anon` default IN-SET; make `0152`'s anchors conditional or drop
-   them; make `0190`'s guards no-op on empty rather than raise; add a migration
-   enabling RLS + policy on `stock_receipt_approvals`; drop the orphan
-   `create_purchase_order` overload. **Then re-replay onto a FRESH project and
-   prove it** — the pass is not done because the diff is clean, it is done
-   because an unattended replay reaches **`0194`** by itself — the target moved
-   with the DB, and quoting the old `0191` would declare victory three migrations
-   early. **Nothing drafted yet, by instruction. Deferred by Turki 2026-09-10.**
+   **WHERE THIS STANDS — READ THIS BEFORE QUOTING ANY OF THE ABOVE AS CLOSED.**
+
+   **Four files edited and committed as `410de67`** (`0083`, `0111`, `0152`,
+   `0190`), each ruled on individually by the architect before it was touched,
+   each carrying its own in-file record of what changed, that it is a post-hoc
+   replay-cleanliness fix, and the measured no-op-on-production proof. Nothing
+   was applied to any database; production is not re-run.
+   **NONE OF IT IS PROVEN. The proof is a pristine unattended replay onto a
+   FRESH project, and that has not been run.** An edit that reasons correctly
+   and a replay that reaches `0194` by itself are different claims, and only the
+   second one closes this entry. The target is `0194`, not the old `0191` —
+   quoting `0191` would declare victory three migrations early.
+
+   **A FIFTH BLOCKER OF THE SAME FAMILY, FOUND 2026-09-10 WHILE MAKING THE
+   `0083` EDIT, NOT YET RULED ON AND DELIBERATELY NOT FIXED.** The `0083` edit
+   closes instance 2 for functions that exist AT `0083`. It does NOT revoke the
+   fresh-project DEFAULT PRIVILEGES, so every function created AFTER it still
+   arrives with an explicit `anon=X/postgres` grant. **`0164` then fails**: it
+   carries a SCHEMA-WIDE invariant, not a scoped one — grep
+   `non-trigger functions still anon-executable`, which lists every non-trigger
+   function in `public` that anon can execute. Measured this turn on the files:
+   between `0084` and `0163`, **24 files define functions and only 7 carry a
+   live anon revoke** (`0087`, `0089`, `0091`, `0092`, `0093`, `0096`, `0097`);
+   `0163` covers three more by name. That leaves fifteen-plus non-trigger
+   functions — `0102`'s search set, `0134`, `0139`, `0141`, `0143`, `0146`,
+   `0148`, `0150`, `0151`, `0153`, `0157` — anon-executable when `0164` runs.
+   **This is why the earlier manual test-project patch revoked THE DEFAULT and
+   not merely the 49 functions**, and it is invisible to the replay-stops-first
+   method: the replay never reached `0164` unattended.
+   **The in-set fix is to move a default-privileges revoke EARLY**, alongside
+   the `0083` edit — `alter default privileges in schema public revoke execute
+   on functions from anon`, which is exactly what `0192` does at the far end of
+   the set. **It carries a live sub-decision and that is why it was left
+   alone:** all four of production's legitimately anon-executable TRIGGER
+   functions are created after `0083` — `trips_station_offers_water_type`
+   (`0114`), `record_salary_change` (`0125`),
+   `record_project_commission_change` (`0147`), and `set_updated_at` is
+   re-stated from `0157` onward. Revoking the default early denies them the
+   anon grant they hold on production, so the rebuild would diverge from prod's
+   end state on four trigger functions. Harmless in security terms, visible in
+   a diff. **Architect's call, per-blocker, before anything is edited.**
+
+   **Instances 5 and 6 are untouched and still need a NEW migration each** —
+   RLS + policy on `stock_receipt_approvals` (a security control no rebuild
+   reproduces), and dropping the orphan 6-arg `create_purchase_order` overload.
+   Neither is a file edit; both are forward migrations, and neither is drafted.
+   **Deferred by Turki 2026-09-10 remains true for those two.**
+
+2. **`CLAUDE.md` §6 CORRECTION PENDING — the RULE is right, the MECHANISM it
+   states is wrong. Opened 2026-09-10, NOT ACTED ON, and deliberately so.**
+
+   §6 says **"A REDEFINED FUNCTION IS EXECUTE-TO-PUBLIC AGAIN"** and gives the
+   mechanism as `create or replace function` **and** `drop`+`create` both
+   resetting the ACL to the Postgres default. **`create or replace function`
+   does NOT reset `proacl`. It preserves it.** `drop`+`create` does reset,
+   because that is a new object with a new OID — the two halves of that sentence
+   do not behave the same way and the rule states them as one.
+
+   **Measured, not reasoned.** `0150` replaces `update_project_with_customer`
+   with `create or replace function` and its assertion (3) compares the ACL
+   captured BEFORE the replacement against the ACL after, with
+   `is distinct from`. **Production passed that assertion**, and its ACL there
+   reads `{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}`
+   — non-null, no PUBLIC entry, no anon. An ACL that had been reset to the
+   default would have been null-or-PUBLIC and the assertion would have raised.
+   **The `0115`/`0118` case §6 cites as proof is explained without the claim:**
+   `0115` created `issue_driver_payslip` AFTER `0083`'s sweep, so it never
+   carried the revoke in the first place. `0118` replacing it lost nothing,
+   because there was nothing to lose.
+
+   **DO NOT weaken the rule on the strength of this.** Re-revoking is
+   safe-directional and free, naming both `public` and `anon` is still correct
+   and still required, and the security footers plus `0193`'s event trigger hold
+   the invariant regardless of which mechanism is true. **What is wrong is the
+   stated REASON, and a rule whose reason is wrong is one someone eventually
+   argues their way out of.** That is the whole cost, and it is why this is a
+   pending correction rather than an incident.
+
+   **Why nothing was edited: `CLAUDE.md` is at 14,796 bytes against §7's 15 KB
+   trigger** (re-measured this turn — about 560 bytes of headroom). A correction
+   that ADDS prose to a file already at its cap is the wrong move, and §5 is
+   explicit that compression happens by re-verifying every claim, never by
+   trimming blind. **This correction belongs to the compression pass, which
+   wants its own session.** Note that pass 5 (2026-09-09) found zero stale
+   claims and concluded the file had converged — **this is the first thing found
+   since, so that conclusion is now one item out of date.**
 
 **Both 2026-09-09 entries are CLOSED. Kept below so they are not reopened.**
 
