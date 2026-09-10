@@ -81,14 +81,21 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Database
 
-- **Files on disk run through `0191`; 189 `.sql` files** (`ls
-  supabase/migrations/*.sql | wc -l`). The gap between 189 and 191 is historical
-  numbering, not a missing file, and it has held its shape across four levels.
-- **The two files AGREE: `CLAUDE.md`'s stub reads `0191`, matching the DB and the
-  files.** It read `0188` for part of 2026-09-09 and was bumped in `876bc0b`,
-  after re-measuring the catalog rather than trusting this note. **Find that line
-  by grep, never by address** — it has moved twice (`:251` → `:239`):
-  `npx tsx scripts/code-grep.ts 'DB at migration' CLAUDE.md --worktree`.
+- **Files on disk run through `0193`; 191 `.sql` files** (`ls
+  supabase/migrations/*.sql | wc -l`, re-measured this turn). The gap between 191
+  and 193 is historical numbering, not a missing file, and it has held its shape
+  across five levels. **`0192` and `0193` are BOTH applied to production and
+  catalog-verified — do NOT re-apply either.** See the three-layer section below.
+- **THE TWO FILES NOW DISAGREE, OPENLY AND ON PURPOSE: `CLAUDE.md`'s stub reads
+  `0191`, the DB is at `0193`.** Measured this turn —
+  `npx tsx scripts/code-grep.ts 'DB at migration' CLAUDE.md --worktree` returns
+  `CLAUDE.md:236`. The stub was not bumped because the commit that landed
+  `0192`/`0193` was scoped to those two files alone, and the docs commit carrying
+  this line is scoped to this file alone. **This is the handling the rule below
+  prescribes — a stub either moves with the DB or disagrees IN WRITING, and
+  silence is the failure mode.** Bump it to `0193` in the next commit that has
+  reason to touch `CLAUDE.md`. **Find that line by grep, never by address** — it
+  has moved three times (`:251` → `:239` → `:236`).
 - **THE RULE THAT GAP TAUGHT, kept because the gap will recur.** `0189` was
   applied through MCP, which touches the database and leaves NOTHING in git — so
   no diff, no failing check and no review signals that the stub just aged. **§7
@@ -195,6 +202,95 @@ The commands are given inline so re-measuring is cheaper than trusting.
 - **`CLAUDE.md` §7's stub carries the migration number too, so the two files go
   stale together.** When the DB moves, change it in both places or leave the
   pair openly disagreeing — never silently.
+
+### The anon-EXECUTE invariant has THREE LAYERS now, and only the third one enforces it
+
+**`CLAUDE.md` §6 said "no default-privileges equivalent exists for functions —
+nothing makes this stick." That is now half-true, and the half that changed is
+the important half.** `0192` and `0193` are both applied to production and
+catalog-verified. The invariant — **zero NON-TRIGGER functions in `public`
+anon-executable** — is now enforced by the database rather than by every future
+author remembering a footer.
+
+The three layers, weakest in the middle:
+
+1. **`CLAUDE.md` §6's per-function footer.** Every `create or replace function`
+   ends with `revoke execute on function … from public, anon`. Unchanged, still
+   mandatory, still the thing a reviewer checks for. It is a discipline, so it
+   fails the way disciplines fail — `0118` forgot it and left a SECURITY DEFINER
+   money RPC open until `0163`.
+2. **`0192`'s default-privilege revoke — DEFENCE IN DEPTH ON ONE GRANTOR.**
+   `alter default privileges in schema public revoke execute on functions from
+   anon`, implicit `FOR ROLE postgres`. Real narrowing, worth keeping, **and it
+   did NOT close the footgun.**
+3. **`0193`'s event trigger — THE ACTUAL ENFORCEMENT.**
+   `zz_revoke_anon_execute_on_new_functions`, a SECURITY DEFINER
+   `event_trigger` on **`ddl_command_end`** for tag **`CREATE FUNCTION`**,
+   revoking `public, anon` on every function it sees in schema `public`.
+
+**`0192` ALONE WAS FALSIFIED BY ITS OWN CANARY, AND THAT IS THE LESSON HERE, NOT
+A FOOTNOTE.** The file was drafted claiming section 1 "closes" the footgun. The
+post-apply canary — create a throwaway function, read `has_function_privilege`
+back — returned **TRUE** on production after `0192` applied. The
+`(postgres, public, FUNCTIONS)` row genuinely stopped granting anon, and `0192`'s
+own assertion (1b) proves that much; a function created afterwards was still born
+anon-executable anyway. **The read-back written into the migration is what caught
+the migration's own overclaim.** The prose in `0192` was corrected to "DEFENCE IN
+DEPTH, NOT A FIX" before the file entered history — the committed blob says so at
+its header, at section 1, in its success notice and at canary B. Assertion (1b)
+was left exactly as drafted, because it asserts something true.
+
+**`0193` is what closes it, proven by production canary on BOTH paths** — a fresh
+`create function` and a `create or replace` of an existing one, each read back
+`has_function_privilege('anon', …, 'execute') = false`, with the schema-wide
+invariant holding at **0** non-trigger anon-executable functions. `CREATE OR
+REPLACE FUNCTION` reports the command tag `CREATE FUNCTION`; there is no separate
+replace tag, which is why one tag covers the redefine-reopen hole that burned
+`0118`.
+
+Three properties of `0193` that are load-bearing, not style:
+
+- **It can NEVER raise.** Each per-object revoke sits in its own exception
+  handler and the whole loop sits in another. **A raising event trigger on
+  `CREATE FUNCTION` would block every future migration** — that is the one
+  catastrophic mode, and the design makes it impossible by failing toward
+  availability and leaving a `notice`. Escape hatch if it ever misbehaves:
+  `alter event trigger zz_revoke_anon_execute_on_new_functions disable`.
+- **It is scoped to `schema_name = 'public'`.** Event triggers fire for ALL
+  roles, so an unscoped version would revoke on objects Supabase Storage and
+  GraphQL create during a platform upgrade. **Do not widen the scope.**
+- **The `zz_` prefix is ordering, not naming taste.** Event triggers on the same
+  event fire in ALPHABETICAL ORDER BY NAME, and this one must run last.
+
+**Revoking anon on a TRIGGER function is harmless** — EXECUTE is checked at
+`CREATE TRIGGER` time, not at fire time — so the trigger needs no carve-out for
+them and does not have one.
+
+**TWO OPEN ITEMS, both carried in `0193`'s header:**
+
+- **The exact re-grant mechanism is NOT positively identified.** Something
+  outside the postgres default-ACL row grants anon at create time. The leading
+  candidate is the `(supabase_admin, public, FUNCTIONS)` row, which carries the
+  same anon grant and is unreachable — `pg_has_role('postgres',
+  'supabase_admin', 'member')` is **false**, measured. All six event triggers
+  were enumerated and none grants. **The fix works regardless**, because it
+  revokes AFTER any grant, at `ddl_command_end`. What it would NOT beat is a
+  re-grant that happens later than that, which is the reason to keep looking.
+- **`CREATE PROCEDURE` is not covered.** Zero procedures in `public` today, so it
+  costs nothing now. Covering it needs BOTH `tag in ('CREATE FUNCTION', 'CREATE
+  PROCEDURE')` AND `revoke execute on ROUTINE %s` — one without the other silently
+  does nothing.
+
+**Do not read a `false` from the canary as `0192` working.** Today's `false` is
+layer 3 doing it. To attribute correctly, check `pg_event_trigger` for
+`zz_revoke_anon_execute_on_new_functions` first.
+
+`0192` also carried two non-footgun parity items, both proven no-ops on
+production and both there so a from-scratch rebuild is not LESS secure than
+production: **`stock_receipt_approvals`** RLS + its `authenticated`-only policy
+(on production, created by NO migration — `0057:96` makes the table with no RLS,
+no policy, no revoke), and the **`projects_set_initials()`** anon revoke (revoked
+on production, granted on a rebuild, out of band either way).
 
 ### The security advisor is not clean, and that is EXPECTED — read this before reacting
 
