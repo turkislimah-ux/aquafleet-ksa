@@ -81,21 +81,21 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Database
 
-- **Files on disk run through `0193`; 191 `.sql` files** (`ls
-  supabase/migrations/*.sql | wc -l`, re-measured this turn). The gap between 191
-  and 193 is historical numbering, not a missing file, and it has held its shape
-  across five levels. **`0192` and `0193` are BOTH applied to production and
-  catalog-verified — do NOT re-apply either.** See the three-layer section below.
-- **THE TWO FILES NOW DISAGREE, OPENLY AND ON PURPOSE: `CLAUDE.md`'s stub reads
-  `0191`, the DB is at `0193`.** Measured this turn —
-  `npx tsx scripts/code-grep.ts 'DB at migration' CLAUDE.md --worktree` returns
-  `CLAUDE.md:236`. The stub was not bumped because the commit that landed
-  `0192`/`0193` was scoped to those two files alone, and the docs commit carrying
-  this line is scoped to this file alone. **This is the handling the rule below
-  prescribes — a stub either moves with the DB or disagrees IN WRITING, and
-  silence is the failure mode.** Bump it to `0193` in the next commit that has
-  reason to touch `CLAUDE.md`. **Find that line by grep, never by address** — it
-  has moved three times (`:251` → `:239` → `:236`).
+- **Files on disk run through `0194`; 192 `.sql` files** (`ls
+  supabase/migrations/*.sql | wc -l`, re-measured this turn). The gap between 192
+  and 194 is historical numbering, not a missing file, and it has held its shape
+  across six levels. **`0192`, `0193` and `0194` are ALL applied to production and
+  catalog-verified — do NOT re-apply any of them.** See the three-layer section
+  and the `0194` section below.
+- **THE STUB DISAGREEMENT IS CLOSED. `CLAUDE.md`'s stub and the DB both read
+  `0194`.** It was allowed to disagree in writing for exactly one commit pair —
+  the security commit was scoped to `0192`/`0193` alone and its docs commit to
+  this file alone — and the bump landed in the first commit that had reason to
+  touch `CLAUDE.md`, which is the commit carrying this line. That is the rule
+  below working as designed, not a lapse that got fixed. **Find that line by
+  grep, never by address** — it has moved four times
+  (`:251` → `:239` → `:236`, and it will move again):
+  `npx tsx scripts/code-grep.ts 'DB at migration' CLAUDE.md --worktree`.
 - **THE RULE THAT GAP TAUGHT, kept because the gap will recur.** `0189` was
   applied through MCP, which touches the database and leaves NOTHING in git — so
   no diff, no failing check and no review signals that the stub just aged. **§7
@@ -203,7 +203,133 @@ The commands are given inline so re-measuring is cheaper than trusting.
   stale together.** When the DB moves, change it in both places or leave the
   pair openly disagreeing — never silently.
 
-### The anon-EXECUTE invariant has THREE LAYERS now, and only the third one enforces it
+### `0194_schema_convergence.sql` — APPLIED AND CATALOG-VERIFIED. Do not re-apply.
+
+Closed the four NON-security drifts between the migration files and production,
+measured 2026-09-10 against prod `ceqzmztewbborwgxnrqh` and test
+`vlyxazfinmlanjdttavg`. Committed in `acc2123`, 477 lines / 23,278 bytes.
+
+**DIRECTION IS THE THING TO CARRY FORWARD, not the diff.** "Convergence" is two
+opposite operations wearing one word: **files ← prod** CODIFIES (applying it
+changes nothing, and the no-op is provable), **prod ← files** is a REAL
+production change. Mixing them up is how a parity migration becomes an outage.
+
+1. **`start_work_order(uuid,text)` / `dispatch_outsourced_job(uuid,text)` —
+   files ← prod, CODIFY.** Production had carried a post-`0076` revision no
+   migration contained. **It is a BEHAVIOUR-PRESERVING REFACTOR, which is why
+   codifying it was safe:** the null-guard is hoisted out of the UPDATE's WHERE
+   into the IF over an already-locked row, the aliases differ (`wo`/`oj` vs
+   `wo2`/`oj2`), and the self-exclusion reads the parameter rather than the row —
+   identical values, since the row was selected BY that parameter. The bodies
+   were lifted byte-exact from `pg_get_functiondef`, never retyped, and the file
+   asserts their md5s (`4214e90c…`, `6b501351…`) so the no-op claim is CHECKED
+   rather than stated. **Post-apply both md5s are unchanged** — proof the section
+   was the no-op it claimed. Grants read anon-none / authenticated+service_role,
+   2 of 2.
+2. **`commission_types.label_ar` → NOT NULL — prod ← files.** `0080` declared it;
+   production never had it. 0 nulls pre-verified, and the file re-checks in place
+   so a failure names the column and the remedy instead of raising a bare 23502.
+   `attnotnull` now true.
+3. **`staff_commissions_commission_type_fkey` → `ON UPDATE CASCADE ON DELETE
+   RESTRICT` — prod ← files.** Now `confupdtype='c'`, `confdeltype='r'`.
+   Constraint actions only; no rows rewritten. **Worth knowing so nobody later
+   reads it as a bug that was biting:** `commission_types.key` is an IMMUTABLE
+   KEY under `CLAUDE.md` §6, so the CASCADE half describes an event the
+   architecture forbids. RESTRICT is the half that does work, and it differs from
+   NO ACTION only in deferrability. This bought parity of TEXT.
+4. **Indexes — THREE distinct, NOT four.** The original plan was "both sides
+   carry all four" and it was wrong: the composite
+   `staff_commissions_staff_idx (staff_id, commission_date DESC)` **subsumes**
+   `staff_commissions_staff_id_idx (staff_id)` by leading-column prefix scan, so
+   carrying both leaves a permanently redundant index on every database. The
+   subsumed one had **0 scans in ~16 weeks** (`pg_stat_user_indexes`, stats since
+   `2026-05-22`), against 302 and 72 for the two prod-only indexes that were
+   codified. Composite created FIRST, subsumed dropped LAST, so no window opened
+   without a `staff_id` path. **Prod `public` index count 238 → 238** — create
+   one, drop one, net zero, which corroborates it independently.
+
+**Its verification block RAISES rather than prints** (§5: a result grid is not
+proof). Two assertions there are worth reusing: **1b checks the composite's
+DEFINITION**, because `create index if not exists` matches only the NAME and
+will silently accept an index of the right name and the wrong columns; and **8
+restates `0192`'s invariant predicate character for character**. A draft of 8
+also excluded `prorettype = event_trigger`, which `0192` does not — that would
+have exempted `revoke_anon_execute_on_new_functions`, the one function whose job
+is enforcing the invariant. **Two spellings of one invariant is how a guard
+quietly stops guarding.** If `0192`'s predicate changes, change `0194`'s with it.
+
+### ACCEPTED RESIDUAL: prod and the files differ by COMMENTS ONLY on 24 functions, and that is FINAL
+
+**Architect's ruling. Do NOT re-raise this, and do NOT draft a migration to
+"finish" convergence.** It is not an open item; it is a closed one with a
+recorded reason.
+
+**What differs.** 76 functions per side, no prod-only and no test-only. **28
+differ by raw hash — not the 3 an earlier inventory claimed**, which is the
+"re-measure before quoting" rule paying out. Of those, **24 differ by COMMENTS
+ONLY**, every one with a comment-stripped length delta of exactly **0**:
+
+`archive_project_guarded`, `cancel_project_commission`, `confirm_invoice`,
+`consume_from_lots`, `consume_work_order_line`, `consumption_approvals_lock_guard`,
+`consumption_event_completed_at`, `create_outsourced_job`, `discard_invoice`,
+`edit_outsourced_job`, `next_payslip_number`, `next_trip_ref_number`,
+`pay_commission`, `pay_invoice`, `receive_stock`, `record_project_commission_change`,
+`reject_stock_receipt`, `restore_customer_guarded`, `return_to_lots`,
+`search_everything`, `search_norm`, `set_project_commission`, `trips_set_ref`,
+`trips_station_offers_water_type`
+
+Prod is the SHORTER side in all 24, and 19 of them carry no comment syntax at
+all on prod. **One cause, not 24** — prod's copies went in through a path that
+stripped comments. The remaining 4 of the 28 were `0194`'s two (now codified),
+`issue_driver_payslip` (intra-expression spacing, `( 'id',` vs `('id',`, which
+whitespace COLLAPSE does not equalise) and `0193`'s trigger function.
+
+**`0193`'s trigger function is a THREE-WAY split, and it is in this residual
+too.** File, prod and test each carry different `raise notice` text at
+`0193:202` and `0193:209` — so `49ece93` put a `0193` into history matching
+neither database. **Notice text only; no control flow, no privilege, no money.**
+Same ruling applies.
+
+**HOW "COMMENTS ONLY" WAS PROVEN, because the obvious method does not work.**
+Comment-stripping cannot see inside a string literal: a `--` in a message would
+be stripped as if it were a comment, hiding a real difference. `0193`'s case
+proves that class exists. So the question was settled directly — **is there any
+string literal, in any of the 24, on either catalog, containing `--`, `/*` or
+`*/`?**
+
+- A regex over quoted literals **FAILED, and said so**: it returned 10 hits, all
+  false, every one starting at an apostrophe INSIDE a comment (`month's`,
+  `receipt's`, `caller's`, `customer's`), which desyncs literal tokenization.
+  **Do not answer this question with a regex.**
+- A proper **state-machine lexer** (4 states: code / literal / line comment /
+  block comment, with `''` escape handling) was run over raw `prosrc` on both
+  catalogs — 70,743 chars on prod, 85,533 on test, 24 of 24 functions each,
+  0 dollar-quoted regions.
+- **It was guarded before being trusted** (the "prove a guard can fail" rule):
+  a positive canary `select 'has -- inside' ; -- real comment` **fired**, a
+  negative canary `select 'clean' ; -- the month's end` stayed **silent** —
+  proving it detects the thing AND handles the exact class that broke the regex —
+  and the final-state desync check was zero on every function.
+- **Result: ZERO literals containing comment syntax, both catalogs.** The
+  comment-only verdict is proven, not assumed. Behavioural identity also holds
+  against the 293 `npm run test:db` assertions.
+
+**WHY THEY ARE NOT BEING RE-APPLIED.** Re-transcribing 24 working functions to
+converge COMMENTS trades real transcription risk for zero behavioural gain. Each
+`create or replace` is a chance to introduce the one difference that matters, on
+money RPCs (`pay_invoice`, `pay_commission`, `confirm_invoice`, `receive_stock`)
+that are working correctly today. **This is `0191`'s ruling generalised** — see
+"DO NOT redefine a money RPC to reflow a comment" above, which decided exactly
+this for `confirm_invoice` and has held since.
+
+**What a from-scratch rebuild produces:** the FILE versions — richer-commented,
+behaviourally identical. That is the better artifact, and it arrives for free.
+
+**CONSEQUENCE FOR THE PRISTINE-REPLAY DIFF: a comment-only FUNCTION diff is
+EXPECTED OUTPUT, not a finding.** The replay should flag LOGIC diffs and stay
+quiet about these. A future session re-running that diff will see 24-plus
+function hashes disagree; **that is this note, not a regression.** Re-verify the
+classification with the lexer before treating any of them as new.
 
 **`CLAUDE.md` §6 said "no default-privileges equivalent exists for functions —
 nothing makes this stick." That is now half-true, and the half that changed is
@@ -1015,7 +1141,9 @@ fix — the fix is known and stated.
    **3 — `0152`.** Anchors pin production's shape against a fresh DB's zeros.
    Cleared by zeroing the `_0152_anchor` block, pushing, and reverting the file
    in the same turn — blob hash `9673b02e…` identical either side. **It is the
-   only remaining file of that shape**; `0153`–`0191` carry none.
+   only remaining file of that shape**; `0153`–`0194` carry none (re-verified
+   this turn — `0192`, `0193` and `0194` hold no `_anchor` block and no
+   `begin;`/`commit;`).
 
    **4 — `0190`.** Its guards refuse to compare an empty snapshot, correctly:
    *"a zero-row diff would report green"*. Cleared by seeding one customer,
@@ -1060,8 +1188,9 @@ fix — the fix is known and stated.
    enabling RLS + policy on `stock_receipt_approvals`; drop the orphan
    `create_purchase_order` overload. **Then re-replay onto a FRESH project and
    prove it** — the pass is not done because the diff is clean, it is done
-   because an unattended replay reaches 0191 by itself. **Nothing drafted yet, by
-   instruction. Deferred by Turki 2026-09-10.**
+   because an unattended replay reaches **`0194`** by itself — the target moved
+   with the DB, and quoting the old `0191` would declare victory three migrations
+   early. **Nothing drafted yet, by instruction. Deferred by Turki 2026-09-10.**
 
 **Both 2026-09-09 entries are CLOSED. Kept below so they are not reopened.**
 
