@@ -12,6 +12,7 @@
     "lint": "next lint",
     "preview": "python3 -m http.server 3002 --directory preview",
     "test:money": "for f in prepaid covered-unpaid amount-payable invoice vat commission commission-rows payslip-deduction daily-trips frozen-split bank-accounts invoice-render-parity statement-parity collection-rate; do npx tsx scripts/$f-check.ts || exit 1; done",
+    "test:db": "npx tsx scripts/db/confirm-invoice-check.ts",
     "test:copy": "npx tsx scripts/metric-copy-check.ts && npx tsx scripts/month-label-check.ts && node scripts/i18n-lookup-single-source-check.mjs && npx tsx scripts/notification-format-check.ts"
   },
   "dependencies": {
@@ -34,10 +35,13 @@
   "devDependencies": {
     "@playwright/test": "^1.62.0",
     "@types/node": "24.13.3",
+    "@types/pg": "^8.23.1",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "autoprefixer": "10.4.20",
+    "pg": "^8.23.0",
     "postcss": "8.4.49",
+    "supabase": "^2.117.0",
     "tailwindcss": "3.4.14",
     "typescript": "5.5.3"
   }

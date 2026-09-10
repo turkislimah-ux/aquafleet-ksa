@@ -30,3 +30,9 @@ HANDOFF-for-review.md
 # `.claude/`: launch.json and skills/aquafleet-domain/SKILL.md are tracked, and
 # SKILL.md is the domain rulebook CLAUDE.md §4 tells every session to read.
 .claude/settings.json
+
+# Supabase CLI scratch. `supabase migration list` / `db push` write a version
+# marker and per-project state here; it is machine- and login-specific and holds
+# no schema. NARROW ON PURPOSE — supabase/migrations/ is the record of this
+# project and must stay tracked.
+supabase/.temp/
