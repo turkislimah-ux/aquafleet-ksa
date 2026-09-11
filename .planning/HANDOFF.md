@@ -52,14 +52,21 @@ from the `drivers.active` drop two sessions ago: it missed a seventh file and to
 the Archive page down with `42703` until a follow-up sweep caught it (`32a515d`,
 `e4dbd3e`), with `tsc` green the whole time.
 
-**NO DEPLOY BLOCKER IS CODE — BOTH ARE THINGS TURKI DOES.** A read-only audit ran
-the whole gate — types, a production build, both suites, the view footer, the
-function ACLs, RLS, the env surface — and every code-side check is green. Two
-things are not ready. **The live database is a sandbox**, with test rows woven
-into records that are already PAID. **And public signup is OPEN — RE-MEASURED
-THIS SESSION, still `"disable_signup": false`**: with no role gate anywhere in
-the app, anyone who registers gets everything. **Do not read "audit passed" as
-"ship it".** See Deploy readiness.
+**NO DEPLOY BLOCKER IS CODE — THE REMAINING ONE IS A THING TURKI DOES.** A
+read-only audit ran the whole gate — types, a production build, both suites, the
+view footer, the function ACLs, RLS, the env surface — and every code-side check
+is green. **ONE thing is not ready: the live database is a sandbox**, with test
+rows woven into records that are already PAID.
+
+**PUBLIC SIGNUP IS NO LONGER ONE OF THEM — CLOSED 2026-09-11**, by Turki in the
+Supabase console, verified off. It was the second blocker for two days and it is
+not one now. **Leaked-password protection is still OFF and that is DELIBERATE:
+it requires the Pro plan, so it is deferred to deploy day and enabled in the
+same pass as the Pro switch.**
+
+**Do not read "audit passed" as "ship it", and do not read "signup closed" as
+"authorization solved" — there is still no role gate,** so every invited user
+reaches everything. See Deploy readiness.
 
 **Every number below is a POINTER, not evidence. Re-measure before quoting it.**
 The commands are given inline so re-measuring is cheaper than trusting.
@@ -441,10 +448,19 @@ on production, granted on a rebuild, out of band either way).
 
 ### The security advisor is not clean, and that is EXPECTED — read this before reacting
 
-Re-run today. Three findings, and **only one of them is work**:
+Re-run today. Three findings, and **NONE of them is work right now.** The one
+that used to be — finding 1 — is not closed but DEFERRED to deploy day for a
+concrete reason (it needs the Pro plan), so the advisor stays non-clean by
+design until then:
 
-1. **`auth_leaked_password_protection` — DISABLED.** Genuinely open. It is a
-   console setting, not a migration. See Open items.
+1. **`auth_leaked_password_protection` — DISABLED, and DEFERRED ON PURPOSE.** It
+   is a console setting, not a migration. **It requires the Pro plan, which this
+   project is not on, so the toggle is not available to click** — Turki enables
+   it on deploy day alongside the Pro switch and the Vercel move (recorded
+   2026-09-11, Open items (a)2). **The advisor will keep flagging it for as long
+   as the deferral stands. That is the advisor working, NOT a new finding — do
+   not re-raise it, and do not file it as "genuinely open" again**, which is
+   what this line said while the plan requirement was unknown.
 2. **`anon_security_definer_function_executable` — count 3.**
    `record_project_commission_change()`, `record_salary_change()` and
    `trips_station_offers_water_type()`. **ALL THREE RETURN `trigger`**, measured
@@ -565,9 +581,11 @@ woven into records that are already PAID, so they cannot simply be deleted — t
 understated dummy invoices and the "testing 111" charge are the known examples.
 **This is the deploy blocker and it is Turki's call, not a code fix.**
 
-**PUBLIC SIGNUP IS OPEN. MEASURED 2026-09-09, NOT ASSUMED.** The earlier audit
-filed this as the largest UNVERIFIED risk and said testing it meant creating an
-account. **It does not.** GoTrue exposes a public, read-only settings endpoint
+**PUBLIC SIGNUP — WAS OPEN, MEASURED 2026-09-09, NOT ASSUMED; CLOSED BY TURKI
+2026-09-11.** The whole of this subsection is kept because the METHOD is the
+durable part, not the finding: the earlier audit filed this as the largest
+UNVERIFIED risk and said testing it meant creating an account. **It does not.**
+GoTrue exposes a public, read-only settings endpoint
 that answers it outright — no account, no write, no secret printed (the anon key
 already ships in the client bundle):
 
@@ -576,9 +594,19 @@ set -a && . ./.env.local && set +a
 curl -s "$NEXT_PUBLIC_SUPABASE_URL/auth/v1/settings" -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY"
 ```
 
-Returned `"disable_signup": false`, `"external": {"email": true}`,
-`"mailer_autoconfirm": false`. **Anyone can register.** Email confirmation is a
-speed bump, not a gate — any working mailbox clears it.
+**RETURNED `"disable_signup": false` ON 2026-09-09. THAT IS THE BEFORE, NOT THE
+STATE — SIGNUP WAS CLOSED ON 2026-09-11** by Turki in the console, and he
+verified it off. Re-running the curl above must now return
+`"disable_signup": true`. **It was NOT re-run when this was written** — the
+session that recorded the close was instructed not to touch Supabase, so this
+entry rests on Turki's console verification, attributed, rather than on a
+measurement taken here. Anyone with network access can settle it in one command;
+the command is right above, it is read-only, and it needs no account.
+
+The rest of that response — `"external": {"email": true}`,
+`"mailer_autoconfirm": false` — described email signup while it was open, and
+email confirmation was never the gate anyway: any working mailbox clears it.
+**That is exactly why the toggle, not confirmation, was the fix.**
 
 **What that JWT reaches, re-measured the same turn against the catalog:**
 
@@ -602,10 +630,17 @@ said 85 next to a list of 5, wrong in the very commit that measured it
 (`7629086`, today) and carried through 10 commits unflagged, because a table
 cell and a sentence are not checked against each other unless the arithmetic is
 written down. Now it is. Re-measured and corrected 2026-09-09. No
-role column, no staff check, no authorization tier anywhere in the app. So the
-audit's worst case is CONFIRMED REAL, not theoretical: open signup + no role
-gate + 45 reachable definer money RPCs = full fleet and finance access to
-anyone who registers.
+role column, no staff check, no authorization tier anywhere in the app.
+
+**THE WORST CASE WAS CONFIRMED REAL, NOT THEORETICAL — and closing signup broke
+ONE of its three terms.** It read: open signup + no role gate + 45 reachable
+definer money RPCs = full fleet and finance access to anyone who registers. **The
+first term is gone as of 2026-09-11. The other two stand, unmeasured against and
+unchanged.** So the sentence now reads: no role gate + 45 reachable definer money
+RPCs = full fleet and finance access to **anyone Turki invites**. That is a far
+smaller population and the same reach. **Do not cross this section off on the
+strength of the signup close** — it was the tourniquet, and the paragraph below
+says so.
 
 **45 here and 49 in (c)3 are BOTH RIGHT — do not "fix" either to match.** The
 advisor's 49 counts every definer function `authenticated` may execute; 4 of
@@ -620,15 +655,36 @@ where n.nspname='public' and p.prosecdef
   and has_function_privilege('authenticated', p.oid, 'execute');
 ```
 
-**The fix is Turki's, not code.** Supabase console → Authentication → Sign In /
-Providers → Email → turn OFF "Allow new users to sign up", then invite the real
-users under Authentication → Users. Re-run the curl above; it must read
-`"disable_signup": true`.
+**DONE 2026-09-11 — the fix was Turki's, not code, and he applied it.** The path
+he took, kept for the record and for re-verification: Supabase console →
+Authentication → Sign In / Providers → Email → turn OFF "Allow new users to sign
+up", then invite the real users under Authentication → Users. Re-run the curl
+above; it must read `"disable_signup": true`.
 
-**Closing signup is a tourniquet, not the cure.** The missing role gate survives
-it — every authenticated user still sees everything. That is a design decision
-Turki has not been asked for yet, and it is not on the deploy path today only
-because shutting signup makes the user set a closed one.
+**Closing signup is a tourniquet, not the cure — and the tourniquet is now ON,
+which changes nothing about the wound.** The missing role gate survives it:
+every authenticated user still sees everything. That is a design decision Turki
+has not been asked for yet, and it is not on the deploy path today only because
+a shut signup makes the user set a closed one. **With signup open that was a
+mitigation waiting to happen; with signup closed it is the whole of the
+authorization model, so the entry gets MORE load-bearing, not less.**
+
+**DEPLOY-DAY CHECKLIST — things deliberately NOT done today, to be done in the
+same pass as the deploy.** These are not open items and not a backlog; each has a
+reason it cannot or should not happen earlier.
+
+1. **Switch the Supabase project to the Pro plan**, alongside the move to Vercel
+   hosting. Turki's, 2026-09-11.
+2. **Turn ON leaked-password protection — immediately after 1, because it
+   REQUIRES Pro.** This is the whole reason it is deferred rather than open: the
+   toggle is not available on the current plan. The security advisor flags it
+   today and will keep flagging it until this runs. **Expected, not a finding.**
+3. **Re-run the settings curl above and confirm `"disable_signup": true`
+   survived the plan change.** Cheap, read-only, and the one thing in this list
+   that verifies rather than changes.
+
+**The DATA blocker is NOT on this list** — it is the one genuine open deploy
+blocker and it is decided before deploy day, not during it. See above.
 
 **THE EDGE-RUNTIME WARNING IS SETTLED — DO NOT RE-RAISE IT.** The build warns
 that `@supabase/supabase-js` touches `process.version`, traced through
@@ -1312,39 +1368,62 @@ was opened 2026-09-10 by a migration replay onto an empty project, an exercise
 nobody had run when the sweep went out. **A re-derivation is a floor on this
 list's completeness, not a timestamp on its contents.**
 
-### (a) DECISION for Turki — do not "fix" these, they are choices
+### (a) DECISION for Turki — ALL FOUR ANSWERED as of 2026-09-11. Nothing here is open.
 
-**Four of the original six closed in the parked-items session.** They are listed under "Closed
-BY MEASUREMENT" below with their hashes, so they are not resurrected. **THREE now
-remain open, and none is code.** Two are Turki clicking a console setting; one is
-whether a convention gets written down. **Item 4 — the only one whose answer
-could have commissioned code — was OPENED AND ANSWERED the same day, 2026-09-11:
-the English ruling STANDS.** It is kept below as a closed entry, with the ruling
-on it, precisely so it is not re-raised as an open question. **An earlier
-revision said "all three are Turki clicking
-something" — item 1 is not a click, and reading it as one is how it stays
-unanswered.**
+**Four of the original six closed in the parked-items session**, listed under
+"Closed BY MEASUREMENT" below with their hashes. **The remaining four were all
+answered on 2026-09-11 — three by Turki in one pass, the fourth by ruling.
+This section is now a RECORD, not a decision queue.**
 
-1. **`.planning/` review artifacts are TRACKED, and no `.gitignore` rule was
-   added — deliberately.** **Re-measured: 6 files named `review-*.md` are
-   tracked** (an earlier revision said seven; it was counting
-   `finance-invoice-spec.md` too). A pattern rule would fight the convention and
-   would silently swallow the next artifact someone meant to commit. **The open
-   question is whether that convention gets written down as a rule or stays
-   custom.** The lesson the deleted `0187-arabic-copy-review.md` earned is about
-   the HEADER, not the tracking: a review sheet states the state it was written
-   in, and that state expires.
-2. **Leaked-password protection is DISABLED in Supabase Auth.** Re-measured off
-   the advisor, not carried from the note. Console setting — not a migration, not
-   a code change, and Turki's to click.
-3. **PUBLIC SIGNUP IS OPEN — the more serious of the two auth settings, and the
-   one that actually gates a deploy.** Measured 2026-09-09:
-   `"disable_signup": false`. Anyone who registers gets an `authenticated` JWT,
-   and 84 of 89 RLS policies are blanket `qual = true` for that role, so the JWT
-   is the whole authorization model. Full measurement, the exact read-only curl,
-   and the console path to close it are in Deploy readiness. **Item 2 used to
-   claim it was the only open security item; it was not, it was the only one
-   anybody had measured.**
+**EVERY ENTRY IS KEPT WITH ITS ANSWER ON IT, AND THAT IS THE POINT.** Three of
+the four are invisible to a re-measurement: two live in the Supabase console,
+which no grep and no catalog query reaches from here, and one is a convention
+nobody wrote down. **Delete the entries and the next session re-derives the
+questions and re-raises them as work.** An earlier revision of this preamble
+said "all three are Turki clicking something" — item 1 was never a click, and
+reading it as one is how it stayed unanswered for days.
+
+**CONSOLE STATE IS NOT SOMETHING THIS FILE CAN VERIFY. Items 2 and 3 are
+recorded on TURKI'S verification, explicitly attributed, not on a measurement
+taken here.** The re-check commands stay published under Deploy readiness for
+whoever has console or network access; they were NOT run this turn, by
+instruction.
+
+1. **ANSWERED 2026-09-11 — left AS-IS per Turki. The `review-*.md` convention
+   is NOT formalized.** It stays custom: `.planning/` review artifacts remain
+   TRACKED, and no `.gitignore` rule is added. **Measured when the question was
+   open: 6 files named `review-*.md` are tracked** (an earlier revision said
+   seven; it was counting `finance-invoice-spec.md` too). A pattern rule would
+   fight the convention and would silently swallow the next artifact someone
+   meant to commit — that reasoning is why "leave it" is the answer and not
+   merely the default. The lesson the deleted `0187-arabic-copy-review.md`
+   earned is unaffected, and is about the HEADER rather than the tracking: a
+   review sheet states the state it was written in, and that state expires.
+2. **DEFERRED to deploy day, deliberately — leaked-password protection stays
+   OFF until then. It REQUIRES THE PRO PLAN.** That is the reason, and it is not
+   procrastination: the project is not on Pro today, so the toggle is not
+   available to click. **Turki switches to Pro alongside the Vercel hosting move
+   and enables it in the same pass.** Recorded 2026-09-11. **Do not re-raise it
+   as an open security item before then, and do not read the advisor's warning
+   as a new finding** — the advisor will keep flagging it, correctly, for as
+   long as the deferral stands. It is on the deploy-day checklist under Deploy
+   readiness.
+3. **CLOSED 2026-09-11 — PUBLIC SIGNUP IS SHUT. Turki disabled "Allow new users
+   to sign up" in the Supabase console and verified it off.** This was the more
+   serious of the two auth settings and the one that actually gated a deploy.
+   **The measurement that opened it (2026-09-09, `"disable_signup": false`) is
+   now HISTORY, not state** — anywhere this file still quotes that value, read
+   it as the before.
+
+   **WHAT CLOSING IT DID NOT FIX, AND THIS SURVIVES THE CLOSE: there is still
+   no role gate anywhere in the app.** 84 of 89 RLS policies are blanket
+   `qual = true` for `authenticated`, so the JWT remains the whole authorization
+   model. Shutting signup changed the population that can get one — invited
+   users only, instead of anyone on the internet — **it did not change what one
+   reaches.** Every invited user still sees all fleet and finance data. That is
+   a design decision Turki has not been asked for, and it is off the deploy path
+   only because a closed signup makes the user set a known one. See Deploy
+   readiness for the full measurement.
 4. **CLOSED 2026-09-11, SAME DAY IT OPENED — the standing "server-action
    `error:` text stays English" ruling is UPHELD. Turki ruled: keep the English
    ruling, do not touch A/B/C/D.** Opened after category E shipped as `1bf52bc`,
@@ -1948,8 +2027,10 @@ For the record, what they were and what measurement showed:
 
 **DEPLOY GATES OUTRANK EVERYTHING NUMBERED BELOW, and they are not code.** The
 ordered MUST list lives in Deploy readiness: decide what happens to the sandbox
-data woven into paid records, **CLOSE PUBLIC SIGNUP — measured open 2026-09-09,
-no longer a question**, and turn on leaked-password protection. **Every code-side gate is already green**, so nothing
+data woven into paid records — **which is now the ONLY one still open.** Public
+signup **CLOSED 2026-09-11** (Turki, console, verified off). Leaked-password
+protection stays off until deploy day **because it needs the Pro plan**, and goes
+on in the same pass as the Pro switch and the Vercel move. **Every code-side gate is already green**, so nothing
 in items 1–5 blocks a deploy and none of them unblocks one either. Do not start
 item 2, 3 or 4 expecting it to move the deploy date. **Item 5 is not startable at
 all — it was ruled out on 2026-09-11 and is kept only as the record of a decided
@@ -1996,25 +2077,25 @@ verifying the localization sweep (`4e0d427`), whose BUG 1 lives on this very pag
 the Trucks tab's maintenance-job popup was exercised in both languages, which
 means the route, its tabs and a detail modal all rendered.
 
-### 1. (a) items 1–3 — Turki only, no analysis owed
+### 1. DONE — every (a) item is answered. Nothing on this line is owed.
 
-Whether the `.planning/review-*.md` convention becomes a written rule, the
-Supabase Auth leaked-password toggle, and **closing public signup**. **None is
-code.** The `CLAUDE.md` stub chore that used to sit beside them **reopened when
-`0189` landed and closed the same day as `876bc0b`** — it never belonged here
-anyway, since nobody had to decide anything; see (b). Do not count it as a fourth
-(a) item, and do not re-open it from a note that predates the bump.
+**All four closed on 2026-09-11.** Public signup **shut** (Turki, console,
+verified off). Leaked-password protection **deferred to deploy day, because it
+needs the Pro plan** — it goes on with the Pro switch, and it is on the
+deploy-day checklist rather than this one. The `review-*.md` convention **left
+as-is, not formalized**, per Turki. And (a)4, the i18n ruling, **answered the
+same day it opened: the English ruling stands and A/B/C/D are ruled out** — its
+analysis sits in item 5, which is a record now, not a plan.
 
-**(a)4 WAS NEVER ON THIS LINE, AND IS NOW CLOSED.** The i18n ruling opened
-2026-09-11 and Turki answered it the same day — **the English ruling stands, and
-A/B/C/D are ruled out.** Its analysis sits in item 5, which is now a record, not
-a plan. This heading briefly said "the three remaining (a) items" as though it
-covered all of them; it is three again, for a different reason.
+**THE ANSWERS LIVE ON THE ENTRIES IN (a), NOT HERE.** Three of the four cannot
+be re-derived from the repo — two are console state, one is an unwritten
+convention — so the entries are kept with their answers attached. **Do not
+re-open any of them from a note or a grep that predates 2026-09-11.**
 
-**The leaked-password toggle is now on the deploy path, not just the open list.**
-It is one of two console settings a deploy waits on; the other is public signup,
-**which was measured OPEN on 2026-09-09 and must be closed**. See Deploy
-readiness.
+The `CLAUDE.md` stub chore that used to sit beside them **reopened when `0189`
+landed and closed the same day as `876bc0b`** — it never belonged here anyway,
+since nobody had to decide anything; see (b). Do not count it as a fifth (a)
+item, and do not re-open it from a note that predates the bump.
 
 ### 2. Analysis — Paid-up Balance vs Amount Payable
 
