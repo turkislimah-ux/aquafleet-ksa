@@ -1159,6 +1159,47 @@ lose the field in the same commit, so the compiler starts flagging the readers
 instead of blessing them. Fifteen `.from("drivers")` sites existed; fourteen were
 already right, and the type system had no opinion about the fifteenth.
 
+**BUG 3 OF `4e0d427` REGRESSED BECAUSE A BYPASS WAS REMOVED WITHOUT FIXING WHAT
+IT BYPASSED. It has now failed twice; this note exists so there is no third
+time.** `app/drivers/LookupSelect.tsx` gated its Add button on
+`canAdd = slug !== "" && isValidSlug(slug)` with `slug = slugifyKey(label)`.
+`slugifyKey` keeps only `[a-z0-9]`, so **a pure-Arabic name slugged to `""` and
+the button went `pointer-events-none`** — a one-field Arabic role, leave type,
+commission label, repairer type, project or water station could not be created
+at all.
+
+Then:
+
+- **`d368293` (0168) did not fix that gate — it ROUTED AROUND it.** It added a
+  second, `dir="rtl"` Arabic box plus a `withArabicName` prop, and moved the
+  `!canAdd` class onto a branch that pathway did not take. Arabic became
+  enterable, the gate stayed broken, and the bug looked fixed.
+- **`524539f` removed `withArabicName` and the second box** — correctly, since
+  0169/0170 made the split unnecessary — **but left `canAdd` exactly as it
+  was.** Verified by reading that commit's blob: line 78 is still
+  `const canAdd = slug !== "" && validSlug;`. Deleting the detour re-exposed the
+  road.
+
+**The gate predates 0168.** Neither commit introduced it and neither commit
+touched it, which is why `git log` on the Arabic work points at two innocent
+changes. A second mechanism rode along: once 0168's hardcoded-`dir="rtl"` box
+was gone, the surviving field carried **no `dir` at all**, so it inherited the
+paragraph direction and mis-ordered Arabic values in English mode — the
+"scramble" half of the report, independent of the gate.
+
+**Closed properly in `4e0d427`:** `lib/slug.ts` derives a key that survives any
+script (frozen FNV-1a fallback, so no existing key changes), the gate tests the
+key it will actually STORE, and the field carries `dir="auto"`. Confirmed
+against production that **not one Arabic custom `staff_roles` / `leave_types`
+label existed** — the absence of data was the evidence, because none could be
+created.
+
+**The transferable rule: WHEN A WORKAROUND IS DELETED, THE THING IT WORKED
+AROUND MUST BE MEASURED, NOT ASSUMED DEAD.** A bypass is evidence that something
+underneath is broken. Removing it is only safe after checking the original
+predicate still holds — and here nobody did, because the removal was framed as a
+simplification rather than as touching a gate.
+
 ---
 
 ## Completed the previous session (2026-09-08, `0c7adf9` → `e93baec`)
@@ -1869,11 +1910,13 @@ the host clock, `876bc0b` bumped the `CLAUDE.md` stub the first two left stale.
 `@types/node` / `engines` alignment) and `876bc0b` (the stub). **(b) is empty
 again**, and this time the sentence is measured rather than inherited.
 
-**`/archive` has not been confirmed in-browser since `32a515d`.** The page is
-auth-gated, so the fix was proven at the query layer — the corrected select runs
-and returns 16 rows, 11 live and 5 terminated — but nobody has watched it render.
-It was fully broken before, so the change can only improve it; **verify it once
-before treating this line as closed.**
+**`/archive` IS CONFIRMED IN-BROWSER. CLOSED 2026-09-11, do not re-open.** It had
+been owed since `32a515d`: the page is auth-gated, so that fix was proven only at
+the query layer — the corrected select runs and returns 16 rows, 11 live and 5
+terminated — and nobody had watched it render. Turki has now watched it, while
+verifying the localization sweep (`4e0d427`), whose BUG 1 lives on this very page:
+the Trucks tab's maintenance-job popup was exercised in both languages, which
+means the route, its tabs and a detail modal all rendered.
 
 ### 1. The three remaining (a) items — Turki only, no analysis owed
 
