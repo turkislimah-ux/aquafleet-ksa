@@ -51,7 +51,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import {
-  THRESHOLD_KEYS, HARDCODED_DEFAULTS, validateThreshold,
+  THRESHOLD_KEYS, HARDCODED_DEFAULTS, validateThreshold, describeThresholdProblem,
   type ThresholdOverrides, type SharedDefaults,
 } from "@/lib/notification-thresholds";
 
@@ -233,7 +233,10 @@ export async function saveThresholdOverrides(
   try {
     for (const key of THRESHOLD_KEYS) {
       const problem = validateThreshold(key, overrides[key] ?? null);
-      if (problem) return { error: problem };
+      // English, and unchanged from what validateThreshold itself used to
+      // return. This branch is unreachable through the editor, which runs the
+      // same validator first; see describeThresholdProblem's note.
+      if (problem) return { error: describeThresholdProblem(key, problem) };
     }
 
     const supabase = createClient();

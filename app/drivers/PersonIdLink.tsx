@@ -17,6 +17,7 @@
 import Link from "next/link";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
+import { toLatinDigits } from "@/lib/digits";
 
 export default function PersonIdLink({
   personId,
@@ -39,7 +40,14 @@ export default function PersonIdLink({
       dir="ltr"
       title={t("drivers.idLinkTitle", lang)}
     >
-      {value}
+      {/* The sentence above says "a Latin identifier". This MAKES it one.
+          `dir="ltr"` fixes the ORDER the digits are laid out in; it does not
+          change WHICH digits they are, so a stored ١٢٥٨٤٧٢٧٥٢ renders
+          Arabic-Indic here in English mode too. The write boundaries
+          (app/drivers/actions.ts, app/archive/actions.ts) fold on the way in;
+          this folds on the way out, so rows stored before those guards existed
+          still read Latin. See lib/digits.ts. */}
+      {toLatinDigits(value)}
     </Link>
   );
 }

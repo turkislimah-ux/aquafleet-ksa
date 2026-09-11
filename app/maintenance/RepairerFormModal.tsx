@@ -169,11 +169,17 @@ export default function RepairerFormModal({
           </label>
 
           <div className="flex gap-2 items-center pt-1 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+            {/* ONE field, EITHER language — `dir="auto"` so the browser picks
+                direction from the value's first strong character instead of
+                inheriting the app language. Unlike `name` / `name_ar` above,
+                which are two declared columns and correctly carry a fixed
+                `dir`, this box is the whole of what the type is called. */}
             <input
               placeholder={t("mt.newRepairerType", lang)}
               value={newTypeText}
               onChange={(e) => setNewTypeText(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addNewType(); } }}
+              dir="auto"
               className={cn(INPUT, "flex-1 mt-2")}
               style={INPUT_STYLE}
             />

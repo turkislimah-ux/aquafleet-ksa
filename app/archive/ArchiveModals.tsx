@@ -17,6 +17,7 @@ import { X, Plus, Trash2, FileText, Upload, User, Truck as TruckIcon, ChevronDow
 import { Btn } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText } from "@/lib/i18n";
+import { toLatinDigits } from "@/lib/digits";
 import { cn, formatDate } from "@/lib/utils";
 import {
   ARCHIVE_GROUP_COLORS, ARCHIVE_STATUS_PILL, archiveStatusLabel, docStatus, groupDot,
@@ -226,6 +227,9 @@ function TypePicker({
                       if (e.key === "Escape") { setAdding(false); setNewLabel(""); }
                     }}
                     placeholder={t("archive.phNewType", lang)}
+                    // ONE field, EITHER language — direction from the value,
+                    // not from the app language. See LookupSelect.tsx.
+                    dir="auto"
                     className={cn(INPUT, "flex-1")}
                     style={INPUT_STYLE}
                     autoFocus
@@ -1021,6 +1025,8 @@ export function DocumentModal({
                 onChange={(e) => setNewTypeLabel(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitNewType(); } }}
                 placeholder={t("archive.phNewType", lang)}
+                // ONE field, EITHER language — see the sibling add row above.
+                dir="auto"
                 className={cn(INPUT, "flex-1")}
                 style={INPUT_STYLE}
                 autoFocus
@@ -1116,7 +1122,19 @@ export function DocumentModal({
           ) : (
             <>
               <label className="text-xs muted block mb-1">{t("archive.docModal.fReference", lang)}</label>
-              <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+              {/* A document reference number is an IDENTIFIER — folded to Latin
+                  digits in the setter, which for a CONTROLLED input is the
+                  equivalent of `onInput` on an uncontrolled one: every path
+                  that changes the value goes through here, paste included.
+                  `dir="ltr"` stops RTL reordering the digit groups on screen.
+                  See lib/digits.ts; ./actions.ts folds again at the write. */}
+              <input
+                value={referenceNo}
+                onChange={(e) => setReferenceNo(toLatinDigits(e.target.value))}
+                dir="ltr"
+                className={INPUT}
+                style={INPUT_STYLE}
+              />
             </>
           )}
         </div>
@@ -1352,7 +1370,17 @@ export function RenewModal({
             : t("archive.renewModal.fNewReference", lang)}
           {linked && <LinkPill />}
         </label>
-        <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+        {/* Same identifier fold as the add/edit modal above. This one
+            matters more: when `linked` is set the value is written straight
+            onto `drivers.iqama_number` / `trucks.vehicle_registration`, so it
+            is one of the two writers 0089 describes. lib/digits.ts. */}
+        <input
+          value={referenceNo}
+          onChange={(e) => setReferenceNo(toLatinDigits(e.target.value))}
+          dir="ltr"
+          className={INPUT}
+          style={INPUT_STYLE}
+        />
         {linked && (
           <p className="text-[11px] muted mt-1">
             {t("archive.renewModal.linkedNumHint", lang)}
@@ -1476,6 +1504,11 @@ export function DocumentDetailModal({
     filesByRenewal.set(f.renewal_id, arr);
   }
   const dash = (v: string | null) => (v && v.trim() ? v : "—");
+  // `dash` for an IDENTIFIER — the reference number, which is a key and is
+  // rendered Latin whatever was stored. Not folded into `dash` itself: that
+  // helper also carries note/label prose, where Arabic-Indic digits are
+  // correct and protected by the standing lib/i18n.ts ruling. lib/digits.ts.
+  const idDash = (v: string | null) => toLatinDigits(dash(v));
   const date = (iso: string | null) =>
     iso ? formatDate(iso + "T00:00:00") : "—";
 
@@ -1535,7 +1568,7 @@ export function DocumentDetailModal({
             }
           />
         ) : (
-          <DetailRow label={t("archive.detail.fReferenceNo", lang)} value={dash(doc.reference_no)} />
+          <DetailRow label={t("archive.detail.fReferenceNo", lang)} value={idDash(doc.reference_no)} />
         )}
         <DetailRow label={t("archive.fIssueDate", lang)} value={date(doc.issue_date)} />
         <DetailRow
@@ -1588,7 +1621,7 @@ export function DocumentDetailModal({
               return (
                 <div key={r.id} className="rounded-lg border p-2.5 space-y-2" style={INPUT_STYLE}>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    <DetailRow label={t("archive.detail.fReferenceNo", lang)} value={dash(r.reference_no)} />
+                    <DetailRow label={t("archive.detail.fReferenceNo", lang)} value={idDash(r.reference_no)} />
                     <DetailRow label={t("archive.fIssueDate", lang)} value={date(r.issue_date)} />
                     <DetailRow label={t("archive.fExpiryDate", lang)} value={date(r.expiry_date)} />
                     <DetailRow

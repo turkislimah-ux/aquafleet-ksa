@@ -14,7 +14,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import { slugifyKey } from "@/lib/slug";
+import { lookupKey } from "@/lib/slug";
 import { computeWorkshopPaymentTotals } from "@/lib/outsourced-vat";
 import type {
   RepairerType,
@@ -251,8 +251,14 @@ export async function addRepairerType(
 ): Promise<{ error: string | null; type?: RepairerType }> {
   const enTrim = labelEn?.trim() ?? "";
   if (!enTrim) return { error: "Type name is required." };
-  const key = slugifyKey(enTrim);
-  if (!key) return { error: "Type name needs letters or numbers." };
+  // Any script. `labelEn` is a parameter NAME, not a language requirement: the
+  // only caller is RepairerFormModal's inline add, which passes one typed
+  // string and "" for the Arabic side, so this is a ONE-FIELD lookup wearing a
+  // two-column table. Deriving the key from that field meant an Arabic type
+  // name was refused with "needs letters or numbers" — same shape as the role /
+  // leave-type bug. lib/slug.ts.
+  const { key } = lookupKey(enTrim);
+  if (!key) return { error: "Type name is required." };
 
   const supabase = createClient();
 

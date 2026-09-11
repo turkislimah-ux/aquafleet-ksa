@@ -20,9 +20,15 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import { slugifyKey, isValidSlug } from "@/lib/slug";
+import { lookupKey } from "@/lib/slug";
 import { linkTarget, isStandingType, type PersonIdField } from "@/lib/archive";
 import { formatDate, formatSarExact } from "@/lib/utils";
+import { toLatinDigits } from "@/lib/digits";
+// TYPE-ONLY, and deliberately so. This file never calls `t()` — it has no
+// language to call it with (see getMaintenanceJobDetail's header). It names
+// dictionary paths so the CLIENT can resolve them, and `TKey` is what makes a
+// typo in one of those paths a compile error instead of a blank label.
+import type { TKey } from "@/lib/i18n";
 import type {
   ArchiveTab,
   ArchiveSubjectKind,
@@ -30,6 +36,8 @@ import type {
   ArchiveDocument,
   ArchiveDocumentFile,
   ArchiveDocumentType,
+  WorkOrderStatus,
+  OutsourcedJobStatus,
 } from "@/lib/db-types";
 
 const BUCKET = "archive-documents";
@@ -240,7 +248,7 @@ export async function createArchiveDocument(
     .insert({
       group_id: input.group_id,
       title: input.title.trim(),
-      reference_no: input.reference_no?.trim() || null,
+      reference_no: toLatinDigits(input.reference_no?.trim() || null),
       issue_date: input.issue_date || null,
       expiry_date: input.expiry_date || null,
       note: input.note?.trim() || null,
@@ -275,7 +283,7 @@ export async function updateArchiveDocument(
     .from("archive_documents")
     .update({
       title: input.title.trim(),
-      reference_no: input.reference_no?.trim() || null,
+      reference_no: toLatinDigits(input.reference_no?.trim() || null),
       issue_date: input.issue_date || null,
       expiry_date: input.expiry_date || null,
       note: input.note?.trim() || null,
@@ -356,9 +364,11 @@ export async function addArchiveDocumentType(
 ): Promise<{ error: string | null; type?: ArchiveDocumentType }> {
   const clean = label.trim();
   if (!clean) return { error: "Type name is required." };
-  const key = slugifyKey(clean);
-  if (!key) return { error: "Type name needs letters or numbers." };
-  if (!isValidSlug(key)) return { error: "Type name must start with a letter." };
+  // Any script. Same collapse as addStaffRole (app/drivers/actions.ts): a
+  // document type named only in Arabic could not be created, because the key
+  // was derived from the label and the label had no Latin run. lib/slug.ts.
+  const { key } = lookupKey(clean);
+  if (!key) return { error: "Type name is required." };
 
   const supabase = createClient();
 
@@ -535,7 +545,7 @@ export async function renewArchiveDocument(
     .update({
       // A linked document stores NEITHER — forced null rather than merely
       // left alone, so there is no path by which a stale value survives.
-      reference_no: input.linked ? null : (input.reference_no?.trim() || null),
+      reference_no: input.linked ? null : toLatinDigits(input.reference_no?.trim() || null),
       issue_date: input.issue_date || null,
       expiry_date: input.linked ? null : (input.expiry_date || null),
       note: input.note?.trim() || null,
@@ -682,7 +692,12 @@ export async function setPersonLinkedId(
   const { error } = await supabase
     .from(target.table)
     .update({
-      [target.numberColumn]: value.number?.trim() || null,
+      // Folded to Latin digits (lib/digits.ts). This is the SECOND writer of
+      // these three columns — app/fleet/actions.ts and app/drivers/actions.ts
+      // are the first — and 0089's whole point is that the two sides write one
+      // fact. Two writers normalising differently would make a registration
+      // number depend on which screen last touched it.
+      [target.numberColumn]: toLatinDigits(value.number?.trim() || null),
       [target.expiryColumn]: value.expiry || null,
     })
     .eq("id", personId);
@@ -838,19 +853,84 @@ export async function restoreCustomer(customerId: string): Promise<RestoreCustom
 //
 // DISPLAY ONLY. The archive shows this history; the Maintenance page remains
 // the only place a job is created or changed.
+//
+// THIS RETURNS DATA, NOT COPY — and that is BUG 1's fix, not a refactor.
+//
+// It used to hand back every label, heading, quantity phrase and total already
+// rendered as an English sentence ("Opened", "Parts consumed", "3 of 5",
+// "Parts total 412.00 SAR"). A server action has no language: it cannot read
+// `useApp()`, there is no `lang` in scope here, and nothing in the request tells
+// it which one the reader picked. So that copy was FROZEN ENGLISH and stayed
+// English inside an otherwise-Arabic modal, next to table headers that were
+// correctly translated because the CLIENT wrote those.
+//
+// Passing `lang` in as an argument would have been the smaller diff and the
+// wrong fix: the client fetches this once, on row click, and holds it in state.
+// Flip the language with the popup open and every string baked at fetch time
+// keeps the old one — the same bug, narrowed to "only after you toggle". Keys
+// re-render with the component; sentences do not.
+//
+// So: i18n keys and raw values out of here, words composed in
+// ArchiveTruckTab.tsx. Anything still typed `string` below is USER OR DB DATA —
+// a part name, an invoice number, a formatted amount — which has no translation
+// and must not acquire one.
 // ---------------------------------------------------------------------------
+
+// The quantity cell, in the three shapes it actually takes. A discriminated
+// union rather than a pre-joined string, because each shape needs a DIFFERENT
+// sentence with the numbers in different places — Arabic does not put "of" and
+// "planned" where English does, and a single template with a swapped word
+// cannot express that.
+export type MaintenanceLineQty =
+  | { form: "drawn"; drawn: string; planned: string }
+  | { form: "planned"; planned: string }
+  | { form: "subtotalVat"; subtotal: string; vat: string };
+
+// The sub-line under a line's name. In-house it is pure identifier data (SKU ·
+// unit) with no words in it, so it passes through as text. Outsourced it is a
+// sentence ("Invoice 1042 · 2026-03-01 · Discount 50.00 SAR") whose two labelled
+// parts have to be translated and whose separator has to be re-joined AFTER
+// translation, so it travels as its components.
+export type MaintenanceLineSub =
+  | { form: "text"; text: string }
+  | {
+      form: "payment";
+      invoiceNumber: string | null;
+      invoiceDate: string | null;
+      discount: string | null;
+    };
+
 export type MaintenanceJobDetail = {
   kind: "in_house" | "outsourced";
   ref: string;
   title: string;
-  status: string;
-  fields: { label: string; value: string }[];
+  // Was `string`, now the two closed unions this column actually holds. Both
+  // are already keyed under `status.*` in the dictionary — the client renders
+  // `t(\`status.${detail.status}\`)`, which is what the Maintenance page itself
+  // does with the same value. The old `.replace(/_/g, " ")` + `capitalize` that
+  // stood in for a translation is gone with it.
+  status: WorkOrderStatus | OutsourcedJobStatus;
+  // `labelKey` is the dictionary path for the field name.
+  //
+  // `valueKey` is ONE rule: when present the client renders
+  // `fill(t(valueKey), { v: value })` instead of `value`. That covers both
+  // things a value can need — a closed enum translated whole
+  // (`status.corrective`, no placeholder, `fill` is a no-op) and a unit wrapped
+  // round a number (`archive.truck.odometerKm` = "{v} km"). Two cases, one
+  // line, so the renderer never has to know which it is holding.
+  //
+  // When `valueKey` is absent `value` is display text — a date, a name, a
+  // formatted amount — and is rendered as-is. It is never a translatable word.
+  fields: { labelKey: TKey; value: string; valueKey?: TKey }[];
   // In-house: the parts lines with what was actually drawn from stock.
   // Outsourced: the repairer payment lines.
   lines: {
-    label: string;
-    sub: string | null;
-    qty: string;
+    // NULL means the part / repairer row could not be read — the client prints
+    // its own "Unknown part" / "Unknown repairer" in the reader's language.
+    // The English fallback used to be baked in here.
+    label: string | null;
+    sub: MaintenanceLineSub | null;
+    qty: MaintenanceLineQty;
     amount: string;
     // On-hand BEFORE and AFTER this work order's consumption. In-house only
     // (outsourced jobs consume no inventory), and null when no matching
@@ -858,8 +938,14 @@ export type MaintenanceJobDetail = {
     onHandBefore: string | null;
     onHandAfter: string | null;
   }[];
-  linesTitle: string;
-  linesEmpty: string;
+  // The AMOUNT only. Which sentence wraps it ("Parts total …" vs "Total paid …")
+  // follows from `kind`, so the client picks it — `linesTitle` and `linesEmpty`
+  // are gone from this payload for the same reason, being a pure function of
+  // `kind` that the client already switches on for its table headers.
+  //
+  // Still nullable, and the nullability is NOT cosmetic: in-house always has a
+  // parts total (possibly an em dash), outsourced has none at all when no
+  // workshop payment was recorded.
   total: string | null;
   note: string | null;
   error: string | null;
@@ -972,23 +1058,34 @@ export async function getMaintenanceJobDetail(
       kind: "in_house",
       ref: wo.wo_number as string,
       title: wo.title as string,
-      status: wo.status as string,
+      status: wo.status as WorkOrderStatus,
+      // LABELS ARE KEYS NOW. Ten of the twelve reuse the very key the
+      // Maintenance page labels the same column with (`common.*` / `mt.*`), so
+      // the archive's read-only view of a work order reads identically to the
+      // editable one instead of inventing a second English wording for each
+      // field. Only "Labor rate" and "Due by" had no key and got one.
+      //
+      // `type` and `priority` carry a `valueKey` as well: both are closed enums
+      // whose members are already in `status.*`, and both used to print the raw
+      // database token ("corrective", "high") in either language. The `value`
+      // beside them keeps the raw token — it is the React key and the fallback,
+      // never what is shown.
       fields: [
-        { label: "Type", value: String(wo.type ?? "—") },
-        { label: "Priority", value: String(wo.priority ?? "—") },
-        { label: "Mechanic", value: mech?.name ?? "—" },
-        { label: "Opened", value: dateOnly(wo.opened_at as string) },
-        { label: "Started", value: dateOnly(wo.start_date as string | null) },
-        { label: "Due by", value: dateOnly(wo.due_by as string) },
-        { label: "Closed", value: dateOnly(wo.closed_at as string | null) },
-        { label: "Odometer", value: wo.odometer_at_service != null ? `${wo.odometer_at_service} km` : "—" },
-        { label: "Labor hours", value: String(wo.labor_hours ?? "—") },
-        { label: "Labor rate", value: money(wo.labor_rate_sar as number | null) },
-        { label: "Created by", value: (wo.created_by as string | null) ?? "—" },
-        { label: "Completed by", value: (wo.completed_by as string | null) ?? "—" },
+        { labelKey: "common.type", value: String(wo.type ?? "—"), valueKey: wo.type ? (`status.${wo.type}` as TKey) : undefined },
+        { labelKey: "common.priority", value: String(wo.priority ?? "—"), valueKey: wo.priority ? (`status.${wo.priority}` as TKey) : undefined },
+        { labelKey: "common.mechanic", value: mech?.name ?? "—" },
+        { labelKey: "common.opened", value: dateOnly(wo.opened_at as string) },
+        { labelKey: "mt.startDate", value: dateOnly(wo.start_date as string | null) },
+        { labelKey: "archive.truck.fDueBy", value: dateOnly(wo.due_by as string) },
+        { labelKey: "archive.truck.thClosed", value: dateOnly(wo.closed_at as string | null) },
+        // The unit moves to the client with the rest of the words. The em-dash
+        // branch stays a bare em dash — "— km" would read as a zero reading.
+        { labelKey: "mt.odometerAtService", value: wo.odometer_at_service != null ? toLatinDigits(String(wo.odometer_at_service)) : "—", valueKey: wo.odometer_at_service != null ? "archive.truck.odometerKm" : undefined },
+        { labelKey: "mt.laborHours", value: String(wo.labor_hours ?? "—") },
+        { labelKey: "archive.truck.fLaborRate", value: money(wo.labor_rate_sar as number | null) },
+        { labelKey: "mt.createdBy", value: (wo.created_by as string | null) ?? "—" },
+        { labelKey: "mt.completedBy", value: (wo.completed_by as string | null) ?? "—" },
       ],
-      linesTitle: "Parts consumed",
-      linesEmpty: "No parts were consumed on this work order.",
       lines: (parts ?? []).map((p) => {
         const part = partById.get(p.part_id as string);
         const drawn = consumedByWop.get(p.id as string);
@@ -1001,12 +1098,22 @@ export async function getMaintenanceJobDetail(
         const first = ms[0];
         const last = ms[ms.length - 1];
         return {
-          label: part?.name ?? "Unknown part",
-          sub: part?.sku ? `${part.sku}${part.unit ? ` · ${part.unit}` : ""}` : null,
+          // NULL, not "Unknown part" — the fallback is a sentence and this file
+          // cannot write sentences. ArchiveTruckTab prints it in the reader's
+          // language.
+          label: part?.name ?? null,
+          // SKU and unit are identifiers, not words. Nothing here to translate,
+          // so this sub-line travels already joined.
+          sub: part?.sku
+            ? ({ form: "text" as const, text: `${part.sku}${part.unit ? ` · ${part.unit}` : ""}` })
+            : null,
           // Planned quantity vs what the FIFO ledger actually drew. They
           // normally match; showing both means a reversal or a partial draw
-          // is visible instead of hidden behind one number.
-          qty: drawn ? `${drawn.qty} of ${p.qty}` : `${p.qty} planned`,
+          // is visible instead of hidden behind one number. The "of" and the
+          // "planned" that used to be spliced in here are now the client's.
+          qty: drawn
+            ? ({ form: "drawn" as const, drawn: String(drawn.qty), planned: String(p.qty) })
+            : ({ form: "planned" as const, planned: String(p.qty) }),
           amount: drawn ? money(drawn.value) : money(Number(p.qty) * Number(p.unit_price_sar)),
           // qty_delta is negative for a consume, so subtracting it adds the
           // drawn quantity back to reach the pre-consumption count.
@@ -1015,8 +1122,9 @@ export async function getMaintenanceJobDetail(
         };
       }),
       // Parts-only, per 0079's boundary — labour is shown above as hours and
-      // rate and is deliberately NOT added into this figure.
-      total: `Parts total ${money(wo.actual_cost_sar as number | null)}`,
+      // rate and is deliberately NOT added into this figure. The label that
+      // says so moved to `archive.truck.partsTotal`; only the figure is here.
+      total: money(wo.actual_cost_sar as number | null),
       note: (wo.mechanic_notes as string | null) ?? null,
       error: null,
     };
@@ -1051,35 +1159,50 @@ export async function getMaintenanceJobDetail(
     kind: "outsourced",
     ref: job.os_number as string,
     title: job.title as string,
-    status: job.status as string,
+    status: job.status as OutsourcedJobStatus,
+    // Outsourced `type` shares the in-house type enum and therefore the same
+    // `status.*` keys — OutsourcedJobDetailModal.tsx already renders it that
+    // way, so this matches the page the data comes from.
     fields: [
-      { label: "Type", value: String(job.type ?? "—") },
-      { label: "Responsible mechanic", value: mech?.name ?? "—" },
-      { label: "Started", value: dateOnly(job.start_date as string) },
-      { label: "Estimated finish", value: dateOnly(job.estimated_finish as string) },
-      { label: "Closed", value: dateOnly(job.closed_at as string | null) },
-      { label: "Created by", value: (job.created_by as string | null) ?? "—" },
-      { label: "Completed by", value: (job.completed_by as string | null) ?? "—" },
+      { labelKey: "common.type", value: String(job.type ?? "—"), valueKey: job.type ? (`status.${job.type}` as TKey) : undefined },
+      { labelKey: "mt.responsibleMechanic", value: mech?.name ?? "—" },
+      { labelKey: "mt.startDate", value: dateOnly(job.start_date as string) },
+      { labelKey: "mt.estimatedFinish", value: dateOnly(job.estimated_finish as string) },
+      { labelKey: "archive.truck.thClosed", value: dateOnly(job.closed_at as string | null) },
+      { labelKey: "mt.createdBy", value: (job.created_by as string | null) ?? "—" },
+      { labelKey: "mt.completedBy", value: (job.completed_by as string | null) ?? "—" },
     ],
-    linesTitle: "Workshop payments",
-    linesEmpty: "No workshop payment recorded for this job.",
     lines: (payments ?? []).map((p) => ({
-      label: repairerById.get(p.repairer_id as string) ?? "Unknown repairer",
-      sub: [
-        p.invoice_number ? `Invoice ${p.invoice_number}` : null,
-        p.invoice_date ? dateOnly(p.invoice_date as string) : null,
-        Number(p.discount_sar) > 0 ? `Discount ${money(p.discount_sar as number)}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ") || null,
-      qty: `${money(p.subtotal_sar as number)} + ${money(p.vat_sar as number)} VAT`,
+      label: repairerById.get(p.repairer_id as string) ?? null,
+      // The three parts travel separately and the client joins them with " · "
+      // AFTER translating, because two of them are labelled ("Invoice …",
+      // "Discount …") and the middle one is a bare date. Pre-joining here is
+      // what froze the English.
+      //
+      // Each part keeps its own null: an absent invoice number, an absent date
+      // and a zero discount each drop out of the join independently, exactly as
+      // the `.filter(Boolean)` did.
+      sub: {
+        form: "payment" as const,
+        invoiceNumber: p.invoice_number ? String(p.invoice_number) : null,
+        invoiceDate: p.invoice_date ? dateOnly(p.invoice_date as string) : null,
+        discount: Number(p.discount_sar) > 0 ? money(p.discount_sar as number) : null,
+      },
+      qty: {
+        form: "subtotalVat" as const,
+        subtotal: money(p.subtotal_sar as number),
+        vat: money(p.vat_sar as number),
+      },
       amount: money(p.grand_total_sar as number),
       // Outsourced work consumes no inventory, so there is no on-hand pair to
       // show — null rather than a zero that would read as "stock hit zero".
       onHandBefore: null,
       onHandAfter: null,
     })),
-    total: (payments ?? []).length > 0 ? `Total paid ${money(grand)}` : null,
+    // Null when nothing was paid — a job with no workshop payment has no total,
+    // as against in-house's parts total which always exists. The client hides
+    // the line entirely rather than printing "Total paid —".
+    total: (payments ?? []).length > 0 ? money(grand) : null,
     note: (job.notes as string | null) ?? null,
     error: null,
   };

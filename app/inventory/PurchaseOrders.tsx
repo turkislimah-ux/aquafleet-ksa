@@ -2313,6 +2313,68 @@ const OUTCOME_LABEL: Record<RejectionMode, { en: string; ar: string }> = {
   remove_stock: { en: "remove-stock", ar: "إزالة المخزون" },
 };
 
+// THE VOTE-CONFLICT MESSAGE IS COMPOSED HERE, not taken from the database.
+//
+// 0058's `approve_stock_receipt` / `reject_stock_receipt` raise three conflict
+// strings, and this modal used to surface them verbatim through `res.error`.
+// A `raise exception` string is a server byte with no language attached, so an
+// Arabic user rejecting a receipt someone else had voted on got an otherwise
+// fully-Arabic modal with one English paragraph in it.
+//
+// Everything this needs is ALREADY on the client: the modal receives
+// `approvals` and `currentUserEmail`, which is exactly what the RPC looks up.
+// So it says the same three things in the user's own language, and the raise
+// stays as the real gate — nothing here is authorization, it is a message.
+//
+// THE BRANCHES MIRROR THE RPC EXACTLY, in the RPC's own order, and one of them
+// is easy to get wrong: when the actor ALREADY HAS A VOTE the RPC takes its
+// "sole voter freely changing their own vote" branch and never reaches a
+// conflict at all. Miss that and this would invent a conflict for the one
+// person who cannot have one.
+//
+// Returns null for every OTHER failure — not-authorized, wrong status, the
+// already-consumed block, the untraceable-lot block. Those are not conflicts
+// and are not re-derivable from what the client holds, so the caller falls back
+// to the RPC's own message for them. Same contract as `conflictMessage()` in
+// app/consumption/ApprovalsTab.tsx, which solved this identically for the 0097
+// approval queue and was simply never applied to this one.
+function receiptConflictMessage(
+  approvals: StockReceiptApproval[],
+  currentUserEmail: string | null,
+  attempted: "approve" | "reject",
+  // The outcome radio, for a reject. Ignored when `attempted` is "approve" —
+  // approve carries no outcome.
+  attemptedOutcome: RejectionMode | null,
+  lang: "en" | "ar",
+): string | null {
+  const mine = approvals.find((a) => a.approver_email === currentUserEmail);
+  if (mine) return null;
+  const other = approvals.find((a) => a.approver_email !== currentUserEmail);
+  if (!other) return null;
+
+  if (other.action !== attempted) {
+    return fill(
+      t(
+        other.action === "approve"
+          ? "inventory.po.conflictOtherApproved"
+          : "inventory.po.conflictOtherRejected",
+        lang,
+      ),
+      { who: other.approver_email },
+    );
+  }
+
+  // Same action. Only a reject can still conflict, and only on its outcome.
+  if (attempted === "reject" && attemptedOutcome && other.outcome && other.outcome !== attemptedOutcome) {
+    return fill(t("inventory.po.conflictOutcomeMismatch", lang), {
+      who: other.approver_email,
+      outcome: OUTCOME_LABEL[other.outcome][lang],
+    });
+  }
+
+  return null;
+}
+
 // Vote-state display — Stage B vote model (0058). While a receipt is
 // pending_approval, at most ONE vote row can exist (a matching second
 // vote always finalizes in the same transaction, flipping status away
@@ -2416,7 +2478,10 @@ export function ApproveReceiptModal({
       // either way, and show the message rather than swallowing it. Without
       // this, a mirror failure would leave a resolved row looking unactioned.
       if (res.receipt) router.refresh();
-      setError(res.error);
+      // Localised conflict FIRST, the RPC's own message as the fallback. Only
+      // the three vote conflicts are re-composed here; everything else the RPC
+      // refuses still speaks for itself. See receiptConflictMessage().
+      setError(receiptConflictMessage(approvals, currentUserEmail, "approve", null, lang) ?? res.error);
       return;
     }
     onApproved();
@@ -2574,7 +2639,10 @@ export function RejectReceiptModal({
       // actions.ts). Refresh so the queue drops the row on the receipt's
       // own status, then show the message — same contract as approve.
       if (res.receipt) router.refresh();
-      setError(res.error);
+      // Localised conflict FIRST, the RPC's own message as the fallback — so
+      // the "already consumed" and untraceable-lot blocks quoted above are
+      // untouched and still surface verbatim. See receiptConflictMessage().
+      setError(receiptConflictMessage(approvals, currentUserEmail, "reject", mode, lang) ?? res.error);
       return;
     }
     onRejected();

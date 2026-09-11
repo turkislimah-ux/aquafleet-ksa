@@ -27,6 +27,7 @@ import { type DriverState } from "@/lib/driver-state";
 import { assignDriver, unassignDriver, terminateTruck } from "../actions";
 import TruckFormModal from "../TruckFormModal";
 import { cn, formatDate, formatDateLangLocale, formatNum, formatSar, todayKey } from "@/lib/utils";
+import { toLatinDigits } from "@/lib/digits";
 import { ArrowLeft, Users, X, Activity, Pencil, Eye, Wrench, Package } from "lucide-react";
 import MtStatusPill, { type MtPillKind } from "@/app/maintenance/MtStatusPill";
 import {
@@ -495,10 +496,14 @@ export default function FleetDetailClient({
             label={t("common.odometer", lang)}
             value={truck.odometer_km != null ? `${formatNum(truck.odometer_km)} km` : "—"}
           />
-          <InfoField label={t("fleet.form.vin", lang)} value={truck.vin || "—"} mono />
+          {/* VIN and registration are IDENTIFIERS — folded to Latin digits on
+              the way out so a row stored before the write guards existed still
+              reads Latin here. `mono` marks exactly the fields this applies to;
+              `model` two rows up is prose and is left alone. lib/digits.ts. */}
+          <InfoField label={t("fleet.form.vin", lang)} value={toLatinDigits(truck.vin) || "—"} mono />
           <InfoField
             label={t("fleet.form.vehicleRegistration", lang)}
-            value={truck.vehicle_registration || "—"}
+            value={toLatinDigits(truck.vehicle_registration) || "—"}
             mono
             href={`/archive?tab=truck&trucksub=documents&truck=${truck.id}`}
           />

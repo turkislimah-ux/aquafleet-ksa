@@ -1200,6 +1200,20 @@ export const dict = {
       // half interpolated the component's `labelAr` — two sources for one slot.
       // They are byte-identical strings, which is why one key can now feed both.
       notANumber: { en: "{label}: not a number.", ar: "{label}: قيمة غير صالحة." },
+      // The other two rules validateThreshold can break. They are NEW because
+      // the validator used to hand the editor a finished English sentence and
+      // the Arabic branch salvaged what it could by splitting on ": " — so the
+      // field name was Arabic and the rule beside it stayed English. The
+      // validator now reports WHICH rule broke and these say it.
+      //
+      // `{min}` / `{max}` are the bounds the comparison actually used, passed
+      // through on the problem rather than re-read here. Latin numerals in both
+      // languages, matching `sharedDefault` above.
+      mustBeWhole: { en: "{label}: must be a whole number.", ar: "{label}: يجب أن يكون رقمًا صحيحًا." },
+      mustBeBetween: {
+        en: "{label}: must be between {min} and {max}.",
+        ar: "{label}: يجب أن يكون بين {min} و {max}.",
+      },
 
       // The four threshold rows: f_ is the label, h_ the help line under it.
       // Keyed by `ThresholdKey` so FIELDS can hold nothing but a key and a step.
@@ -1729,6 +1743,25 @@ export const dict = {
       idle: { en: "Idle", ar: "متاح" },
       offDuty: { en: "Off duty", ar: "غير مكلف" },
       onLeave: { en: "On leave", ar: "في إجازة" },
+    },
+
+    /**
+     * Jobs-running mix — the `jobs_running` summary widget's two bars.
+     *
+     * NEW, and the reason it is new rather than a reuse is the same reason the
+     * three groups above exist: getWidgetValue (lib/actions/dashboard-widgets.ts)
+     * is a SERVER action and had these two words, plus fleetState's three and
+     * driverMix's four, written into it as English literals. That copy could
+     * not follow the language, so a summary card sat in English on an Arabic
+     * dashboard — the identical fault as the archive's maintenance popup.
+     *
+     * `archive.truck.kind.*` says exactly these two words already, but it is
+     * scoped to the archive's own track column; the dashboard reaching into it
+     * would tie two unrelated surfaces' copy together.
+     */
+    jobsMix: {
+      inHouse: { en: "In-house", ar: "داخلي" },
+      outsourced: { en: "Outsourced", ar: "خارجي" },
     },
 
     activity: {
@@ -6456,6 +6489,23 @@ export const dict = {
         adjustment: { en: "adjustment", ar: "تسوية" },
         bonus: { en: "bonus", ar: "مكافأة" },
       },
+      // The item's NAME when a snapshot line has none of its own. A bonus never
+      // has one — it is synthesised from the cycle row, not entered by anybody
+      // — and a special or adjustment saved with the label box empty does not
+      // either. buildPayoutSnapshot used to write the English words "Special" /
+      // "Adjustment" / "Bonus" into the frozen jsonb for exactly these cases,
+      // and History printed that column raw, so an Arabic payslip carried three
+      // English words in its item list.
+      //
+      // Sentence-cased, unlike `kind` directly above: that one is a mid-sentence
+      // noun the Type column renders through CSS `capitalize`, while this sits
+      // in a name column beside user-entered labels, where forcing capitalize
+      // would mangle the rows that DO carry one.
+      itemName: {
+        special: { en: "Special", ar: "دفعة استثنائية" },
+        adjustment: { en: "Adjustment", ar: "تسوية" },
+        bonus: { en: "Bonus", ar: "مكافأة" },
+      },
       // The three-state review enum (`ReviewStatus`), on the pill beside every
       // special / adjustment / bonus and on the payout itself. Indexed by the
       // stored value, which is what replaced CommissionsTab's STATUS_LABEL map.
@@ -7167,6 +7217,70 @@ export const dict = {
         en: "No matching stock movement found for this work order",
         ar: "لم يُعثر على حركة مخزون مطابقة لأمر العمل هذا",
       },
+
+      // THE POPUP'S OWN COPY, because the SERVER cannot write it.
+      //
+      // getMaintenanceJobDetail (app/archive/actions.ts) used to return this
+      // popup's every label, heading and total already rendered as an English
+      // sentence. A server action has no `lang` — it cannot read useApp() —
+      // so that copy was frozen English and stayed English inside an otherwise
+      // Arabic modal. The action now returns DATA (i18n keys + raw values) and
+      // the client composes the words from here, which is why these keys exist
+      // at all rather than living as string literals over there.
+      //
+      // Only the labels with NO existing key are listed. The rest of the field
+      // grid reuses `common.*` / `mt.*` — the same keys the Maintenance page
+      // labels these very columns with, so the archive's read-only view of a
+      // work order now reads identically to the editable one.
+      fLaborRate: { en: "Labor rate", ar: "أجر الساعة" },
+      // NOT `common.due` ("Due" / "تاريخ الاستحقاق"). The work order's column is
+      // `due_by`, and the shorter label sits next to four other dates here.
+      fDueBy: { en: "Due by", ar: "الاستحقاق" },
+      // `{v}`, not `{km}`, and the odd slot name is load-bearing. Every
+      // `valueKey` on a MaintenanceJobDetail field is resolved by ONE rule on
+      // the client — `fill(t(valueKey), { v: value })` — so that an enum key
+      // (`status.corrective`, which carries no placeholder and comes back
+      // unchanged) and a unit template like this one go through the same line
+      // instead of needing the renderer to know which kind it is holding.
+      //
+      // The substituted number is a stored odometer reading in Latin digits.
+      // Arabic copy elsewhere in this file keeps Arabic-Indic digits by
+      // standing ruling; that ruling is about hand-written prose, not about a
+      // value read out of a column.
+      odometerKm: { en: "{v} km", ar: "{v} كم" },
+
+      // ---- Lines section. One pair per job kind: an in-house work order lists
+      // the parts it drew from stock, an outsourced job lists what the workshop
+      // was paid. Different nouns, different sentences — not one string with a
+      // substituted word.
+      linesInHouse: { en: "Parts consumed", ar: "قطع الغيار المستهلكة" },
+      linesOutsourced: { en: "Workshop payments", ar: "مدفوعات الورش" },
+      linesEmptyInHouse: {
+        en: "No parts were consumed on this work order.",
+        ar: "لم تُستهلك أي قطع في أمر العمل هذا.",
+      },
+      linesEmptyOutsourced: {
+        en: "No workshop payment recorded for this job.",
+        ar: "لا توجد مدفوعات ورشة مسجّلة لهذا العمل.",
+      },
+      // Shown when the part / repairer row a line points at could not be read.
+      // An honest "unknown" beats a blank cell that reads as "no part".
+      unknownPart: { en: "Unknown part", ar: "قطعة غير معروفة" },
+      unknownRepairer: { en: "Unknown repairer", ar: "ورشة غير معروفة" },
+      // Planned quantity vs what the FIFO ledger actually drew. They normally
+      // match; showing both means a reversal or a partial draw is visible
+      // instead of hidden behind one number.
+      qtyDrawn: { en: "{drawn} of {planned}", ar: "{drawn} من {planned}" },
+      qtyPlanned: { en: "{planned} planned", ar: "{planned} مخطط" },
+      // "VAT" stays Latin in the Arabic, matching `mt.vat` and `thSubtotalVat`
+      // directly above — the term is used untranslated throughout this app.
+      subtotalPlusVat: { en: "{subtotal} + {vat} VAT", ar: "{subtotal} + {vat} VAT" },
+      subInvoice: { en: "Invoice {n}", ar: "فاتورة {n}" },
+      subDiscount: { en: "Discount {amount}", ar: "خصم {amount}" },
+      // Parts-only, per 0079's boundary — labour is shown above as hours and
+      // rate and is deliberately NOT added into this figure. The label says so.
+      partsTotal: { en: "Parts total {amount}", ar: "إجمالي القطع {amount}" },
+      totalPaid: { en: "Total paid {amount}", ar: "إجمالي المدفوع {amount}" },
     },
 
     // -----------------------------------------------------------------------
@@ -10281,6 +10395,34 @@ export const dict = {
       noReceiptLinked: { en: "No receipt is linked to this record yet.", ar: "لا يوجد إيصال مرتبط بهذا السجل بعد." },
       hasAlreadyBeen: { en: "This has already been resolved — closing this form. Refresh to see its final state.", ar: "تم حسم هذا بالفعل — سيُغلق هذا النموذج. حدّث الصفحة لرؤية حالته النهائية." },
       bothApproversMust: { en: "Both approvers must cast the SAME action — two approves, or two matching rejects.", ar: "يجب أن يتخذ المعتمِدان نفس الإجراء — اعتمادان، أو رفضان متطابقان." },
+
+      // receiptConflictMessage() in PurchaseOrders.tsx — the three vote
+      // conflicts 0058's approve_stock_receipt / reject_stock_receipt raise.
+      // Composed in the app, not taken from the raise, for the same reason
+      // consumption.approvalsTab.conflictApproved is: a `raise exception`
+      // string is a server byte with no language, so surfacing it verbatim
+      // printed English inside an otherwise Arabic modal.
+      //
+      // Two whole sentences per case rather than one with a swapped word —
+      // Arabic changes the verb, not a lowercase noun. Same shape as the
+      // consumption pair so the two approval surfaces read alike.
+      conflictOtherApproved: {
+        en: "Conflict — {who} already voted to approve this receipt. A second vote has to match theirs, or ask them to change it first.",
+        ar: "تعارض — {who} صوّت بالفعل باعتماد هذا الإيصال. على الصوت الثاني أن يطابق صوته، أو اطلب منه تغييره أولاً.",
+      },
+      conflictOtherRejected: {
+        en: "Conflict — {who} already voted to reject this receipt. A second vote has to match theirs, or ask them to change it first.",
+        ar: "تعارض — {who} صوّت بالفعل برفض هذا الإيصال. على الصوت الثاني أن يطابق صوته، أو اطلب منه تغييره أولاً.",
+      },
+      // The OUTCOME mismatch: both voters chose reject, but not the same
+      // kind of reject. `{outcome}` is filled from OUTCOME_LABEL in
+      // PurchaseOrders.tsx — the same bilingual pair the vote summary prints
+      // beside the vote itself — never with the raw `void_cost` /
+      // `remove_stock` enum. One vocabulary per screen.
+      conflictOutcomeMismatch: {
+        en: "Conflict — {who} already voted to reject this receipt with the outcome “{outcome}”. The second reject must choose that same outcome.",
+        ar: "تعارض — {who} صوّت بالفعل برفض هذا الإيصال بالنتيجة «{outcome}». على الرفض الثاني اختيار النتيجة نفسها.",
+      },
       optionalComment: { en: "Optional comment", ar: "تعليق اختياري" },
       bothApproversMustPick: { en: "Both approvers must pick the SAME outcome — reason may differ.", ar: "يجب أن يختار المعتمِدان نفس النتيجة — يمكن أن يختلف السبب." },
       rejectionOutcome: { en: "Rejection outcome", ar: "نتيجة الرفض" },

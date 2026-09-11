@@ -13,15 +13,35 @@
 import { createClient } from "@/lib/supabase/server";
 import { isAllowedWidgetKey, isStateWidget, widgetDef } from "@/lib/dashboard-widgets";
 import { fetchTruckStateCounts } from "@/lib/actions/truck-state";
+// TYPE-ONLY. This file cannot call `t()` — see the note on `parts` below.
+import type { TKey } from "@/lib/i18n";
 
 export type WidgetValue = {
   key: string;
   /** Single headline number, already coerced. */
   value: number;
-  /** Bars, when the widget is a mix rather than one figure. */
-  parts: { label: string; value: number }[];
+  /**
+   * Bars, when the widget is a mix rather than one figure.
+   *
+   * `label` IS NOT COPY, and the two shapes it takes are why this field is a
+   * union rather than a plain string.
+   *
+   * The state widgets used to write their bar names here as English literals
+   * ("Active", "Off duty", "In-house"). A server action has no language, so
+   * those stayed English on an Arabic dashboard — the same fault, and the same
+   * mechanism, as the archive's maintenance-job popup. They now travel as
+   * `labelKey` and DashboardClient resolves them.
+   *
+   * The METRIC widgets are the other shape: their bar name is a month token
+   * ("2026-09") sliced off the row. That is data, has no translation, and stays
+   * `label`.
+   */
+  parts: WidgetPart[];
   hasData: boolean;
 };
+
+/** One bar: a translatable name OR a raw data token, never both. */
+export type WidgetPart = { value: number } & ({ labelKey: TKey; label?: never } | { label: string; labelKey?: never });
 
 function num(v: unknown): number {
   if (v == null) return 0;
@@ -91,9 +111,9 @@ export async function getWidgetValue(key: string): Promise<WidgetValue | null> {
         key,
         value: t.total,
         parts: [
-          { label: "Active", value: t.active },
-          { label: "Idle", value: t.idle },
-          { label: "Maintenance", value: t.maintenance },
+          { labelKey: "dashboard.fleetState.active", value: t.active },
+          { labelKey: "dashboard.fleetState.idle", value: t.idle },
+          { labelKey: "dashboard.fleetState.maintenance", value: t.maintenance },
         ],
         hasData: true,
       };
@@ -102,11 +122,14 @@ export async function getWidgetValue(key: string): Promise<WidgetValue | null> {
       return {
         key,
         value: num(s.drivers_total),
+        // The SAME four keys the Now-strip's driver MixBar renders a few
+        // hundred lines up in DashboardClient — so the widget copy of this
+        // breakdown and the built-in one cannot drift apart in either language.
         parts: [
-          { label: "Active", value: num(s.drivers_active) },
-          { label: "Idle", value: num(s.drivers_idle) },
-          { label: "Off duty", value: num(s.drivers_off_duty) },
-          { label: "On leave", value: num(s.drivers_on_leave) },
+          { labelKey: "dashboard.driverMix.active", value: num(s.drivers_active) },
+          { labelKey: "dashboard.driverMix.idle", value: num(s.drivers_idle) },
+          { labelKey: "dashboard.driverMix.offDuty", value: num(s.drivers_off_duty) },
+          { labelKey: "dashboard.driverMix.onLeave", value: num(s.drivers_on_leave) },
         ],
         hasData: true,
       };
@@ -119,8 +142,8 @@ export async function getWidgetValue(key: string): Promise<WidgetValue | null> {
         key,
         value: num(s.work_orders_running) + num(s.outsourced_running),
         parts: [
-          { label: "In-house", value: num(s.work_orders_running) },
-          { label: "Outsourced", value: num(s.outsourced_running) },
+          { labelKey: "dashboard.jobsMix.inHouse", value: num(s.work_orders_running) },
+          { labelKey: "dashboard.jobsMix.outsourced", value: num(s.outsourced_running) },
         ],
         hasData: true,
       };
@@ -163,6 +186,10 @@ export async function getWidgetValue(key: string): Promise<WidgetValue | null> {
     key,
     value: num(rows[0]?.[src.col]),
     // Oldest-to-newest so a bar chart reads left to right.
+    //
+    // `label`, NOT `labelKey`, and deliberately: this is a month token
+    // ("2026-09") read off the row. There is no dictionary entry for it and
+    // there should not be — it is data, like the numbers beside it.
     parts: [...rows]
       .reverse()
       .map((r) => ({ label: String(r.month ?? "").slice(0, 7), value: num(r[src.col]) })),

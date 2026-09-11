@@ -29,10 +29,16 @@ import {
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { LinkPill } from "./ArchiveModals";
 import type { SubTabItem } from "./SubTabPicker";
-import { getMaintenanceJobDetail, type MaintenanceJobDetail } from "./actions";
+import {
+  getMaintenanceJobDetail,
+  type MaintenanceJobDetail,
+  type MaintenanceLineQty,
+  type MaintenanceLineSub,
+} from "./actions";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 import { cn, formatAmount, formatDate } from "@/lib/utils";
+import { toLatinDigits } from "@/lib/digits";
 import {
   docStatus, ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
   groupAccent, groupDot, linkedFieldFor, linkedFieldForDoc, readPersonLink,
@@ -863,6 +869,16 @@ function TerminatedTruckDetail({
     outsourcedJobs.filter((o) => o.truck_id === truck.id).length;
   const dash = (v: string | number | null | undefined) =>
     v === null || v === undefined || v === "" ? "—" : String(v);
+  // `dash` for an IDENTIFIER — VIN and vehicle registration, the two fields
+  // below that render `mono`. Deliberately NOT folded into `dash` itself:
+  // `fModel` goes through the same helper and a model name is prose, so an
+  // Arabic one is allowed to keep whatever digits its author typed (the
+  // standing lib/i18n.ts ruling). Year / capacity / odometer are numeric
+  // columns and cannot carry Arabic-Indic digits in the first place.
+  // Folding here is belt-and-braces over the write guards in
+  // app/fleet/actions.ts and app/archive/actions.ts — it is what makes rows
+  // stored BEFORE those guards read Latin. See lib/digits.ts.
+  const idDash = (v: string | null | undefined) => toLatinDigits(dash(v));
 
   return (
     <div
@@ -896,12 +912,12 @@ function TerminatedTruckDetail({
             <TruckField label={t("archive.truck.fModel", lang)} value={dash(truck.model)} />
             <TruckField label={t("archive.truck.fYear", lang)} value={dash(truck.year)} />
             <TruckField label={t("archive.truck.fCapacity", lang)} value={dash(truck.capacity_m3)} />
-            <TruckField label={t("archive.truck.fVin", lang)} value={dash(truck.vin)} mono />
+            <TruckField label={t("archive.truck.fVin", lang)} value={idDash(truck.vin)} mono />
             {/* Same words as the LINKED-field label for a truck, in both
                 languages — the column this field shows IS what a linked
                 registration document reads from, so it reuses that leaf
                 rather than minting a second copy that could drift. */}
-            <TruckField label={t("archive.personId.truck_registration", lang)} value={dash(truck.vehicle_registration)} mono />
+            <TruckField label={t("archive.personId.truck_registration", lang)} value={idDash(truck.vehicle_registration)} mono />
             <TruckField label={t("archive.truck.fRegistrationExpiry", lang)} value={fmtDate(truck.registration_expiry)} />
             <TruckField label={t("archive.truck.fOdometer", lang)} value={dash(truck.odometer_km)} />
           </div>
@@ -1021,9 +1037,19 @@ function MaintenanceJobModal({
               {" · "}
               {t(`archive.truck.jobKind.${detail.kind}`, lang)}
               {" · "}
-              {/* FLAGGED, same reason as the track table's status cell: a raw
-                  Maintenance-route enum with no closed union to key off. */}
-              <span className="capitalize">{detail.status.replace(/_/g, " ")}</span>
+              {/* UN-FLAGGED. The note here said this was "a raw Maintenance-route
+                  enum with no closed union to key off", and the second half was
+                  the only true part: the value always WAS one of
+                  WorkOrderStatus | OutsourcedJobStatus, the action just typed it
+                  `string`. Typing it properly (see MaintenanceJobDetail) makes
+                  `status.${...}` a checked key, and every member of both unions
+                  is already in that group — the Maintenance page renders the
+                  same column the same way.
+
+                  `.replace(/_/g, " ")` + `capitalize` went with it. That pair
+                  was never a translation; it made "in_progress" look tidy in
+                  English and left it untouched in Arabic. */}
+              {t(`status.${detail.status}`, lang)}
             </p>
           </div>
           <button
@@ -1037,22 +1063,37 @@ function MaintenanceJobModal({
         <div className="p-4 space-y-3">
           <div className="text-[11px] font-semibold uppercase tracking-wide muted">{t("archive.truck.sectionDetails", lang)}</div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {/* FLAGGED: `f.label` — and `linesTitle` / `linesEmpty` /
-                `l.label` / `l.sub` / `total` below — are DISPLAY strings built
-                SERVER-SIDE by getMaintenanceJobDetail in ./actions.ts. The
-                brief scopes that file's `error:` strings out of this batch; it
-                does not obviously cover display text. Left English pending a
-                ruling — see the report. */}
+            {/* RULED AND FIXED. This block used to carry a FLAG saying `f.label`
+                — plus `linesTitle` / `linesEmpty` / `l.label` / `l.sub` /
+                `total` below — were display strings built SERVER-SIDE and were
+                "left English pending a ruling". The ruling came: they are
+                copy, copy is translated, and a server action has no language to
+                translate with. getMaintenanceJobDetail now returns keys and raw
+                values; the words are written here.
+
+                ONE rule for the value, covering both an enum and a unit —
+                see the `valueKey` note on MaintenanceJobDetail. */}
             {detail.fields.map((f) => (
-              <TruckField key={f.label} label={f.label} value={f.value} />
+              <TruckField
+                key={f.labelKey}
+                label={t(f.labelKey, lang)}
+                value={f.valueKey ? fill(t(f.valueKey, lang), { v: f.value }) : f.value}
+              />
             ))}
           </div>
 
+          {/* The heading, the empty line and the "unknown" fallbacks below are a
+              pure function of `kind` — which is why they are no longer shipped
+              from the server at all. This component already switches on `kind`
+              for its table headers; it now does so for its sentences too. */}
           <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
-            {detail.linesTitle} ({detail.lines.length})
+            {t(detail.kind === "in_house" ? "archive.truck.linesInHouse" : "archive.truck.linesOutsourced", lang)}
+            {" ("}{detail.lines.length}{")"}
           </div>
           {detail.lines.length === 0 ? (
-            <p className="text-sm muted">{detail.linesEmpty}</p>
+            <p className="text-sm muted">
+              {t(detail.kind === "in_house" ? "archive.truck.linesEmptyInHouse" : "archive.truck.linesEmptyOutsourced", lang)}
+            </p>
           ) : (
             <Table>
               <thead style={{ background: "rgba(0,0,0,0.02)" }}>
@@ -1070,10 +1111,21 @@ function MaintenanceJobModal({
                 {detail.lines.map((l, i) => (
                   <tr key={i}>
                     <TD>
-                      <span className="font-medium text-sm">{l.label}</span>
-                      {l.sub && <div className="text-[11px] muted">{l.sub}</div>}
+                      <span className="font-medium text-sm">
+                        {l.label ??
+                          t(
+                            detail.kind === "in_house"
+                              ? "archive.truck.unknownPart"
+                              : "archive.truck.unknownRepairer",
+                            lang,
+                          )}
+                      </span>
+                      {(() => {
+                        const sub = lineSubText(l.sub, lang);
+                        return sub ? <div className="text-[11px] muted">{sub}</div> : null;
+                      })()}
                     </TD>
-                    <TD className="text-xs tabular-nums">{l.qty}</TD>
+                    <TD className="text-xs tabular-nums">{lineQtyText(l.qty, lang)}</TD>
                     {detail.kind === "in_house" && (
                       <TD className="text-xs tabular-nums">
                         {l.onHandBefore !== null && l.onHandAfter !== null ? (
@@ -1095,7 +1147,15 @@ function MaintenanceJobModal({
           )}
 
           {detail.total && (
-            <div className="text-sm font-semibold text-end tabular-nums">{detail.total}</div>
+            <div className="text-sm font-semibold text-end tabular-nums">
+              {fill(
+                t(
+                  detail.kind === "in_house" ? "archive.truck.partsTotal" : "archive.truck.totalPaid",
+                  lang,
+                ),
+                { amount: detail.total },
+              )}
+            </div>
           )}
 
           {detail.note && (
@@ -1115,6 +1175,39 @@ function MaintenanceJobModal({
       </div>
     </div>
   );
+}
+
+// The two composed cells of a maintenance-job line, written HERE rather than on
+// the server, because both are sentences and the server has no language.
+//
+// Each takes the discriminated shape getMaintenanceJobDetail sends and returns
+// finished text. Kept as plain functions, not components, so the table row can
+// drop the result straight into a `<TD>` and a null sub-line stays genuinely
+// absent instead of rendering an empty `<div>`.
+
+function lineQtyText(qty: MaintenanceLineQty, lang: Lang): string {
+  if (qty.form === "drawn") {
+    return fill(t("archive.truck.qtyDrawn", lang), { drawn: qty.drawn, planned: qty.planned });
+  }
+  if (qty.form === "planned") {
+    return fill(t("archive.truck.qtyPlanned", lang), { planned: qty.planned });
+  }
+  return fill(t("archive.truck.subtotalPlusVat", lang), { subtotal: qty.subtotal, vat: qty.vat });
+}
+
+function lineSubText(sub: MaintenanceLineSub | null, lang: Lang): string | null {
+  if (!sub) return null;
+  if (sub.form === "text") return sub.text || null;
+  // Joined AFTER translating, and each part drops out independently — an absent
+  // invoice number, an absent date and a zero discount each remove themselves
+  // and their separator, which is what the server's old `.filter(Boolean)` did
+  // before the words had to move.
+  const parts = [
+    sub.invoiceNumber ? fill(t("archive.truck.subInvoice", lang), { n: sub.invoiceNumber }) : null,
+    sub.invoiceDate,
+    sub.discount ? fill(t("archive.truck.subDiscount", lang), { amount: sub.discount }) : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 function TruckField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {

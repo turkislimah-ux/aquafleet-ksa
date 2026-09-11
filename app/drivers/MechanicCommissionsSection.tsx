@@ -150,7 +150,10 @@ export default function MechanicCommissionsSection({
           <tbody>
             {sorted.map((c) => (
               <tr key={c.id}>
-                <TD>{typeLabel(c.commission_type)}</TD>
+                {/* dir on an inner span, same rule the money/date cells
+                    below state — and `auto` rather than a fixed direction
+                    because a commission type is user text in either language. */}
+                <TD><span dir="auto">{typeLabel(c.commission_type)}</span></TD>
                 {/* dir on an inner span, never on the cell — `text-align: start`
                     resolves against the cell's OWN direction, so dir="ltr" there
                     would left-align the column in Arabic. */}

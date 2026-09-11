@@ -17,6 +17,7 @@ import { createCustomer, updateCustomer } from "./actions";
 import ScrollLock from "@/components/ScrollLock";
 import { useApp } from "@/components/AppShell";
 import { t, arText, type TKey } from "@/lib/i18n";
+import { foldDigitsInPlace } from "@/lib/digits";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -200,7 +201,18 @@ export default function CustomerForm({
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">{t("customers.thPhone", lang)}</span>
-                <input name="phone" defaultValue={editing?.phone ?? ""} className={INPUT} style={INPUT_STYLE} />
+                {/* A phone number is DIALLED and SEARCHED, so it is an
+                    identifier, not prose — folded to Latin digits as it
+                    arrives. lib/digits.ts holds the handler and the reasoning;
+                    `idText()` in ../actions.ts is the actual boundary. */}
+                <input
+                  name="phone"
+                  defaultValue={editing?.phone ?? ""}
+                  dir="ltr"
+                  onInput={(e) => foldDigitsInPlace(e.currentTarget)}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                />
               </label>
               <label className="flex flex-col gap-1 text-sm sm:col-span-2">
                 <span className="muted">{t("customers.fAddress", lang)}</span>

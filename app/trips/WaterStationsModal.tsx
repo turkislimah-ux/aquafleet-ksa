@@ -517,11 +517,15 @@ function StationForm({
           {/* The form reuses the table's `colName` / `colCity` — one word, one
               leaf, whichever surface spells it. */}
           <span className="muted">{t("trips.stations.colName", lang)} *</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} className={INPUT} style={INPUT_STYLE} required />
+          {/* ONE name field, EITHER language. `dir="auto"` reads direction off
+              the value's first strong character, so an Arabic station name
+              renders RTL in an English-mode form and vice versa. Same treatment
+              as the city line below — both are free text a human typed. */}
+          <input value={name} onChange={(e) => setName(e.target.value)} dir="auto" className={INPUT} style={INPUT_STYLE} required />
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="muted">{t("trips.stations.colCity", lang)}</span>
-          <input value={city} onChange={(e) => setCity(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+          <input value={city} onChange={(e) => setCity(e.target.value)} dir="auto" className={INPUT} style={INPUT_STYLE} />
         </label>
         <div className="grid grid-cols-2 gap-3">
           <label className="flex flex-col gap-1 text-sm">

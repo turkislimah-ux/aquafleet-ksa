@@ -211,31 +211,44 @@ export type LinkedFieldSource = Pick<
   "linked_driver_field" | "linked_staff_field" | "linked_truck_field"
 >;
 
+/**
+ * Where a linked document's number and expiry actually live. COLUMNS ONLY.
+ *
+ * There is NO `label` here, and that is deliberate. It used to carry one —
+ * "Iqama ID" / "License ID" / "Vehicle Registration" — written in English in a
+ * module both server actions and client components import, which is precisely
+ * the shape that put English labels inside an Arabic modal elsewhere in this
+ * sweep. Nothing read it (checked with scripts/code-grep.ts on `linkTarget`:
+ * two call sites, both in app/archive/actions.ts, neither touching `.label`),
+ * so it was a loaded gun rather than a live leak — and the fix for a loaded gun
+ * is to unload it, not to document it.
+ *
+ * The real accessors are `personIdLabel(field, lang)` and
+ * `personIdLabelLower(field, lang)`. Use those; they take a language.
+ */
 export type LinkTarget = {
   field: PersonIdField;
   table: "drivers" | "staff" | "trucks";
   numberColumn: "iqama_number" | "license_number" | "vehicle_registration";
   expiryColumn: "iqama_expiry" | "license_expiry" | "registration_expiry";
-  label: string;
 };
 
 const LINK_TARGETS: Record<PersonIdField, LinkTarget> = {
   driver_iqama: {
     field: "driver_iqama", table: "drivers",
-    numberColumn: "iqama_number", expiryColumn: "iqama_expiry", label: "Iqama ID",
+    numberColumn: "iqama_number", expiryColumn: "iqama_expiry",
   },
   driver_license: {
     field: "driver_license", table: "drivers",
-    numberColumn: "license_number", expiryColumn: "license_expiry", label: "License ID",
+    numberColumn: "license_number", expiryColumn: "license_expiry",
   },
   staff_iqama: {
     field: "staff_iqama", table: "staff",
-    numberColumn: "iqama_number", expiryColumn: "iqama_expiry", label: "Iqama ID",
+    numberColumn: "iqama_number", expiryColumn: "iqama_expiry",
   },
   truck_registration: {
     field: "truck_registration", table: "trucks",
     numberColumn: "vehicle_registration", expiryColumn: "registration_expiry",
-    label: "Vehicle Registration",
   },
 };
 

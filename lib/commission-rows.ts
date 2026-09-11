@@ -576,7 +576,13 @@ export function buildPayoutSnapshot(p: {
     items.push({
       kind: "special",
       id: x.id,
-      label: x.label ?? "Special",
+      // "" MEANS "this line has no name of its own", and the History tab says
+      // so from the dictionary. It used to be the English word "Special", which
+      // went into the frozen jsonb and printed untranslated on an Arabic
+      // payslip. `kind` was already stored beside it and already carried the
+      // same information in a form that can be translated — the word was
+      // redundant as well as wrong.
+      label: x.label ?? "",
       amount: x.amount_sar,
       status: (x.status ?? "pending") as ReviewStatus,
       deny_reason: x.deny_reason ?? null,
@@ -586,7 +592,7 @@ export function buildPayoutSnapshot(p: {
     items.push({
       kind: "adjustment",
       id: x.id,
-      label: x.label ?? "Adjustment",
+      label: x.label ?? "",
       amount: x.amount_sar,
       status: (x.status ?? "pending") as ReviewStatus,
       deny_reason: x.deny_reason ?? null,
@@ -596,7 +602,13 @@ export function buildPayoutSnapshot(p: {
     items.push({
       kind: "bonus",
       id: null,
-      label: "Bonus",
+      // ALWAYS empty, with no `??` to fall back from: a bonus is synthesised
+      // from the cycle row and there is no label box anywhere that could fill
+      // it. That is why the History tab can translate a bonus line's name even
+      // on payouts frozen before this change, while a special or adjustment
+      // only heals going forward — an old "Adjustment" in the jsonb is
+      // indistinguishable from a user who typed the word.
+      label: "",
       amount: cycle.bonus_sar,
       status: cycle.bonus_status,
       deny_reason: cycle.bonus_deny_reason ?? null,

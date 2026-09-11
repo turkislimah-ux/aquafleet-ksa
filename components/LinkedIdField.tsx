@@ -30,6 +30,7 @@ import Link from "next/link";
 import { Lock } from "lucide-react";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
+import { foldDigitsInPlace, toLatinDigits } from "@/lib/digits";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
@@ -55,7 +56,25 @@ export default function LinkedIdField({
   const { lang } = useApp();
 
   if (!locked) {
-    return <input name={name} type={type} defaultValue={value} className={INPUT} style={INPUT_STYLE} />;
+    return (
+      <input
+        name={name}
+        type={type}
+        defaultValue={value}
+        // ARABIC-INDIC DIGITS ARE REWRITTEN AS THEY ARRIVE, whatever brought
+        // them. The handler and the full reasoning live in lib/digits.ts —
+        // shared rather than inlined because the bare <input> identifier fields
+        // (VIN in fleet/TruckFormModal, phone on three forms, the archive
+        // reference number) need the identical behaviour, and four copies of a
+        // guard is four places for one of them to be dropped.
+        //
+        // A date input is skipped: its value is always ISO yyyy-mm-dd supplied
+        // by the browser's own picker, never typed text.
+        onInput={type === "text" ? (e) => foldDigitsInPlace(e.currentTarget) : undefined}
+        className={INPUT}
+        style={INPUT_STYLE}
+      />
+    );
   }
 
   return (
@@ -65,7 +84,11 @@ export default function LinkedIdField({
         style={INPUT_STYLE}
       >
         <Lock className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">{value || "—"}</span>
+        {/* Folded on DISPLAY as well as on entry. This branch renders a value
+            that is already STORED, and rows written before the guard above
+            existed still carry Arabic-Indic digits — folding only at entry
+            would leave exactly those rows reading wrong. */}
+        <span className="truncate">{toLatinDigits(value) || "—"}</span>
       </div>
       {archiveHref && (
         <Link

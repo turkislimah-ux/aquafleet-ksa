@@ -15,6 +15,7 @@ import { X, Pencil, Ban, History, Wrench } from "lucide-react";
 import { Btn, Stat } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
+import { foldDigitsInPlace } from "@/lib/digits";
 import { type Staff, type StaffRole, type OperationStation, type StaffCommission, type StaffCommissionType } from "@/lib/db-types";
 import { onLeaveTodaySet, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { addDaysToKey, formatDate, formatSar } from "@/lib/utils";
@@ -419,10 +420,14 @@ export default function StaffTab({
                       </span>
                     )}
                   </div>
-                  <div className="text-xs muted truncate">
+                  {/* `dir="auto"` — a role name and a station name are both
+                      USER TEXT and may be Arabic while the page is English. */}
+                  <div className="text-xs muted truncate" dir="auto">
                     {roleName(p.role)}{stationName(p.station) ? ` · ${stationName(p.station)}` : ""}
                   </div>
-                  <div className="text-[11px] muted truncate">{p.phone ?? "—"}</div>
+                  {/* A phone number is an identifier — fixed LTR, not `auto`,
+                      so a leading "+" cannot flip it. */}
+                  <div className="text-[11px] muted truncate" dir="ltr">{p.phone ?? "—"}</div>
                   {p.email && <div className="text-[11px] muted truncate">{p.email}</div>}
                 </div>
               </button>
@@ -451,13 +456,13 @@ export default function StaffTab({
                   <div className="font-semibold">
                     {detail.name}{detail.name_ar ? <span className="muted font-normal"> · {detail.name_ar}</span> : null}
                   </div>
-                  <div className="text-xs muted">{roleName(detail.role)}</div>
+                  <div className="text-xs muted" dir="auto">{roleName(detail.role)}</div>
                 </div>
                 <StatusBadge s={detail} onLeave={onLeaveStaff.has(detail.id)} lang={lang} />
               </div>
 
               <div className="card p-3 grid grid-cols-2 gap-2">
-                <Cell label={t("drivers.staff.fRole", lang)}>{roleName(detail.role)}</Cell>
+                <Cell label={t("drivers.staff.fRole", lang)}><span dir="auto">{roleName(detail.role)}</span></Cell>
                 <Cell label={t("drivers.staff.fBranch", lang)}>{stationName(detail.station) ?? <span className="muted">—</span>}</Cell>
                 <Cell label={t("drivers.staff.fEmail", lang)}>{detail.email ?? <span className="muted">—</span>}</Cell>
                 <Cell label={t("drivers.staff.fPhone", lang)}>{detail.phone ?? <span className="muted">—</span>}</Cell>
@@ -608,7 +613,17 @@ export default function StaffTab({
                 <input name="email" type="email" defaultValue={editing?.email ?? ""} placeholder={t("drivers.staff.phEmail", lang)} className={INPUT} style={INPUT_STYLE} />
               </Field>
               <Field label={t("drivers.staff.fPhone", lang)}>
-                <input name="phone" defaultValue={editing?.phone ?? ""} placeholder={t("drivers.staff.phPhone", lang)} className={INPUT} style={INPUT_STYLE} />
+                {/* Same identifier treatment as the driver form's phone
+                    field — see DriversClient.tsx and lib/digits.ts. */}
+                <input
+                  name="phone"
+                  defaultValue={editing?.phone ?? ""}
+                  placeholder={t("drivers.staff.phPhone", lang)}
+                  dir="ltr"
+                  onInput={(e) => foldDigitsInPlace(e.currentTarget)}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                />
               </Field>
               <Field label={t("drivers.staff.fHireDate", lang)}>
                 <input name="hire_date" type="date" defaultValue={editing?.hire_date ?? ""} className={INPUT} style={INPUT_STYLE} />

@@ -15,6 +15,7 @@ import { createClient } from "@/lib/supabase/server";
 import { driverAvailability, resolveOnLeaveToday } from "@/lib/driver-assignment";
 import type { LeavePeriod } from "@/lib/leave";
 import { todayKey } from "@/lib/utils";
+import { toLatinDigits } from "@/lib/digits";
 
 export type ActionResult = { error: string | null };
 
@@ -30,6 +31,27 @@ function numOrNull(v: FormDataEntryValue | null) {
   if (s === "") return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
+}
+
+// `nullable` for an IDENTIFIER column — same trim-or-null, plus Arabic-Indic
+// digits folded to Latin 0-9.
+//
+// THIS IS THE BOUNDARY, not components/LinkedIdField.tsx. That input rewrites
+// as you type, which is the better experience, but it is one caller of this
+// action and cannot speak for the rest: a future import, a seed script or a
+// second form would post straight past it. Same reasoning, and the same
+// wording, as `assemblePlate` in lib/plate.ts — the place where display state
+// becomes a stored value filters rather than trusts its caller.
+//
+// The failure this prevents is SILENT. `١٢٥٨٤٧٢٧٥٢` renders as a registration
+// number either way, so nothing on screen says it is wrong; it just misses
+// every `eq()`, every search and every join for the rest of its life. One live
+// row (`trucks` / plate DDD-6661) already carries exactly that.
+//
+// Applied to vehicle_registration and VIN only. NOT to `model`, `home_station`
+// or any name — see lib/digits.ts on why a name keeps its Arabic-Indic digits.
+function idText(v: FormDataEntryValue | null) {
+  return toLatinDigits(nullable(v));
 }
 
 // Free this driver from any OTHER truck before placing them, so the unique
@@ -66,12 +88,12 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
     status: "active",
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
-    vin: nullable(formData.get("vin")),
+    vin: idText(formData.get("vin")),
     // 0091 — the TRUCK owns these; the archive's registration documents read
     // and write these same columns rather than keeping a copy. Seeded here at
     // create only; the edit form sends no key for them (disabled inputs don't
     // submit), so an edit leaves the existing values untouched.
-    vehicle_registration: nullable(formData.get("vehicle_registration")),
+    vehicle_registration: idText(formData.get("vehicle_registration")),
     registration_expiry: nullable(formData.get("registration_expiry")),
     assigned_driver_id: nullable(formData.get("assigned_driver_id")),
     // Phase-5 iteration B: Last Service is now a create-only field (the
@@ -123,7 +145,7 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
     capacity_m3: numOrNull(formData.get("capacity_m3")),
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
-    vin: nullable(formData.get("vin")),
+    vin: idText(formData.get("vin")),
     // vehicle_registration / registration_expiry are DELIBERATELY ABSENT here.
     //
     // They are seeded on the Add form and read-only afterwards — the Archive

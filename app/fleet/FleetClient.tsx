@@ -20,6 +20,7 @@ import TruckFormModal from "./TruckFormModal";
 // which moved to `common.monthLong` for the two other long-month callers. Same
 // twelve words, same "August 2026" output; `style: "long"` is what keeps it.
 import { cn, formatNum, monthLabel, formatDateLangLocale } from "@/lib/utils";
+import { toLatinDigits } from "@/lib/digits";
 import { pillColor } from "@/lib/project-colors";
 import {
   utilizationBand, utilizationBarWidth, formatUtilization, utilizationNaReason,
@@ -451,7 +452,14 @@ export default function FleetClient({
                   {tr.model ?? "—"}
                   {tr.year ? <span className="muted"> · {tr.year}</span> : null}
                 </TD>
-                <TD className="font-mono text-xs">{tr.vehicle_registration || "—"}</TD>
+                {/* THE COLUMN BUG 2 WAS REPORTED ON. One row holds
+                    '١٢٥٨٤٧٢٧٥٢' and rendered it raw, so the Arabic-Indic
+                    digits showed in ENGLISH mode too — display was never the
+                    cause, the STORED value is. Folding here makes the grid
+                    read Latin whatever is in the column; the write guards
+                    (app/fleet/actions.ts, app/archive/actions.ts) stop new
+                    ones arriving. See lib/digits.ts. */}
+                <TD className="font-mono text-xs">{toLatinDigits(tr.vehicle_registration) || "—"}</TD>
                 <TD>{tr.home_station ? stationNameById.get(tr.home_station) ?? "—" : "—"}</TD>
                 <TD>
                   {/* The PILL'S COLOUR keys off `status`, the enum — the label

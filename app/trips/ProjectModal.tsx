@@ -42,6 +42,7 @@ import { X } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural } from "@/lib/i18n";
+import { toLatinDigits } from "@/lib/digits";
 import { customerTypeLabel, waterTypeLabel } from "@/lib/enum-labels";
 import {
   CUSTOMER_TYPE_LABELS,
@@ -653,13 +654,19 @@ export default function ProjectModal({
                 <span className="muted">{t("trips.project.fNameAr", lang)}</span>
                 <input value={custNameAr} onChange={(e) => setCustNameAr(e.target.value)} dir="rtl" className={INPUT} style={INPUT_STYLE} placeholder={t("trips.project.phNameAr", lang)} />
               </label>
+              {/* VAT and CR are ZATCA tax-invoice IDENTIFIERS — they are printed
+                  on an invoice and matched against a government register, so they
+                  are folded to Latin digits and isolated LTR. Contrast
+                  `cust_name_ar` directly above: that is PROSE and deliberately
+                  keeps whatever digits its author typed. lib/digits.ts; the
+                  actual boundary is the RPC call in ./actions.ts. */}
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">{t("trips.project.fVat", lang)}</span>
-                <input value={custVatNumber} onChange={(e) => setCustVatNumber(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+                <input value={custVatNumber} onChange={(e) => setCustVatNumber(toLatinDigits(e.target.value))} dir="ltr" className={INPUT} style={INPUT_STYLE} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">{t("trips.project.fCr", lang)}</span>
-                <input value={custCrNumber} onChange={(e) => setCustCrNumber(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+                <input value={custCrNumber} onChange={(e) => setCustCrNumber(toLatinDigits(e.target.value))} dir="ltr" className={INPUT} style={INPUT_STYLE} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">{t("trips.project.fCustType", lang)}</span>

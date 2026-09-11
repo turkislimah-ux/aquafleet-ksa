@@ -29,6 +29,7 @@ import PlateInput from "@/components/PlateInput";
 import ScrollLock from "@/components/ScrollLock";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
+import { foldDigitsInPlace } from "@/lib/digits";
 
 const CAPACITY_OPTIONS_M3 = [33, 18, 6] as const;
 
@@ -151,7 +152,18 @@ export default function TruckFormModal({
           />
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">{t("fleet.form.vin", lang)}</span>
-            <input name="vin" defaultValue={row?.vin ?? ""} className={INPUT} style={INPUT_STYLE} />
+            {/* A VIN is an identifier — same fold as the registration field
+                below, which gets it from LinkedIdField. This one is a bare
+                input because a VIN is editable for the truck's whole life
+                (0091 locks the REGISTRATION, not this). lib/digits.ts. */}
+            <input
+              name="vin"
+              defaultValue={row?.vin ?? ""}
+              dir="ltr"
+              onInput={(e) => foldDigitsInPlace(e.currentTarget)}
+              className={INPUT}
+              style={INPUT_STYLE}
+            />
           </label>
 
           {/* LINKED IDENTITY FIELDS (0091) — editable ONLY when adding, as the

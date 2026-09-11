@@ -22,7 +22,7 @@ import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
-import { slugifyKey, isValidSlug } from "@/lib/slug";
+import { lookupKey } from "@/lib/slug";
 import { cn } from "@/lib/utils";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -71,11 +71,26 @@ export default function LookupSelect({
     return Array.from(map, ([key, lbl]) => ({ key, label: lbl }));
   }, [items, extra, value]);
 
-  // Live slug preview/gate (mirrors the DB CHECK via lib/slug). Empty label →
-  // no preview, submit disabled. Invalid slug (starts with digit/_) → loud error.
-  const slug = slugifyKey(label);
-  const validSlug = isValidSlug(slug);
-  const canAdd = slug !== "" && validSlug;
+  // THE GATE IS "did you type a name", NOTHING MORE.
+  //
+  // It used to be `slugifyKey(label) !== "" && isValidSlug(slug)`, and that is
+  // BUG 3: `slugifyKey` keeps only [a-z0-9], so ANY pure-Arabic name collapsed
+  // to "" and the Add button went `pointer-events-none`. The field accepted the
+  // Arabic characters fine — nothing scrambled them, nothing rejected them —
+  // the SUBMIT was simply dead, which reads to the user as "it will not take
+  // Arabic". The label was never the problem; deriving the KEY from it was.
+  //
+  // WHY IT REGRESSED. 0168 (d368293) added a second `dir="rtl"` Arabic box plus
+  // a `withArabicName` prop that routed around this gate, so the gate stopped
+  // being reachable and stopped being visible. 524539f then removed that second
+  // box — correctly, per the ONE NAME FIELD note at the top of this file — but
+  // removed only the BYPASS, not the gate it was bypassing. The gate had been
+  // wrong since before 0168; the bypass is what hid it in between.
+  //
+  // `lookupKey` now returns a stable hashed handle for a label with no Latin
+  // run, so there is nothing left for this gate to protect. See lib/slug.ts.
+  const { key: previewKey, readable: readableKey } = lookupKey(label);
+  const canAdd = previewKey !== "";
 
   async function add() {
     const clean = label.trim();
@@ -83,10 +98,8 @@ export default function LookupSelect({
       setErr(t("drivers.lookup.nameRequired", lang));
       return;
     }
-    if (!canAdd) {
-      setErr(t("drivers.lookup.mustStartWithLetter", lang));
-      return;
-    }
+    // No second check. The `!canAdd -> "must start with a letter"` branch that
+    // stood here is gone with the gate it enforced — see the note on `canAdd`.
     setBusy(true);
     setErr(null);
     const res = await onAdd(clean);
@@ -107,14 +120,24 @@ export default function LookupSelect({
     setErr(null);
   }
 
-  // The one name field. Not `dir`-locked and not `lang`-driven: it accepts
-  // English or Arabic and stores whichever was typed, so the browser's own
-  // bidi handling is what should decide direction here.
+  // The one name field. Not `lang`-driven: it accepts English or Arabic and
+  // stores whichever was typed.
+  //
+  // `dir="auto"` is EXPLICIT, and the comment that used to sit here — "the
+  // browser's own bidi handling is what should decide direction" — was the
+  // second half of BUG 3. With no `dir` at all the input inherits the
+  // PARAGRAPH direction, which in English mode is LTR; Arabic typed into an
+  // LTR-base field has its trailing punctuation and any Latin/digit run
+  // reordered around it, which is the "scrambled" rendering. `dir="auto"` asks
+  // the browser to pick per-VALUE from its first strong character, so the same
+  // field renders Arabic RTL and English LTR without either language having to
+  // be declared up front.
   const nameInput = (
     <input
       value={label}
       onChange={(e) => setLabel(e.target.value)}
       placeholder={newPlaceholder ?? t("drivers.lookup.newName", lang)}
+      dir="auto"
       className={INPUT}
       style={INPUT_STYLE}
       autoFocus
@@ -147,12 +170,18 @@ export default function LookupSelect({
               setValue(e.target.value);
             }
           }}
+          // Same reasoning as the name input's: an option label may be Arabic
+          // or English row by row, so direction is decided per VALUE rather
+          // than from the app language. Set on the option too — a <select>'s
+          // closed state renders the selected <option>, and several browsers
+          // read the direction off that element, not the list.
+          dir="auto"
           className={INPUT}
           style={INPUT_STYLE}
         >
           {options.length === 0 && <option value="">—</option>}
           {options.map((o) => (
-            <option key={o.key} value={o.key}>{o.label}</option>
+            <option key={o.key} value={o.key} dir="auto">{o.label}</option>
           ))}
           <option value="__add__">{addLabel ?? t("drivers.lookup.addCustom", lang)}</option>
         </select>
@@ -162,10 +191,16 @@ export default function LookupSelect({
           {addButtons}
         </div>
       )}
-      {adding && label.trim() !== "" && slug !== "" && (
-        validSlug
-          ? <p className="text-xs muted">{t("drivers.lookup.savedAs", lang)} <span dir="ltr">{slug}</span></p>
-          : <p className="text-xs text-rose-600 dark:text-rose-400">{t("drivers.lookup.mustStartWithLetter", lang)}</p>
+      {/* SHOWN ONLY WHEN THE KEY IS WORTH READING. A Latin name produces
+          "night_shift", which tells someone something. An Arabic one now
+          produces `k`+16 hex, which tells them nothing and looks like a fault —
+          so that branch prints nothing at all rather than a scarier version of
+          success. The old `else` here was an ERROR line; there is no longer a
+          name this component refuses. */}
+      {adding && readableKey && (
+        <p className="text-xs muted">
+          {t("drivers.lookup.savedAs", lang)} <span dir="ltr">{previewKey}</span>
+        </p>
       )}
       {err && <p className="text-xs text-rose-600 dark:text-rose-400">{err}</p>}
       <input type="hidden" name={name} value={value} />

@@ -753,7 +753,14 @@ function BreakdownModal({
                         <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
                           {sp.is_special_trip && <StatusPill status="scheduled" label={t("drivers.commTab.specialTrip", lang)} />}
                           <StatusPill status={STATUS_TONE[sp.status]} label={t(`drivers.comm.status.${sp.status}`, lang)} />
-                          <span className={denied ? "line-through" : ""}>{sp.label}</span>
+                          {/* `dir="auto"`, for the same reason every free-text INPUT in this
+                              sweep got one: the label is whatever the user typed, so its
+                              direction is a property of the VALUE, not of the page. With
+                              no dir it inherits the paragraph — LTR in English mode —
+                              which reorders an Arabic label's trailing punctuation and
+                              any Latin or digit run inside it. It is NOT translated and
+                              must not be: it is data. */}
+                          <span dir="auto" className={denied ? "line-through" : ""}>{sp.label}</span>
                         </div>
                         {/* No dir override: this joins an ISO date with a FREE-TEXT
                             note, and forcing the pair LTR would mis-order an Arabic
@@ -1034,7 +1041,14 @@ function SpecialsModal({
                   <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
                     {sp.is_special_trip && <StatusPill status="scheduled" label={t("drivers.commTab.specialTrip", lang)} />}
                     <StatusPill status={STATUS_TONE[sp.status]} label={t(`drivers.comm.status.${sp.status}`, lang)} />
-                    <span className={denied ? "line-through" : ""}>{sp.label}</span>
+                    {/* `dir="auto"`, for the same reason every free-text INPUT in this
+                              sweep got one: the label is whatever the user typed, so its
+                              direction is a property of the VALUE, not of the page. With
+                              no dir it inherits the paragraph — LTR in English mode —
+                              which reorders an Arabic label's trailing punctuation and
+                              any Latin or digit run inside it. It is NOT translated and
+                              must not be: it is data. */}
+                          <span dir="auto" className={denied ? "line-through" : ""}>{sp.label}</span>
                   </div>
                   {/* No dir override — the note is free text and may be Arabic. */}
                   <div className="text-[11px] muted">{[sp.date, sp.note].filter(Boolean).join(" · ") || "—"}</div>

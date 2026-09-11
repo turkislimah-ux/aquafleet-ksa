@@ -1787,9 +1787,17 @@ function Summaries({ options, lang, pickerOpen, setPickerOpen }: {
                     <ul className="mt-2 space-y-1.5">
                       {val.parts.map((p) => {
                         const max = Math.max(...val.parts.map((x) => Math.abs(x.value)), 1);
+                        // A bar is named EITHER by a dictionary key (the state
+                        // widgets' Active / Off duty / In-house …) or by a raw
+                        // data token (the metric widgets' "2026-09"). See the
+                        // `parts` note in lib/actions/dashboard-widgets.ts: the
+                        // state names used to be English literals written on
+                        // the SERVER, which has no language, so they stayed
+                        // English on an Arabic dashboard.
+                        const name = "labelKey" in p && p.labelKey ? t(p.labelKey, lang) : p.label ?? "";
                         return (
-                          <li key={p.label} className="flex items-center gap-2 text-xs">
-                            <span className="w-14 shrink-0 truncate muted">{p.label}</span>
+                          <li key={name} className="flex items-center gap-2 text-xs">
+                            <span className="w-14 shrink-0 truncate muted">{name}</span>
                             <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
                               <span className="block h-full rounded-full bg-brand-500"
                                 style={{ width: `${(Math.abs(p.value) / max) * 100}%` }} />

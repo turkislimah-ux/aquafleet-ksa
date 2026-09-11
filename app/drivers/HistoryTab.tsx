@@ -406,7 +406,25 @@ function PayoutDetail({
                     return (
                       <tr key={i} className={denied ? "opacity-60" : ""}>
                         <TD className={denied ? "line-through" : ""}>
-                          {it.label}
+                          {/* Same law as the base-lines table above: discriminate
+                              on the VALUE, never on a frozen English label.
+                              buildPayoutSnapshot now writes "" for a line with
+                              no name of its own, and `kind` — which was always
+                              stored — supplies the word.
+
+                              A BONUS IS FORCED, not just defaulted, and that is
+                              the one place this heals HISTORY. A bonus line is
+                              synthesised from the cycle row and can never carry
+                              a user label, so the "Bonus" sitting in every
+                              pre-existing snapshot is known to be our own word
+                              and is safe to replace. A special or adjustment is
+                              not: an old "Adjustment" in that jsonb might be
+                              what somebody typed, so those only translate on
+                              payouts frozen from here on. The snapshot itself is
+                              never rewritten (0027's freeze law, same idea). */}
+                          {it.kind === "bonus"
+                            ? t("drivers.comm.itemName.bonus", lang)
+                            : it.label || t(`drivers.comm.itemName.${it.kind}`, lang)}
                           {denied && it.deny_reason && (
                             <span className="block text-[11px] muted no-underline">
                               {fill(t("drivers.hist.deniedReason", lang), { reason: it.deny_reason })}

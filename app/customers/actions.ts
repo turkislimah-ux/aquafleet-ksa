@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { toLatinDigits } from "@/lib/digits";
 
 export type ActionResult = { error: string | null };
 
@@ -11,6 +12,13 @@ function str(v: FormDataEntryValue | null) {
 function nullable(v: FormDataEntryValue | null) {
   const s = str(v);
   return s === "" ? null : s;
+}
+// `nullable` for an IDENTIFIER column — Arabic-Indic digits folded to Latin
+// 0-9. See lib/digits.ts. A phone number is dialled and searched, so it is a
+// key; `name_ar` two lines below is prose and keeps whatever digits it was
+// given.
+function idText(v: FormDataEntryValue | null) {
+  return toLatinDigits(nullable(v));
 }
 function numOrNull(v: FormDataEntryValue | null) {
   const s = str(v);
@@ -24,7 +32,7 @@ function parse(formData: FormData) {
     name: str(formData.get("name")),
     name_ar: nullable(formData.get("name_ar")),
     contact_name: nullable(formData.get("contact_name")),
-    phone: nullable(formData.get("phone")),
+    phone: idText(formData.get("phone")),
     customer_type: str(formData.get("customer_type")),
     delivery_site_address: nullable(formData.get("delivery_site_address")),
     delivery_lat: numOrNull(formData.get("delivery_lat")),

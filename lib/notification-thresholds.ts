@@ -27,6 +27,10 @@
 // worse than a check violation. Bounding it here is the difference between
 // "must be between 0 and 9999.99" and "numeric field overflow".
 
+// `label` is ENGLISH ONLY and is read by exactly one caller — describeThresholdProblem
+// below, the server's last-resort sentence. The EDITOR does not read it: it
+// labels every field from `settings.notifications.f_<key>`, which is the same
+// four strings with an Arabic half. Keep the two in step.
 export const THRESHOLD_BOUNDS = {
   low_runway_trips:         { min: 0, max: 9999.99, integer: false, label: "Low balance warning" },
   doc_expiry_lead_days:     { min: 0, max: 365,     integer: true,  label: "Document expiry notice" },
@@ -55,17 +59,57 @@ export const HARDCODED_DEFAULTS: SharedDefaults = {
 };
 
 /**
+ * WHICH RULE A VALUE BROKE — not a sentence about it.
+ *
+ * This used to be a `string`, and the string was English. The editor rendered it
+ * in both languages, so an Arabic user saw their own field label followed by
+ * "must be between 0 and 365." — the field name translated, the rule beside it
+ * not. The component even split the sentence on ": " to salvage the half it
+ * could replace, which is the shape of a fix working around a payload that
+ * should never have carried words.
+ *
+ * A shared validator has NO language: it is imported by a "use server" action
+ * and by a client component at once, and it cannot read useApp(). So it reports
+ * the FAULT and each caller says it — the server in English (below), the editor
+ * from the dictionary. One rule set still, exactly as before; two renderings.
+ *
+ * `outOfRange` carries the bounds rather than letting the caller re-read
+ * THRESHOLD_BOUNDS, so the numbers in the message are the same two the
+ * comparison actually used.
+ */
+export type ThresholdProblem =
+  | { kind: "notANumber" }
+  | { kind: "notInteger" }
+  | { kind: "outOfRange"; min: number; max: number };
+
+/**
  * Validate one threshold value. NULL is always valid — it is the inherit signal.
- * Returns an error string, or null when the value is acceptable.
+ * Returns the broken rule, or null when the value is acceptable.
  *
  * Shared by the server action and the editor so a value can never pass the form
  * and then fail the database.
  */
-export function validateThreshold(key: ThresholdKey, value: number | null): string | null {
+export function validateThreshold(key: ThresholdKey, value: number | null): ThresholdProblem | null {
   if (value === null) return null;
   const b = THRESHOLD_BOUNDS[key];
-  if (!Number.isFinite(value)) return `${b.label}: not a number.`;
-  if (b.integer && !Number.isInteger(value)) return `${b.label}: must be a whole number.`;
-  if (value < b.min || value > b.max) return `${b.label}: must be between ${b.min} and ${b.max}.`;
+  if (!Number.isFinite(value)) return { kind: "notANumber" };
+  if (b.integer && !Number.isInteger(value)) return { kind: "notInteger" };
+  if (value < b.min || value > b.max) return { kind: "outOfRange", min: b.min, max: b.max };
   return null;
+}
+
+/**
+ * The SERVER's English rendering of a problem — byte-identical to what
+ * validateThreshold used to return, so the action's behaviour is unchanged.
+ *
+ * English is correct here and is not a leak: the editor validates with the same
+ * function BEFORE it calls the action, so these sentences are reachable only
+ * when something bypasses the form. That is a developer-facing path, and a
+ * server action has no language to render it in anyway.
+ */
+export function describeThresholdProblem(key: ThresholdKey, problem: ThresholdProblem): string {
+  const label = THRESHOLD_BOUNDS[key].label;
+  if (problem.kind === "notANumber") return `${label}: not a number.`;
+  if (problem.kind === "notInteger") return `${label}: must be a whole number.`;
+  return `${label}: must be between ${problem.min} and ${problem.max}.`;
 }

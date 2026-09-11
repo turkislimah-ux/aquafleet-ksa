@@ -182,7 +182,11 @@ export default function LeaveSection({
               >
                 <div className="min-w-0">
                   <div className="text-sm font-medium flex items-center gap-2">
-                    <span className="truncate">{typeLabel(p.leave_type)}</span>
+                    {/* `dir="auto"` because a leave-type name is USER TEXT in either
+                        language — a custom Arabic type inside an English-mode
+                        page would otherwise inherit LTR and render its
+                        punctuation and any Latin run out of order. */}
+                    <span className="truncate" dir="auto">{typeLabel(p.leave_type)}</span>
                     {covers && (
                       <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400">
                         {t("drivers.leave.now", lang)}

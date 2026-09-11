@@ -35,6 +35,7 @@ import OperationStationField from "@/components/OperationStationField";
 import { STAGE_ORDER, type TripStage } from "@/lib/db-types";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, type Lang } from "@/lib/i18n";
+import { foldDigitsInPlace } from "@/lib/digits";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { DRIVER_STATE_TONE, type DriverState } from "@/lib/driver-state";
 import { type TruckOpsState } from "@/lib/truck-status";
@@ -967,7 +968,19 @@ export default function DriversClient({
                 <input name="name_ar" dir="rtl" defaultValue={editing?.name_ar ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
               <Field label={t("drivers.form.fPhone", lang)}>
-                <input name="phone" defaultValue={editing?.phone ?? ""} placeholder="+966 5…" className={INPUT} style={INPUT_STYLE} />
+                {/* Folded to Latin digits as the value arrives, and `dir`
+                    forced LTR so "+966 5…" is not reordered in Arabic mode.
+                    Contrast `name_ar` on the line above: that is PROSE and
+                    deliberately keeps whatever digits its author typed. */}
+                <input
+                  name="phone"
+                  defaultValue={editing?.phone ?? ""}
+                  placeholder="+966 5…"
+                  dir="ltr"
+                  onInput={(e) => foldDigitsInPlace(e.currentTarget)}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                />
               </Field>
               {/* LINKED IDENTITY FIELDS (0088/0089) — editable ONLY at
                   creation, as the seed. After that the ARCHIVE is the single

@@ -27,7 +27,8 @@ import {
   type WaterType,
 } from "@/lib/db-types";
 import { commissionForDelivery, commissionForNthTrip } from "@/lib/commission";
-import { slugifyKey, isValidSlug } from "@/lib/slug";
+import { lookupKey } from "@/lib/slug";
+import { toLatinDigits } from "@/lib/digits";
 import {
   derivedBalanceItems,
   type BalanceReturnLite,
@@ -910,6 +911,15 @@ export type NewProjectInput = {
   // Batch D (invoice header restructure) — buyer header fields. Pre-existing
   // customers columns (name_ar/vat_number/cr_number/billing_address), newly
   // threaded through the RPC. Optional, same convention as cust_email.
+  //
+  // BOTH RPC CALLS BELOW FOLD `cust_vat_number` / `cust_cr_number` THROUGH
+  // `toLatinDigits` and deliberately leave `cust_name_ar` alone. VAT and CR are
+  // printed on a ZATCA tax invoice and matched against the buyer's own
+  // registration — they are identifiers, and an Arabic-Indic digit in one is
+  // invisible on screen while making the number wrong everywhere it is
+  // compared. `name_ar` is prose; see lib/digits.ts on why prose keeps its
+  // digits. Same fold, same reason, in createProjectWithCustomer and
+  // updateProjectWithCustomer, which is why it is stated once here.
   cust_name_ar: string | null;
   cust_vat_number: string | null;
   cust_cr_number: string | null;
@@ -1033,8 +1043,8 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
     p_payment_mode: paymentMode,
     p_cust_email: input.cust_email?.trim() || null,
     p_cust_name_ar: input.cust_name_ar?.trim() || null,
-    p_cust_vat_number: input.cust_vat_number?.trim() || null,
-    p_cust_cr_number: input.cust_cr_number?.trim() || null,
+    p_cust_vat_number: toLatinDigits(input.cust_vat_number?.trim() || null),
+    p_cust_cr_number: toLatinDigits(input.cust_cr_number?.trim() || null),
     p_cust_billing_address: input.cust_billing_address?.trim() || null,
   });
   if (error) return { error: error.message };
@@ -1215,8 +1225,8 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
     p_cust_email: input.cust_email?.trim() || null,
     p_current_balance: currentBalance,
     p_cust_name_ar: input.cust_name_ar?.trim() || null,
-    p_cust_vat_number: input.cust_vat_number?.trim() || null,
-    p_cust_cr_number: input.cust_cr_number?.trim() || null,
+    p_cust_vat_number: toLatinDigits(input.cust_vat_number?.trim() || null),
+    p_cust_cr_number: toLatinDigits(input.cust_cr_number?.trim() || null),
     p_cust_billing_address: input.cust_billing_address?.trim() || null,
   });
   if (error) return { error: error.message };
@@ -1521,9 +1531,13 @@ export async function createWaterStation(
 ): Promise<{ error: string | null; key?: string }> {
   const clean = input.name?.trim() ?? "";
   if (!clean) return { error: "Station name is required." };
-  const key = slugifyKey(clean);
-  if (!key) return { error: "Station name needs letters or numbers." };
-  if (!isValidSlug(key)) return { error: "Name must start with a letter." };
+  // Any script. The key is IMMUTABLE here by CLAUDE.md §6 (a rename updates
+  // the name only), which is precisely why it must not be a transliteration of
+  // the name: an opaque stable handle is what makes "the name may change, the
+  // key may not" survivable. An Arabic-only station name was unaddable before
+  // this. lib/slug.ts.
+  const { key } = lookupKey(clean);
+  if (!key) return { error: "Station name is required." };
 
   const supabase = createClient();
   const { data: existing, error: lookupErr } = await supabase

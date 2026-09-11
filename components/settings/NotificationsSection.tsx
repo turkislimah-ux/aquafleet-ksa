@@ -39,7 +39,7 @@ import { useRouter } from "next/navigation";
 import { Check, RotateCcw } from "lucide-react";
 import { Btn, PILL_TONE_CLS } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { t } from "@/lib/i18n";
+import { t, fill, type Lang } from "@/lib/i18n";
 import { SEVERITY_TONE, type Severity } from "@/lib/notification-format";
 import {
   fetchNotificationSettings, saveSeverityPrefs, saveThresholdOverrides,
@@ -47,8 +47,34 @@ import {
 } from "@/lib/actions/notification-settings";
 import {
   THRESHOLD_BOUNDS, validateThreshold,
-  type ThresholdKey, type ThresholdOverrides,
+  type ThresholdKey, type ThresholdOverrides, type ThresholdProblem,
 } from "@/lib/notification-thresholds";
+
+/**
+ * Say a broken threshold rule in the user's language.
+ *
+ * The mirror of describeThresholdProblem in lib/notification-thresholds.ts —
+ * same three cases, same order, dictionary instead of English literals. It
+ * lives HERE rather than beside its twin because the twin's module is imported
+ * by a "use server" action, and copy on that side of the boundary cannot follow
+ * the language.
+ *
+ * The switch is exhaustive over ThresholdProblem, so adding a fourth rule to the
+ * validator fails to compile here until this says it too.
+ */
+function thresholdProblemText(problem: ThresholdProblem, label: string, lang: Lang): string {
+  if (problem.kind === "notANumber") {
+    return fill(t("settings.notifications.notANumber", lang), { label });
+  }
+  if (problem.kind === "notInteger") {
+    return fill(t("settings.notifications.mustBeWhole", lang), { label });
+  }
+  return fill(t("settings.notifications.mustBeBetween", lang), {
+    label,
+    min: String(problem.min),
+    max: String(problem.max),
+  });
+}
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-28 tabular-nums";
@@ -92,7 +118,10 @@ function parseField(raw: string): number | null {
 
 export default function NotificationsSection({ open, lang }: { open: boolean; lang: "en" | "ar" }) {
   const router = useRouter();
-  const ar = lang === "ar";
+  // No `const ar = lang === "ar"` any more. Its one remaining reader branched on
+  // the language to decide how much of a validation sentence it could translate;
+  // now the whole sentence is one dictionary lookup and nothing here needs to
+  // know which language is on. `noUnusedLocals` would fail the build on it.
 
   const [data, setData] = useState<NotificationSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -171,27 +200,23 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
     for (const f of FIELDS) {
       const v = parseField(draft[f.key]);
       // ONE validator, shared with the server action, so a value can never
-      // pass the form and then fail the database. Arabic gets the label; the
-      // rule text stays English rather than inventing a second rule set.
+      // pass the form and then fail the database — and it now reports WHICH
+      // RULE broke instead of a finished sentence, so both halves of the
+      // message come out of the dictionary together.
       //
-      // The English half used to interpolate THRESHOLD_BOUNDS[f.key].label while
-      // the Arabic half interpolated the component's own labelAr — two sources
-      // for the same slot, which only agreed because the strings happened to be
-      // byte-identical. One dictionary lookup now feeds both, and the local that
-      // held the bounds row is gone with it: nothing else in this loop read it,
-      // and `noUnusedLocals` would fail the build on a leftover.
+      // What was here before: the validator returned English prose, and this
+      // line rescued the part it could by splitting on ": " and pasting the
+      // Arabic label back onto the English rule — so an Arabic user read
+      // "مهلة انتهاء المستندات: must be between 0 and 365." The label was
+      // never the leaking half.
       const label = t(`settings.notifications.f_${f.key}`, lang);
       if (v !== null && Number.isNaN(v)) {
-        setThresholdError(
-          t("settings.notifications.notANumber", lang).replace("{label}", () => label),
-        );
+        setThresholdError(fill(t("settings.notifications.notANumber", lang), { label }));
         return;
       }
       const problem = validateThreshold(f.key, v);
       if (problem) {
-        // Still a ternary, and deliberately: the English branch prints the
-        // SERVER's own rule sentence verbatim, which is not dictionary copy.
-        setThresholdError(ar ? `${label}: ${problem.split(": ")[1] ?? problem}` : problem);
+        setThresholdError(thresholdProblemText(problem, label, lang));
         return;
       }
       parsed[f.key] = v;

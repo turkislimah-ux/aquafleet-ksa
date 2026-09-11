@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { slugifyKey, isValidSlug } from "@/lib/slug";
+import { slugifyKey, isValidSlug, lookupKey } from "@/lib/slug";
 import { todayKey } from "@/lib/utils";
+import { toLatinDigits } from "@/lib/digits";
 import {
   buildCurrentBaseLines,
   buildPayoutSnapshot,
@@ -28,6 +29,18 @@ function numOrNull(v: FormDataEntryValue | null) {
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
+// `nullable` for an IDENTIFIER column — trim-or-null, plus Arabic-Indic digits
+// folded to Latin 0-9. See lib/digits.ts for why an identifier is normalised
+// and a NAME is not: `name_ar` on the very next line legitimately holds «فهد ٣»
+// on 12 live rows and must keep its Arabic-Indic digits.
+//
+// Iqama and licence numbers are KEYS — the Archive matches documents to people
+// by them, and lib/archive.ts writes the same two columns from the other side.
+// A number stored in one digit system and searched in the other is invisible to
+// every lookup while still looking correct on screen.
+function idText(v: FormDataEntryValue | null) {
+  return toLatinDigits(nullable(v));
+}
 // duty_hours is NOT NULL (DB default 10) — empty/invalid input must never
 // write null. Falls back to `fallback` (10) instead.
 function numOrDefault(v: FormDataEntryValue | null, fallback: number) {
@@ -49,10 +62,10 @@ function parse(formData: FormData) {
   return {
     name: str(formData.get("name")),
     name_ar: nullable(formData.get("name_ar")),
-    iqama_number: nullable(formData.get("iqama_number")),
+    iqama_number: idText(formData.get("iqama_number")),
     // 0088 — the person owns the number; the archive's licence documents
     // read/write this same column rather than keeping a copy.
-    license_number: nullable(formData.get("license_number")),
+    license_number: idText(formData.get("license_number")),
     license_expiry: nullable(formData.get("license_expiry")),
     // status is dead (Commit 4): derived driver state (lib/driver-state.ts) is
     // PURE and reads no driver column at all — it takes three resolved booleans
@@ -62,7 +75,7 @@ function parse(formData: FormData) {
     // longer written — columns stay in DB, dead. `rating` and `incidents_12mo`
     // were in that group too and are dropped from the table outright, by 0132
     // and 0133.
-    phone: nullable(formData.get("phone")),
+    phone: idText(formData.get("phone")),
     hire_date: nullable(formData.get("hire_date")),
     home_station: nullable(formData.get("home_station")),
     // Added in 0023 — duty_hours is NOT NULL, falls back to 10 (never null).
@@ -198,7 +211,7 @@ function parseStaff(formData: FormData) {
     role: str(formData.get("role")),
     station: nullable(formData.get("station")),
     email: nullable(formData.get("email")),
-    phone: nullable(formData.get("phone")),
+    phone: idText(formData.get("phone")),
     active: formData.get("active") != null,
     // Added in 0023 — duty_hours is NOT NULL, falls back to 10 (never null);
     // hire_date/iqama_expiry are optional.
@@ -207,7 +220,7 @@ function parseStaff(formData: FormData) {
     // 0088 — same column name and meaning as drivers.iqama_number. The
     // archive's iqama documents for this person read/write it directly
     // rather than storing their own copy of the number.
-    iqama_number: nullable(formData.get("iqama_number")),
+    iqama_number: idText(formData.get("iqama_number")),
     iqama_expiry: nullable(formData.get("iqama_expiry")),
     // Added by migration 0063 (Maintenance labor costing) — nullable until
     // entered. Required by create_work_order/edit_work_order whenever this
@@ -277,9 +290,14 @@ export async function addStaffRole(
 ): Promise<{ error: string | null; key?: string }> {
   const clean = label.trim();
   if (!clean) return { error: "Role name is required." };
-  const key = slugifyKey(clean);
-  if (!key) return { error: "Role name needs letters or numbers." };
-  if (!isValidSlug(key)) return { error: "Label must start with a letter." };
+  // ANY SCRIPT. `lookupKey` returns the old slug for a Latin name and a stable
+  // hashed handle for one that has no Latin run — an Arabic role name included.
+  // The two rejections that used to sit here ("needs letters or numbers",
+  // "must start with a letter") are GONE deliberately: both were the ASCII key
+  // constraint leaking out as a rule about what the user may type. See
+  // lib/slug.ts. An empty name is still refused, one line above.
+  const { key } = lookupKey(clean);
+  if (!key) return { error: "Role name is required." };
 
   const supabase = createClient();
   const { data: existing, error: lookupErr } = await supabase
@@ -897,9 +915,9 @@ export async function addLeaveType(
 ): Promise<{ error: string | null; key?: string }> {
   const clean = label.trim();
   if (!clean) return { error: "Type name is required." };
-  const key = slugifyKey(clean);
-  if (!key) return { error: "Type name needs letters or numbers." };
-  if (!isValidSlug(key)) return { error: "Label must start with a letter." };
+  // Any script — same collapse as addStaffRole above. See lib/slug.ts.
+  const { key } = lookupKey(clean);
+  if (!key) return { error: "Type name is required." };
 
   const supabase = createClient();
   const { data: existing, error: lookupErr } = await supabase
@@ -1094,9 +1112,9 @@ export async function deleteStaffCommission(id: string): Promise<ActionResult> {
 export async function addStaffCommissionType(label: string): Promise<{ error: string | null; key?: string }> {
   const clean = label.trim();
   if (!clean) return { error: "Type name is required." };
-  const key = slugifyKey(clean);
-  if (!key) return { error: "Type name needs letters or numbers." };
-  if (!isValidSlug(key)) return { error: "Label must start with a letter." };
+  // Any script — same collapse as addStaffRole above. See lib/slug.ts.
+  const { key } = lookupKey(clean);
+  if (!key) return { error: "Type name is required." };
 
   const supabase = createClient();
   const { data: existing, error: lookupErr } = await supabase
