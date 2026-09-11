@@ -672,7 +672,63 @@ before running any build while dev is up.
 
 ---
 
-## Completed this session (2026-09-11, migration-set convergence close-out — `08b96a1` → `1adf8a3`)
+## Completed this session (2026-09-11, Arabic/RTL/numeral localization — `1adf8a3` → `1bf52bc`)
+
+Three commits. **Two separate pieces of work under one heading, and the second
+is deliberately SMALL** — do not read the third commit as the start of the
+sweep the scope below describes.
+
+| Hash | What |
+| --- | --- |
+| `4e0d427` | **The four-bug localization sweep.** 35 files, +1240 / −199, `lib/digits.ts` created. BUG 1 English labels in Arabic popups, BUG 2 Arabic-Indic numerals in the Fleet VEHICLE ID column, BUG 3 the Arabic-in-shared-input regression (see its lesson block above), BUG 4 an English Postgres conflict message in an Arabic approvals modal. **Each bug was fixed as a CLASS, not as the reported instance.** |
+| `bdf4447` | **HANDOFF** — `/archive` closed, BUG 3's regression cause recorded. +48 / −5. |
+| `1bf52bc` | **Category E only: the nine client-side `res.error ?? "<English>"` fallbacks in `app/maintenance`.** 5 files, +51 / −9; `lib/i18n.ts` is **+42 / −0**, purely additive, so no existing ruling comment moved. Seven new `mt.err*` leaves. **No server action was touched and none learned a language.** |
+
+**BUG 1 SETTLED AN ARCHITECTURAL RULE THAT OUTLIVES IT. A SERVER ACTION HAS NO
+LANGUAGE — and passing `lang` in is the WRONG fix WHEN THE CLIENT CACHES THE
+PAYLOAD.** The popup fetches once on row-click and holds the result in
+`useState`, so a resolved sentence goes stale the moment the language toggles.
+**Keys re-render with the component; sentences do not.** So those actions return
+DATA — i18n `TKey`s plus raw values — and the client composes the words. The
+`import type { TKey }` pattern makes a typo in a dictionary path a compile
+error.
+
+**That rule does NOT generalise to every server string, and the codebase already
+holds the counter-example.** `app/consumption/actions.ts` takes `lang: Lang` on
+all 13 exported actions and resolves its own sentences; its reasoning is in
+`lib/i18n.ts` — grep `Loud beats quiet` — and runs: a forgotten call site fails
+LOUDLY as a tsc error, where a returned key fails silently as a blank banner.
+**The two designs are not in conflict. The deciding test is whether the client
+HOLDS the payload across a language toggle**, and an error banner does not.
+
+**Why `1bf52bc` is category E and stops there:** the literal after `??` prints
+only when the action returned `{ error: null }` **and** no row, so nothing from
+the server reaches the screen on that path. It is our sentence, not the
+server's. `lib/i18n.ts` already permitted exactly this — grep
+`client-side fallbacks are looked up`, which reads "only the client-side
+fallbacks are looked up". **No standing ruling was overturned.** The tenth
+`?? "English"` site in the tree, `app/trips/InvoiceDetailModal.tsx`'s
+`?? "Customer"`, is NOT an error fallback and is separately ruled English —
+grep `stand-in`, "it is not a name, and an Arabic one would assert something the
+row does not say". It was left alone.
+
+**CITE THESE BY GREP, NOT BY LINE.** `1bf52bc` inserted 42 lines into
+`lib/i18n.ts` and shifted every number past `mt` — the first draft of this entry
+carried seven pre-commit line numbers and all seven were already wrong when it
+was written. The file is ~10,200 lines and every i18n commit moves most of them.
+
+**`npx tsc` IS A TRAP AND IT NEARLY SHIPPED AN UNVERIFIED CLAIM HERE.** From
+outside the repo it resolves to a joke npm package that prints a banner and
+**exits 0**; piped to `head`, the banner is swallowed and the silence reads as
+clean. The Bash tool's cwd does not persist between calls and drifts to `$HOME`.
+**Always `cd /Users/turkislimah/aquafleet-ksa && ./node_modules/.bin/tsc
+--noEmit -p tsconfig.json`, and print `--version` first** — a real run says
+`5.5.3`. Caught before staging on both commits; the drifted-cwd attempt on
+`1bf52bc` returned `127`, which is the honest failure this recipe produces.
+
+---
+
+## Completed earlier the same day (2026-09-11, migration-set convergence close-out — `08b96a1` → `1adf8a3`)
 
 **This session spans midnight — do not read the dates as two sessions.**
 `5ba4db2` is stamped 2026-09-10 22:02, the other three 2026-09-11 01:24–01:41.
@@ -1259,11 +1315,13 @@ list's completeness, not a timestamp on its contents.**
 ### (a) DECISION for Turki — do not "fix" these, they are choices
 
 **Four of the original six closed in the parked-items session.** They are listed under "Closed
-BY MEASUREMENT" below with their hashes, so they are not resurrected. Three
-remain, and **none is code.** Two are Turki clicking a console setting; the third
-is whether a convention gets written down. **An earlier revision said "all three
-are Turki clicking something" — item 1 is not a click, and reading it as one is
-how it stays unanswered.**
+BY MEASUREMENT" below with their hashes, so they are not resurrected. **Four now
+remain, and none is code to WRITE — but item 4, opened 2026-09-11, is the first
+whose answer commissions code.** Two are Turki clicking a console setting; one is
+whether a convention gets written down; the fourth is whether a standing i18n
+ruling is overturned. **An earlier revision said "all three are Turki clicking
+something" — item 1 is not a click, and reading it as one is how it stays
+unanswered.**
 
 1. **`.planning/` review artifacts are TRACKED, and no `.gitignore` rule was
    added — deliberately.** **Re-measured: 6 files named `review-*.md` are
@@ -1285,6 +1343,15 @@ how it stays unanswered.**
    and the console path to close it are in Deploy readiness. **Item 2 used to
    claim it was the only open security item; it was not, it was the only one
    anybody had measured.**
+4. **Whether the standing "server-action `error:` text stays English" ruling is
+   OVERTURNED in the 17 modules that still carry it.** Opened 2026-09-11 after
+   category E shipped as `1bf52bc`. **The question is a ruling, not a bug** — the
+   English is DELIBERATE and stated in seven places in `lib/i18n.ts`. Answering
+   yes commissions roughly ten commits; answering no costs nothing and closes
+   the item. **Do NOT start any of it on the strength of `1bf52bc`** — that
+   commit was scoped to the one category the ruling already permitted. The full
+   measurement, the two competing designs and the batching proposal are in
+   Forward agenda item 5. **Turki has not ruled.**
 
 ### (b) Doable FIX — TWO entries, both opened 2026-09-10, BOTH NOW CLOSED
 
@@ -1874,8 +1941,8 @@ For the record, what they were and what measurement showed:
 ordered MUST list lives in Deploy readiness: decide what happens to the sandbox
 data woven into paid records, **CLOSE PUBLIC SIGNUP — measured open 2026-09-09,
 no longer a question**, and turn on leaked-password protection. **Every code-side gate is already green**, so nothing
-in items 1–4 blocks a deploy and none of them unblocks one either. Do not start
-item 2, 3 or 4 expecting it to move the deploy date.
+in items 1–5 blocks a deploy and none of them unblocks one either. Do not start
+item 2, 3, 4 or 5 expecting it to move the deploy date.
 
 ### 0. DONE — the parked inventory is clear
 
@@ -1918,7 +1985,7 @@ verifying the localization sweep (`4e0d427`), whose BUG 1 lives on this very pag
 the Trucks tab's maintenance-job popup was exercised in both languages, which
 means the route, its tabs and a detail modal all rendered.
 
-### 1. The three remaining (a) items — Turki only, no analysis owed
+### 1. (a) items 1–3 — Turki only, no analysis owed
 
 Whether the `.planning/review-*.md` convention becomes a written rule, the
 Supabase Auth leaked-password toggle, and **closing public signup**. **None is
@@ -1926,6 +1993,11 @@ code.** The `CLAUDE.md` stub chore that used to sit beside them **reopened when
 `0189` landed and closed the same day as `876bc0b`** — it never belonged here
 anyway, since nobody had to decide anything; see (b). Do not count it as a fourth
 (a) item, and do not re-open it from a note that predates the bump.
+
+**(a)4 IS NOT ON THIS LINE, and this heading used to say "the three remaining
+(a) items" as though it covered all of them.** The i18n ruling opened 2026-09-11
+is also Turki's to answer, but its analysis is DONE and sits in item 5 — so it
+is the one (a) item where "no analysis owed" is true for a different reason.
 
 **The leaked-password toggle is now on the deploy path, not just the open list.**
 It is one of two console settings a deploy waits on; the other is public signup,
@@ -2008,6 +2080,81 @@ nothing proposed, nothing compared, nothing chosen, and nothing on disk.**
 holds is (c)3's record of the ABSENCE, not a candidate scheme. Deliver options
 to choose between, not a built gate; the choice is Turki's. Read (c)3 first for
 the state being designed against, and do not restate it here.
+
+### 5. Server-action error localization, categories A/B/C/D — MEASURED, BLOCKED ON A RULING
+
+**Nothing here is owed and nothing here is started.** Category E shipped as
+`1bf52bc`; A/B/C/D are the remainder and they sit behind (a)4. **This is a menu,
+not a backlog** — same standing as the DB-harness batch above.
+
+**THE FIRST THING TO UNDERSTAND IS THAT THIS IS NOT A GAP.** Seven comments in
+`lib/i18n.ts` rule the English deliberate. **Find them by grep, never by line —
+every i18n commit reflows the file, and `1bf52bc` moved all seven by 42:**
+
+```sh
+grep -nE 'stays? English|stay English|SERVER TEXT STAYS ENGLISH' lib/i18n.ts
+```
+
+**It returns TEN hits and seven of them are the ruling**, measured 2026-09-11:
+the city-labels hit is about an SVG, the `"Customer"` one about a buyer name,
+and one is `1bf52bc`'s own comment restating the boundary it respected.
+**Doing this work REWRITES those seven. A pass that silently deletes them is the
+failure mode** — each states a reason, and the reason has to be answered, not
+dropped.
+
+**But one route already overturned it and shipped.** `app/consumption/actions.ts`
+is fully translated — 13 exported actions all taking `lang`, 54 error returns,
+dictionary under `consumption.errors` (grep `rpcFallback`). So the question is
+not "is this allowed", it is **"consumption did it; do the other 17 follow."**
+
+**Measured 2026-09-11. Re-measure before quoting — these are pointers.** 21
+modules carry `"use server"` and return `error:`; 951 return-with-`error` sites
+exist but most are `{ error: null }` successes. The copy splits four ways:
+
+| cat | sites | distinct | owner | status |
+| --- | --- | --- | --- | --- |
+| A — `error: "English"` | 323 | 174 | ours | the job |
+| B — `error: \`template\`` | 29 | — | ours, dynamic | needs `fill` |
+| C — `error: e.message` | 189 | — | Postgres | **out** |
+| D — `error: msg(e, fallback)` | 41 | — | Postgres + our fallback | fallback only |
+| E — client `?? "English"` | 9 | 7 | ours | **DONE, `1bf52bc`** |
+
+```sh
+for f in $(grep -rl '"use server"' app lib --include='*.ts'); do n=$(grep -cE 'error:[[:space:]]*"[A-Z]' "$f"); [ "$n" -gt 0 ] && echo "$n $f"; done | sort -rn
+```
+
+**Category A is 0% dynamic** — not one of the 174 contains a `{` placeholder, so
+that dictionary is 174 static leaves and needs no `fill`. Only B does.
+**Duplication is heavy**: `"Missing record."` ×14, `"Not signed in."` ×9,
+`"Type name is required."` ×8, `"Name is required."` ×8. The top 20 strings cover
+about 120 of the 323, so a shared group does most of the work.
+
+**THE DESIGN BLOCKER DOES NOT EXIST, AND THAT WAS WORTH MEASURING.** `lang` lives
+in `useApp()`, which is client-only, so a server-component caller would kill the
+`lang`-argument design outright. **There are none.** No `page.tsx` and no
+`route.ts` imports any of the 18 affected modules (`app/page.tsx` imports two
+action modules — `driver-state-drift`, `truck-state` — and neither returns
+English error copy). Every caller is a client component that already has `lang`.
+Importer counts are small: 1–8 files per module, drivers highest.
+
+**C AND D'S POSTGRES HALF IS OUT, AND IT IS OUT FOR A REASON THAT IS NOT
+EFFORT.** `lib/i18n.ts` rules it — grep `NOT here, and cannot be`: translating a
+raised RPC exception means an error-code map on the DATABASE side, which is a
+schema change, not a copy fix. Sized it anyway — **274 distinct `raise exception` sentences across 100
+migration files.** Separate milestone. What IS in scope from D is the `fallback`
+argument of each `msg()` call, which is ours. **`msg(e, fallback)` is defined
+FIVE times, identically** — `lib/actions/notifications.ts:40`, `profile.ts:61`,
+`notification-settings.ts:68`, `issues.ts:51`, `daily-trips.ts:59`. Whether that
+consolidation rides along is part of the ruling.
+
+**323 sites cannot be one tsc-clean commit under §5.** The unit is a ROUTE, about
+ten commits: the shared dictionary plus the `msg()` consolidation; the small
+`lib/actions/*` set (21 sites) to prove the pattern; then drivers 62, inventory
+46, maintenance+osActions 72, trips 35, invoiceActions+statementActions 16,
+archive 21, finance+profile 27, and fleet+projects+customers+reports 21. **The
+trips commit is the one that rewrites the strongest of the seven rulings** —
+grep `SERVER-ACTION FAILURE TEXT`, which names `actions.ts` and
+`invoiceActions.ts` by file. It needs the most care and should not go first.
 
 ---
 
