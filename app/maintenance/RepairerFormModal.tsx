@@ -76,7 +76,7 @@ export default function RepairerFormModal({
     const res = await addRepairerType(text, "");
     setAddingType(false);
     if (res.error || !res.type) {
-      setError(res.error ?? "Could not add type.");
+      setError(res.error ?? t("mt.errAddType", lang));
       return;
     }
     setLocalTypes((prev) => [...prev, res.type!]);
@@ -111,7 +111,7 @@ export default function RepairerFormModal({
 
     setSaving(false);
     if (res.error || !res.repairer) {
-      setError(res.error ?? "Could not save repairer.");
+      setError(res.error ?? t("mt.errSaveRepairer", lang));
       return;
     }
     onSaved(res.repairer);

@@ -202,7 +202,7 @@ export default function NewOutsourcedJobModal({
     const res = await addOutsourcedDescription(text, "");
     setAddingChip(false);
     if (res.error || !res.description) {
-      setError(res.error ?? "Could not add description.");
+      setError(res.error ?? t("mt.errAddDescription", lang));
       return;
     }
     setLocalDescriptions((prev) => [...prev, res.description!]);
@@ -240,7 +240,7 @@ export default function NewOutsourcedJobModal({
       });
       if (res.error || !res.job) {
         setSaving(false);
-        setError(res.error ?? "Could not save changes.");
+        setError(res.error ?? t("mt.errSaveChanges", lang));
         return;
       }
 
@@ -270,7 +270,7 @@ export default function NewOutsourcedJobModal({
     });
     setSaving(false);
     if (res.error || !res.job) {
-      setError(res.error ?? "Could not create outsourced job.");
+      setError(res.error ?? t("mt.errCreateOutsourcedJob", lang));
       return;
     }
     onCreated?.(res.job);

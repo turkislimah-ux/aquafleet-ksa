@@ -267,7 +267,7 @@ export default function NewWorkOrderModal({
     const res = await addRepairDescription(text, "");
     setAddingChip(false);
     if (res.error || !res.description) {
-      setError(res.error ?? "Could not add description.");
+      setError(res.error ?? t("mt.errAddDescription", lang));
       return;
     }
     setLocalDescriptions((prev) => [...prev, res.description!]);
@@ -345,7 +345,7 @@ export default function NewWorkOrderModal({
       });
       if (res.error || !res.workOrder) {
         setSaving(false);
-        setError(res.error ?? "Could not save changes.");
+        setError(res.error ?? t("mt.errSaveChanges", lang));
         return;
       }
 
@@ -377,7 +377,7 @@ export default function NewWorkOrderModal({
     });
     setSaving(false);
     if (res.error || !res.workOrder) {
-      setError(res.error ?? "Could not create work order.");
+      setError(res.error ?? t("mt.errCreateWorkOrder", lang));
       return;
     }
     onCreated?.(res.workOrder);

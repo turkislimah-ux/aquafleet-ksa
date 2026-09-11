@@ -280,7 +280,7 @@ export default function OutsourcedJobDetailModal({
 
     if (res.error || !res.payment) {
       setSavingPayment(false);
-      setError(res.error ?? "Could not save payment.");
+      setError(res.error ?? t("mt.errSavePayment", lang));
       return;
     }
     if (pendingFile) {

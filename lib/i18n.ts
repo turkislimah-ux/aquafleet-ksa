@@ -639,6 +639,48 @@ export const dict = {
       en: "Work orders, preventive schedules, and history",
       ar: "أوامر العمل والصيانة الوقائية والسجل",
     },
+
+    /**
+     * CLIENT-SIDE LAST-RESORT ERROR TEXT — the half of `res.error ?? "…"` that
+     * is OURS.
+     *
+     * THE BOUNDARY THIS RESPECTS, RATHER THAN MOVES. The standing ruling —
+     * stated at this file's `trips` header (point 2), and again above
+     * `fleet.loadFailed`, `settings.warehouses` and `trips.project` — is that a
+     * server action's own `error:` string stays English: it arrives already
+     * formed, several of them quote a Postgres message verbatim, and a
+     * half-translated sentence is harder to act on than an English one. That
+     * ruling is UNTOUCHED, in every one of the 17 action modules that still
+     * carries English copy.
+     *
+     * These seven leaves are the OTHER operand. `res.error ?? "…"` prints the
+     * literal only when the action returned `{ error: null }` on a path the
+     * caller treats as a failure — a create that reports no error but hands
+     * back no row. Nothing from the server reaches the screen in that branch,
+     * so the sentence is written here, by us, and has no reason to be English.
+     * `trips.invoice`'s header already draws exactly this line: "only the
+     * client-side fallbacks are looked up."
+     *
+     * NO SERVER SIGNATURE CHANGES FOR THESE. Every one of the four modals
+     * already takes `lang` and already calls `t()`; the actions are not touched
+     * and do not learn a language.
+     *
+     * TWO ARABIC VALUES ARE COPIED, NOT COINED, so one English sentence cannot
+     * acquire two Arabic spellings: `errSaveChanges` matches
+     * `settings.warehouses.saveFailed`, and `errAddType` matches the documents
+     * namespace's leaf of the same name. The other five follow this namespace's
+     * own vocabulary — الورشة (`repairer`), العمل الخارجي
+     * (`editOutsourcedJob`), أمر العمل (`confirmDeleteWorkOrder`), الدفعة
+     * (`confirmDeletePayment`), الوصف (`description`) — rather than inventing
+     * a second word for a noun `mt` has already settled.
+     */
+    errAddDescription: { en: "Could not add description.", ar: "تعذّرت إضافة الوصف." },
+    errAddType: { en: "Could not add type.", ar: "تعذّرت إضافة النوع." },
+    errSaveChanges: { en: "Could not save changes.", ar: "تعذّر حفظ التغييرات." },
+    errSaveRepairer: { en: "Could not save repairer.", ar: "تعذّر حفظ الورشة." },
+    errSavePayment: { en: "Could not save payment.", ar: "تعذّر حفظ الدفعة." },
+    errCreateWorkOrder: { en: "Could not create work order.", ar: "تعذّر إنشاء أمر العمل." },
+    errCreateOutsourcedJob: { en: "Could not create outsourced job.", ar: "تعذّر إنشاء العمل الخارجي." },
   },
   // Global search (Polish Batch 1). `common.search` above stays as-is — it
   // is the generic per-page filter placeholder used by Fleet/Inventory/etc.
