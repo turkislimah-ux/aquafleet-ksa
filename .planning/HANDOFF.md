@@ -1315,11 +1315,13 @@ list's completeness, not a timestamp on its contents.**
 ### (a) DECISION for Turki — do not "fix" these, they are choices
 
 **Four of the original six closed in the parked-items session.** They are listed under "Closed
-BY MEASUREMENT" below with their hashes, so they are not resurrected. **Four now
-remain, and none is code to WRITE — but item 4, opened 2026-09-11, is the first
-whose answer commissions code.** Two are Turki clicking a console setting; one is
-whether a convention gets written down; the fourth is whether a standing i18n
-ruling is overturned. **An earlier revision said "all three are Turki clicking
+BY MEASUREMENT" below with their hashes, so they are not resurrected. **THREE now
+remain open, and none is code.** Two are Turki clicking a console setting; one is
+whether a convention gets written down. **Item 4 — the only one whose answer
+could have commissioned code — was OPENED AND ANSWERED the same day, 2026-09-11:
+the English ruling STANDS.** It is kept below as a closed entry, with the ruling
+on it, precisely so it is not re-raised as an open question. **An earlier
+revision said "all three are Turki clicking
 something" — item 1 is not a click, and reading it as one is how it stays
 unanswered.**
 
@@ -1343,15 +1345,22 @@ unanswered.**
    and the console path to close it are in Deploy readiness. **Item 2 used to
    claim it was the only open security item; it was not, it was the only one
    anybody had measured.**
-4. **Whether the standing "server-action `error:` text stays English" ruling is
-   OVERTURNED in the 17 modules that still carry it.** Opened 2026-09-11 after
-   category E shipped as `1bf52bc`. **The question is a ruling, not a bug** — the
-   English is DELIBERATE and stated in seven places in `lib/i18n.ts`. Answering
-   yes commissions roughly ten commits; answering no costs nothing and closes
-   the item. **Do NOT start any of it on the strength of `1bf52bc`** — that
-   commit was scoped to the one category the ruling already permitted. The full
-   measurement, the two competing designs and the batching proposal are in
-   Forward agenda item 5. **Turki has not ruled.**
+4. **CLOSED 2026-09-11, SAME DAY IT OPENED — the standing "server-action
+   `error:` text stays English" ruling is UPHELD. Turki ruled: keep the English
+   ruling, do not touch A/B/C/D.** Opened after category E shipped as `1bf52bc`,
+   answered within the hour. **The seven comments in `lib/i18n.ts` STAND as
+   written, in all 17 modules that still carry English error copy.** Nothing is
+   owed; categories A/B/C/D are not work, not a backlog, and not a menu — they
+   are ruled out. The measurement survives in Forward agenda item 5 as the
+   RECORD OF A DECIDED QUESTION, not as a plan.
+
+   **THIS ENTRY IS KEPT BECAUSE THE ANSWER WAS "NO", AND A "NO" IS THE KIND THAT
+   GETS RE-DERIVED.** Anyone measuring the codebase fresh finds 323 English
+   `error:` strings and one fully-translated route (`app/consumption/actions.ts`)
+   and reads that as an unfinished job. **It is not unfinished — it is decided.**
+   The asymmetry is deliberate and stays: consumption resolves sentences
+   server-side, the other 17 pass the server's own English through. Do not
+   "reconcile" them, and do not re-open this from a fresh grep.
 
 ### (b) Doable FIX — TWO entries, both opened 2026-09-10, BOTH NOW CLOSED
 
@@ -1942,7 +1951,9 @@ ordered MUST list lives in Deploy readiness: decide what happens to the sandbox
 data woven into paid records, **CLOSE PUBLIC SIGNUP — measured open 2026-09-09,
 no longer a question**, and turn on leaked-password protection. **Every code-side gate is already green**, so nothing
 in items 1–5 blocks a deploy and none of them unblocks one either. Do not start
-item 2, 3, 4 or 5 expecting it to move the deploy date.
+item 2, 3 or 4 expecting it to move the deploy date. **Item 5 is not startable at
+all — it was ruled out on 2026-09-11 and is kept only as the record of a decided
+question.**
 
 ### 0. DONE — the parked inventory is clear
 
@@ -1994,10 +2005,11 @@ code.** The `CLAUDE.md` stub chore that used to sit beside them **reopened when
 anyway, since nobody had to decide anything; see (b). Do not count it as a fourth
 (a) item, and do not re-open it from a note that predates the bump.
 
-**(a)4 IS NOT ON THIS LINE, and this heading used to say "the three remaining
-(a) items" as though it covered all of them.** The i18n ruling opened 2026-09-11
-is also Turki's to answer, but its analysis is DONE and sits in item 5 — so it
-is the one (a) item where "no analysis owed" is true for a different reason.
+**(a)4 WAS NEVER ON THIS LINE, AND IS NOW CLOSED.** The i18n ruling opened
+2026-09-11 and Turki answered it the same day — **the English ruling stands, and
+A/B/C/D are ruled out.** Its analysis sits in item 5, which is now a record, not
+a plan. This heading briefly said "the three remaining (a) items" as though it
+covered all of them; it is three again, for a different reason.
 
 **The leaked-password toggle is now on the deploy path, not just the open list.**
 It is one of two console settings a deploy waits on; the other is public signup,
@@ -2081,11 +2093,22 @@ holds is (c)3's record of the ABSENCE, not a candidate scheme. Deliver options
 to choose between, not a built gate; the choice is Turki's. Read (c)3 first for
 the state being designed against, and do not restate it here.
 
-### 5. Server-action error localization, categories A/B/C/D — MEASURED, BLOCKED ON A RULING
+### 5. Server-action error localization, categories A/B/C/D — MEASURED, THEN RULED OUT. NOT WORK.
 
-**Nothing here is owed and nothing here is started.** Category E shipped as
-`1bf52bc`; A/B/C/D are the remainder and they sit behind (a)4. **This is a menu,
-not a backlog** — same standing as the DB-harness batch above.
+**RULED 2026-09-11 by Turki: keep the English ruling, do not touch A/B/C/D.**
+Category E shipped as `1bf52bc` under the one permission the ruling already
+carried; A/B/C/D are the remainder and they are **closed, not queued.** This is
+**not a menu and not a backlog** — it does not share the DB-harness batch's
+standing, and it is not something to pick up on a slow session.
+
+**IT IS KEPT FOR ONE REASON: A FRESH MEASUREMENT LOOKS EXACTLY LIKE AN
+UNFINISHED JOB.** 323 English `error:` strings, one route fully translated, an
+obvious-looking pattern to follow. **Whoever finds that has found a decided
+question, not a gap.** Everything below is the evidence behind the "no" — the
+sizing, the design options, the batching — recorded so the ruling can be
+revisited DELIBERATELY if Turki ever reopens it, and so nobody re-derives it from
+scratch and mistakes it for a plan. **Do not start any of it. The numbers below
+are the shape of work NOT being done.**
 
 **THE FIRST THING TO UNDERSTAND IS THAT THIS IS NOT A GAP.** Seven comments in
 `lib/i18n.ts` rule the English deliberate. **Find them by grep, never by line —
@@ -2104,8 +2127,10 @@ dropped.
 
 **But one route already overturned it and shipped.** `app/consumption/actions.ts`
 is fully translated — 13 exported actions all taking `lang`, 54 error returns,
-dictionary under `consumption.errors` (grep `rpcFallback`). So the question is
-not "is this allowed", it is **"consumption did it; do the other 17 follow."**
+dictionary under `consumption.errors` (grep `rpcFallback`). So the question was
+never "is this allowed", it was **"consumption did it; do the other 17 follow."**
+**ANSWERED 2026-09-11: no, they do not.** Consumption stays translated, the other
+17 stay English, and that asymmetry is now the ruling rather than an oversight.
 
 **Measured 2026-09-11. Re-measure before quoting — these are pointers.** 21
 modules carry `"use server"` and return `error:`; 951 return-with-`error` sites
@@ -2143,9 +2168,9 @@ raised RPC exception means an error-code map on the DATABASE side, which is a
 schema change, not a copy fix. Sized it anyway — **274 distinct `raise exception` sentences across 100
 migration files.** Separate milestone. What IS in scope from D is the `fallback`
 argument of each `msg()` call, which is ours. **`msg(e, fallback)` is defined
-FIVE times, identically** — `lib/actions/notifications.ts:40`, `profile.ts:61`,
-`notification-settings.ts:68`, `issues.ts:51`, `daily-trips.ts:59`. Whether that
-consolidation rides along is part of the ruling.
+FIVE times** across `lib/actions/` — near-duplicates, NOT identical; see the
+correction at the end of this item. Whether that consolidation rode along was
+part of the ruling, **and the ruling was no.**
 
 **323 sites cannot be one tsc-clean commit under §5.** The unit is a ROUTE, about
 ten commits: the shared dictionary plus the `msg()` consolidation; the small
@@ -2155,6 +2180,27 @@ archive 21, finance+profile 27, and fleet+projects+customers+reports 21. **The
 trips commit is the one that rewrites the strongest of the seven rulings** —
 grep `SERVER-ACTION FAILURE TEXT`, which names `actions.ts` and
 `invoiceActions.ts` by file. It needs the most care and should not go first.
+
+**THAT TEN-COMMIT PLAN IS NOT COMMISSIONED AND MUST NOT BE STARTED.** It is
+written out because a plan that was never sized reads as cheap, and this one is
+not — it rewrites seven deliberate rulings across 18 modules. **Sizing it is part
+of why the answer was no.** The `msg(e, fallback)` consolidation — five identical
+definitions, `lib/actions/notifications.ts:40`, `profile.ts:61`,
+`notification-settings.ts:68`, `issues.ts:51`, `daily-trips.ts:59` — was
+proposed as a rider on this work and therefore does NOT ride. It survives as a
+standalone refactor anyone may raise on its own merits; it is not licensed here.
+
+```sh
+grep -n 'function msg(' lib/actions/*.ts
+```
+
+**AND IT IS NOT THE FREE CONSOLIDATION THE PARAGRAPH ABOVE CALLS IT — measured
+2026-09-11, the five are NOT identical.** `notifications.ts` types its first
+parameter `{ message?: string } | null | undefined`; the other four take
+`unknown`. Any consolidation picks one signature and retypes four call sites'
+worth of inference, so it is a real change with a real blast radius, not a
+copy-paste merge. **This is why line cites were cut from it** — the five files
+are durable, the offsets are not.
 
 ---
 
