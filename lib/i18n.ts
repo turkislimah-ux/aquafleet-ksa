@@ -3738,6 +3738,16 @@ export const dict = {
       printRoleReceivedBy: { en: "Received by", ar: "المُستلِم" },
       printRoleGate: { en: "Gate / security", ar: "البوابة / الأمن" },
       signatureLine: { en: "{role} — name & signature", ar: "{role} — الاسم والتوقيع" },
+
+      // --- the two leaves the SHEET needs and the screen never wrote ---
+      // The printable permit is rendered through the ATLAS kit, which states an
+      // empty result as a SENTENCE and foots every sheet with who produced it.
+      // Neither string exists in the modal: its table is never empty (a permit
+      // with no lines cannot be confirmed) and a modal has no footer. Keyed
+      // rather than defaulted because `table()`'s own fallback is an English
+      // literal, which would print English prose on the Arabic sheet.
+      printNoItems: { en: "No items on this permit.", ar: "لا توجد أصناف في هذا الإذن." },
+      printGenerated: { en: "Generated {date}", ar: "أُنشئ في {date}" },
     },
   },
 
@@ -9646,11 +9656,45 @@ export const dict = {
         issued: { en: "Issued", ar: "تاريخ الإصدار" },
         figureCaption: { en: "Revenue, {month}", ar: "الإيرادات، {month}" },
         figureUnit: { en: "Saudi Riyals", ar: "ريال سعودي" },
-        // The currency word set BESIDE a figure, in running text and in a
-        // window's sub-line. NOT in a column head — a head is a whole phrase
-        // and is its own key, because Arabic does not put the unit where
-        // English does.
-        sarUnit: { en: "SAR", ar: "ريال" },
+        // NO sarUnit KEY HERE, AND DO NOT ADD ONE BACK. It held
+        // { en: "SAR", ar: "ريال" } and set the currency word BESIDE a figure —
+        // in the stat band, the ledger and a window's sub-line. Every one of
+        // those figures comes from a screen that writes it through formatSar
+        // (lib/utils.ts), whose unit is a hard-coded " SAR" appended to an
+        // en-US-pinned number in BOTH languages — the same pinning that keeps
+        // this app's digits and dates Latin whatever the toggle says. So the
+        // Arabic sheet read "16,790 ريال" where the Arabic SCREEN reads
+        // "16,790 SAR", and a printable deviates 0% from its source in WORDING
+        // as strictly as in data.
+        //
+        // The unit is a literal in lib/docvm/breakdown.ts now, and being a
+        // literal is the point: a key whose two values are the same string is
+        // an invitation to "finish the translation", which is exactly how this
+        // one got its ريال. lib/docvm/purchaseOrder.ts carries the identical
+        // note for the identical reason — one rule, every sheet.
+        //
+        // trips.invoiceSheet.transferDetails is a DIFFERENT key and it stays:
+        // lib/invoiceViewModel.ts uses it, correctly, on the invoice.
+        //
+        // WHAT DID NOT CHANGE, AND MUST NOT BE "FINISHED" LATER. The ruling is
+        // about the unit set BESIDE A FIGURE. Three other things on this sheet
+        // still say riyal in Arabic, and all three are correct:
+        //
+        //   - figureUnit above — the spelled-out caption under the masthead
+        //     figure. English spells it out too: "Saudi Riyals", not "SAR".
+        //   - colAmountSar / colCommissionSar / colRevenueSar below — COLUMN
+        //     HEADS. A head is a WHOLE PHRASE and is its own key precisely
+        //     because Arabic does not put the unit where English does: "Amount
+        //     SAR" is "المبلغ بالريال", in riyals, a preposition and not a
+        //     token appended to a number. There is no figure beside it to
+        //     disagree with.
+        //   - seriesRevenue below — the chart's axis and legend label, which
+        //     names a SERIES, again as a phrase, and again in both languages.
+        //
+        // Each of those deviates from the screen EQUALLY in English and Arabic,
+        // by design, which is the opposite of the Arabic-only mismatch the
+        // deleted key produced. Swapping their riyal for SAR would be
+        // mistranslating a phrase, not standardising a unit.
         listSep: { en: ", ", ar: "، " },
 
         financialHead: { en: "Financial", ar: "المالية" },
@@ -10671,6 +10715,71 @@ export const dict = {
       /** `{outcome}` is the rejection-outcome label, or empty when none was stored. */
       voteAlreadyRejected: { en: "You've already voted Reject ({outcome}) — submitting again updates it.", ar: "صوّتَّ بالرفض مسبقًا ({outcome}) — الإرسال يحدّثه." },
       voteApproveBecomesReject: { en: "You previously voted Approve — submitting this will change your vote to Reject.", ar: "صوّتَّ بالاعتماد سابقًا — الإرسال هنا سيغيّر صوتك إلى رفض." },
+
+      /**
+       * The VAT rate column head, on the PO detail table and on the printed
+       * sheet. It was a HARDCODED English literal in the JSX — the one string
+       * on that table that never translated, sitting between four keyed heads.
+       *
+       * ARABIC IS IDENTICAL BY RULE, not by omission: "VAT" stays Latin in
+       * Arabic as a standalone LABEL (`mt.vat` above states the rule,
+       * `trips.statement.colVat` follows it, and `poTotalIncl` /
+       * `totalInclVat` already print it inside an Arabic phrase). The rate is
+       * digits either way. Keying it is what stops the NEXT reader deciding
+       * that on their own.
+       *
+       * SCOPE: this leaf closes PurchaseOrders.tsx's detail table only. Seven
+       * more hardcoded "VAT (15%)" literals live across the create, receive
+       * and stock surfaces; they are a separate pass and are NOT this one.
+       */
+      vatPct: { en: "VAT (15%)", ar: "VAT (15%)" },
+
+      /**
+       * THE PRINTED PURCHASE ORDER'S OWN WORDS — the ATLAS sheet, not the
+       * modal.
+       *
+       * Same rule as `trips.breakdown.doc` above: the screen and the sheet
+       * state the SAME FACTS, and every fact they share reads from ONE key.
+       * The eight identity labels, the column heads, the totals labels, the
+       * "ordered:" suffix, the empty line and the approval wording are all
+       * reused from the block above and are NOT restated here.
+       *
+       * What is here is the wording a SHEET needs and a modal does not. A
+       * modal has a title bar and lives inside an app that already says what
+       * it is; a sheet handed to a supplier says so on its face, names its own
+       * sections, and carries a currency word beside a figure that on screen
+       * sits under a column head.
+       *
+       * Two of these exist because the sheet SPLITS a column the screen does
+       * not. On screen a received quantity that differs from what was ordered
+       * trails a muted "(ordered: N)" inside the one Qty cell; on paper the
+       * two get their own columns so a reader can run down the pair. That is
+       * Turki's decision and it needs two heads the screen never wrote.
+       */
+      doc: {
+        // The <title> of the printed document. Never seen on the sheet itself;
+        // it is what the print dialog and a saved PDF are named. `{n}` is the
+        // PO number.
+        docTitle: { en: "Purchase order {n}", ar: "أمر شراء {n}" },
+        eyebrow: { en: "Purchase order", ar: "أمر شراء" },
+        /** Heads the identity grid — the eight fields of the order itself. */
+        orderHead: { en: "Order", ar: "الأمر" },
+        // NO sarUnit KEY HERE, AND DO NOT ADD ONE BACK. It existed, held
+        // { en: "SAR", ar: "ريال" }, and was copied from the breakdown sheet's
+        // key of the same name without re-deriving it. The purchase-order modal
+        // writes every figure through `formatSarVat` (lib/inventory-vat.ts),
+        // which appends a hard-coded " SAR" in BOTH languages — so an Arabic
+        // sheet reading "16,790.00 ريال" restated a screen that says
+        // "16,790.00 SAR". That is a WORDING deviation, which the printable law
+        // forbids as squarely as a wrong number. The unit is a literal in
+        // lib/docvm/purchaseOrder.ts now, which is also why it is not
+        // translatable: it has nothing to translate.
+        colOrdered: { en: "Ordered", ar: "المطلوبة" },
+        colReceived: { en: "Received", ar: "المستلمة" },
+        // `{date}` is an app-formatted date. The company name beside it in the
+        // footer is not a leaf.
+        generated: { en: "Generated {date}", ar: "أُنشئ في {date}" },
+      },
     },
     /** Copy rendered only by SharedCreateModals.tsx — the create/edit modals for parts, suppliers, categories and units. */
     forms: {

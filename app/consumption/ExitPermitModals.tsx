@@ -29,6 +29,13 @@ import {
 } from "@/lib/db-types";
 import { useApp } from "@/components/AppShell";
 import { t, plural, arText, type Lang, type TKey } from "@/lib/i18n";
+// THE PRINTED PERMIT IS A DOCUMENT, not this DOM with the chrome hidden. The
+// view-model decides every word and figure, the renderer only the look, and
+// printHtml owns the transport — a hidden same-origin iframe the browser prints
+// on its own, which nothing in app/globals.css can reach inside.
+import { buildExitPermitVm } from "@/lib/docvm/exitPermit";
+import { buildExitPermitHtml } from "@/lib/docs/exitPermit";
+import { printHtml } from "@/lib/printHtml";
 import {
   createExitPermitDraft, updateExitPermitDraft,
   addExitPermitLine, updateExitPermitLineQty, removeExitPermitLine,
@@ -1171,10 +1178,18 @@ export function VoidModal({
 // ---------------------------------------------------------------------------
 // PRINTABLE PERMIT — the physical document that rides with the driver.
 //
-// Uses the app's established print approach: render into a portal, mark the
-// body so the scoped @media print rules isolate it, and print the node.
-// Deliberately plain: big number, who/what/where, and a signature block,
-// because this is signed at a gate by someone who is not looking at a screen.
+// THIS MODAL IS NOW A PREVIEW, AND THE PRINTOUT IS SOMETHING ELSE. It used to be
+// both: the subtree was whitelisted in app/globals.css's @media print block and
+// pinned with `position: absolute; inset: 0`, so "print" meant "print this live
+// React DOM with the app hidden around it". That pin does not paginate — it
+// clipped any permit longer than one sheet, silently, listing some of the items
+// and looking complete. Both the whitelist entry and the pin are gone; the sheet
+// is assembled by lib/docvm/exitPermit.ts and rendered by lib/docs/exitPermit.ts
+// through the ATLAS kit, where a long permit FLOWS onto a second page with its
+// column heads repeated and its signature block intact.
+//
+// What stays on screen is unchanged, deliberately: this is what the view-model
+// mirrors, so the two must keep saying the same thing.
 // ---------------------------------------------------------------------------
 export function PermitPrintView({
   permit, lines, parts, warehouseName, destination, destinationKind, receiver, onClose,
@@ -1196,6 +1211,68 @@ export function PermitPrintView({
   );
   const sharedUnit = units.size === 1 ? [...units][0] : null;
 
+  // EVERY RESOLVED STRING IS PASSED, NOT RE-RESOLVED. The part name goes through
+  // this component's own `arText` and its own "Unknown" fallback, the carrier
+  // through its own `||`, and the destination kind arrives already translated
+  // from this component's caller. No file under lib/ imports from app/, so a
+  // document that resolved its own would be a second place for the same words to
+  // drift from the screen's.
+  function handlePrint() {
+    printHtml(
+      buildExitPermitHtml(
+        buildExitPermitVm({
+          lang,
+          // Stamped when the sheet is PRODUCED, which for a printout is now.
+          generatedAt: new Date(),
+          epNumber: permit.ep_number,
+          kind: permit.kind,
+          expectedReturnOn: permit.expected_return_on,
+          voided: permit.status === "voided",
+          exitedAt: permit.exited_at,
+          exitedBy: permit.exited_by,
+          warehouseName,
+          destination,
+          destinationKind,
+          receiver,
+          carrier: permit.carrier_name,
+          lines: lines.map((l) => {
+            const p = partsById.get(l.part_id);
+            return {
+              id: l.id,
+              partName: p ? arText(p.name, p.name_ar, lang) : t("consumption.modals.unknownPart", lang),
+              sku: p?.sku ?? "—",
+              qtyOut: Number(l.qty),
+              outstanding: outstandingQty(l),
+              unit: p?.unit ?? null,
+              unitPriceSar: Number(l.unit_price_sar),
+            };
+          }),
+          note: permit.note,
+        }),
+      ),
+    );
+  }
+
+  // CTRL/CMD+P PRINTS THE DOCUMENT TOO. Without this the shortcut prints a BLANK
+  // SHEET: app/globals.css hides everything and un-hides by whitelist, and this
+  // permit's whitelist entry went with its print CSS. Same intercept
+  // BreakdownReport, StatementModal and InvoiceDetailModal carry, for the same
+  // reason. Capture phase, so it runs before anything else can swallow the key.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      handlePrint();
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+    // The deps are what the SHEET is made of, so a registered handler cannot
+    // print a stale permit or the wrong language.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permit, lines, parts, warehouseName, destination, destinationKind, receiver, lang]);
+
   return (
     <Shell
       size="xl"
@@ -1205,13 +1282,15 @@ export function PermitPrintView({
       footer={
         <>
           <Btn variant="outline" onClick={onClose}>{t("consumption.shared.close", lang)}</Btn>
-          <Btn variant="primary" onClick={() => window.print()}>
+          <Btn variant="primary" onClick={handlePrint}>
             <Printer className="h-4 w-4" />{t("consumption.modals.printBtn", lang)}
           </Btn>
         </>
       }
     >
-      <div id="permit-print" className="space-y-4">
+      {/* No print id any more: the id was the @media print whitelist's hook, and
+          the whitelist entry is gone. A dead id here would read as a live one. */}
+      <div className="space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <div className="text-xs uppercase tracking-wide muted">{t("consumption.shared.exitPermit", lang)}</div>

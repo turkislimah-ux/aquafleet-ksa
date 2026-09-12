@@ -193,7 +193,9 @@ export type MetaPair = {
 /** Issuing-company identity, for documents that instruct a third party. */
 export type Letterhead = {
   name: string;
-  lines: MetaPair[];
+  /** readonly: the kit only ever maps over these. A view-model that hands over
+   *  a frozen list should not have to widen it to be printed. */
+  lines: readonly MetaPair[];
 };
 
 export type Masthead = {
@@ -216,6 +218,18 @@ export type Masthead = {
   figure?: { caption: string; value: string; unit: string };
   /** Present on a document that must state its issuer on its face. */
   letterhead?: Letterhead;
+  /**
+   * Status marks on the trailing edge of the eyebrow line, same grammar as
+   * mark(): solid means it happened, dashed means it did not.
+   *
+   * Here rather than in the body because a document's state qualifies the
+   * document, not one of its sections — an exit permit that is VOIDED is void
+   * on its face, and a reader who has to reach the foot of the sheet to learn
+   * that has already been misled. Every field of this block is escaped and
+   * there is no raw slot, deliberately, so a caller cannot smuggle a mark in
+   * through a string: it asks for one, and the kit draws it.
+   */
+  marks?: readonly { label: string; on: boolean }[];
 };
 
 function metaPair(p: MetaPair): string {
@@ -264,18 +278,41 @@ export function masthead(m: Masthead): string {
         `</div>`
       : "";
 
+  // eyebrowEnd and marks share the trailing edge, so they need a group of their
+  // own: two flex children of .mast-line would be pushed apart by its
+  // space-between, stranding the reference on the left of the marks instead of
+  // beside them.
+  const end =
+    m.eyebrowEnd || m.marks?.length
+      ? `<div class="mast-end">` +
+        (m.eyebrowEnd ? `<div class="lbl eyebrow">${metaPair(m.eyebrowEnd)}</div>` : "") +
+        (m.marks ?? []).map((s) => mark(s.label, s.on)).join("") +
+        `</div>`
+      : "";
+
+  // THE FOOTING IS OMITTED, NOT EMPTIED. A REPORT always has meta and usually a
+  // figure; a DOCUMENT has neither — its identity is a grid in its first
+  // section, and `figure` is deliberately absent on a PO or a permit (see the
+  // Masthead type). Emitting the wrapper anyway left an empty block carrying
+  // .mast-foot's 22px top margin, which reads on the sheet as a tear-off strip
+  // with nothing in it. An empty div is not free just because it is empty.
+  const foot =
+    m.meta.length || figure
+      ? `<div class="mast-foot">
+    <div class="mast-meta">${m.meta.map((line) => line.map(metaPair).join(" &nbsp; &nbsp; ")).join("<br>")}</div>
+    ${figure}
+  </div>`
+      : "";
+
   return `<header class="mast">
   <div class="mast-line">
     <div class="lbl eyebrow">${esc(m.eyebrow)}</div>
-    ${m.eyebrowEnd ? `<div class="lbl eyebrow">${metaPair(m.eyebrowEnd)}</div>` : ""}
+    ${end}
   </div>
   <h1 class="title">${esc(m.title)}</h1>
   ${subtitle}
   ${head}
-  <div class="mast-foot">
-    <div class="mast-meta">${m.meta.map((line) => line.map(metaPair).join(" &nbsp; &nbsp; ")).join("<br>")}</div>
-    ${figure}
-  </div>
+  ${foot}
   <div class="rule-heavy"></div>
 </header>`;
 }
@@ -285,18 +322,40 @@ export function masthead(m: Masthead): string {
 /* ------------------------------------------------------------------ */
 
 /**
- * A hanging-gutter section: the title sits out in the fixed leading column and
- * the content hangs beside it.
+ * WHERE THE SECTION TITLE SITS. Two placements, one label device.
+ *
+ * - `gutter` — the title hangs out in the fixed leading column and the content
+ *   sits beside it. A wide-margin reading layout: the titles form a scannable
+ *   rail down the edge and the content keeps one continuous measure.
+ * - `top` — the title sits ABOVE its content at full measure, no leading
+ *   column. The content gets the whole width, which is what a DOCUMENT wants:
+ *   a purchase order's table has six columns to place and no width to lend to a
+ *   rail of headings nobody reads twice.
+ *
+ * THE CHOICE IS PER REPORT AND IT IS THE VIEW-MODEL'S CALLER'S, not this
+ * file's. What does NOT change with it: the type tokens, the rules, the
+ * severity gutter-word device, and above all the RANKED LABEL — English sets
+ * these heads as tracked caps, Arabic as weight + size + a hairline, because
+ * Arabic has no case to track. Both modes emit the SAME `.sec-head` element, so
+ * that ranking is inherited rather than restated, and neither mode can drift
+ * from the other in the one place a reader would notice.
+ */
+export type SectionLayout = "gutter" | "top";
+
+/**
+ * A section: a title and its content.
  *
  * `flag` puts the severity word under the section head, for a finding that
  * applies to the whole section rather than to one row.
  *
- * NO break-after: avoid ON THE HEAD, EVER. The head is a GRID ITEM, so it
+ * NO break-after: avoid ON A GUTTER HEAD, EVER. There it is a GRID ITEM, so it
  * cannot be stranded from its content the way a stacked heading can: the grid
  * row carries both or fragments both. Asking Chromium to avoid a break after a
  * grid item propagated the constraint outward and pushed the entire flow off
  * page one, turning a 2-page sheet into a blank page followed by two. Measured,
- * not theorised.
+ * not theorised. A TOP head is a stacked heading and CAN be orphaned, so it
+ * takes the opposite treatment — see `.stack` in ./shell.ts, where the rule is
+ * scoped to that mode precisely so it can never reach a grid item.
  */
 export function section(opts: {
   head: string;
@@ -305,13 +364,53 @@ export function section(opts: {
   body: string;
   /** Class for the content column, e.g. "chart" or "pair". */
   bodyClass?: string;
+  /**
+   * Defaults to `gutter`, which is what every report shipped before this
+   * argument existed. The default is load-bearing for exactly that reason:
+   * the Customer Breakdown is live and its sections must keep rendering
+   * byte-identically, so adding the argument had to change nothing for a caller
+   * that does not pass it. New reports state their mode explicitly.
+   */
+  layout?: SectionLayout;
 }): string {
-  return `<section class="row">
-  <div class="sec-head">${esc(opts.head)}${opts.sub ? `<span class="sub">${esc(opts.sub)}</span>` : ""}${
-    opts.flag ? gutterWord(opts.flag) : ""
-  }</div>
-  <div${opts.bodyClass ? ` class="${opts.bodyClass}"` : ""}>${opts.body}</div>
+  const head = `<div class="sec-head">${esc(opts.head)}${
+    opts.sub ? `<span class="sub">${esc(opts.sub)}</span>` : ""
+  }${opts.flag ? gutterWord(opts.flag) : ""}</div>`;
+  const body = `<div${opts.bodyClass ? ` class="${opts.bodyClass}"` : ""}>${opts.body}</div>`;
+
+  // Two wrappers, one child order. The head is written FIRST in both, so the
+  // reading order and the DOM order agree in gutter mode too and the placement
+  // stays a pure matter of the container's own layout.
+  return opts.layout === "top"
+    ? `<section class="stack">
+  ${head}
+  ${body}
+</section>`
+    : `<section class="row">
+  ${head}
+  ${body}
 </section>`;
+}
+
+/**
+ * A section with NO head, spanning the whole measure.
+ *
+ * NOT a `section()` with an empty head — that reserves the 104px gutter column
+ * and hangs the content beside a blank, which reads as a heading that failed to
+ * render rather than as a block that never had one.
+ *
+ * It exists because a HEADING IS WORDING, and wording is the view-model's. A
+ * report is written in sections and names each one; a gate pass is one
+ * continuous instruction — its screen source has no headings anywhere, so a
+ * renderer that invented "Line items" over its table would be putting a word on
+ * the sheet that nobody wrote. The block takes its place in the flow by
+ * POSITION, which is what the screen does too.
+ *
+ * Keeps `section`'s margin and its break-inside: avoid, so a headless block is
+ * spaced and paginated exactly like a headed one.
+ */
+export function block(body: string): string {
+  return `<section>${body}</section>`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -413,6 +512,21 @@ export type Cell =
       colSpan?: number;
       rowSpan?: number;
       /**
+       * A quieter second line under the value, in the same cell.
+       *
+       * For the fact that QUALIFIES the value rather than standing beside it: a
+       * part's SKU under its name, the ordered price under the one actually
+       * paid, an approval's timestamp under the approver. Every one of those is
+       * a muted second line on its own screen already, so a column of its own
+       * on paper would need a head nobody wrote and would claim the two facts
+       * rank equally.
+       *
+       * ESCAPED AND ISOLATED ON THE COLUMN'S OWN RULE, exactly as the value is
+       * — a sub-line is not a back door past `raw`. It is inert under `raw`,
+       * where the caller owns the whole cell's markup.
+       */
+      sub?: string;
+      /**
        * The value is ALREADY HTML and is emitted verbatim. The one escape hatch
        * in this file, for a status mark or an already-isolated figure. Anything
        * reaching this path with user text in it is an injection; pass plain
@@ -453,8 +567,11 @@ function cellHtml(c: Cell, col: Col | undefined): string {
     ("colSpan" in o && o.colSpan ? ` colspan="${o.colSpan}"` : "") +
     ("rowSpan" in o && o.rowSpan ? ` rowspan="${o.rowSpan}"` : "");
   const raw = "raw" in o && o.raw;
-  const body = raw ? o.v : col?.num || col?.iso ? iso(o.v) : esc(o.v);
-  return `<td${attrs}>${body}</td>`;
+  const text = (s: string) => (col?.num || col?.iso ? iso(s) : esc(s));
+  const body = raw ? o.v : text(o.v);
+  const sub =
+    !raw && "sub" in o && o.sub ? `<span class="sub-line">${text(o.sub)}</span>` : "";
+  return `<td${attrs}>${body}${sub}</td>`;
 }
 
 /**

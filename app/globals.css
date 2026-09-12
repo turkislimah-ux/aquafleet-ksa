@@ -399,7 +399,6 @@ html[dir="rtl"] { --dock-dir: -1; }
 @media print {
   body * { visibility: hidden !important; }
   #history-print, #history-print *,
-  #permit-print, #permit-print *,
   /* Reports tab 2 — one id per statement, so "print" means "print THIS
      statement". Only one statement is mounted at a time, so exactly one of
      these subtrees exists in the DOM on any given print. */
@@ -419,9 +418,13 @@ html[dir="rtl"] { --dock-dir: -1; }
   /* THE PAYSLIPS SURFACE IS THE ONE PLACE TWO PRINT SUBTREES COEXIST.
      Every other statement is mounted alone, so "one id visible" is enough.
      Here the register and the commission review render together, so a body
-     class set by the review table's own Print button decides which survives —
-     same mechanism as body.printing-po below. Without this, printing either one
-     would emit both. */
+     class set by the review table's own Print button decides which survives.
+     Without this, printing either one would emit both.
+
+     This used to say "same mechanism as body.printing-po below". There is no
+     body.printing-po below any more — the purchase order left this stylesheet
+     (see the epitaph). The mechanism is now unique to this surface, and it is
+     the LAST body-class print switch in the file. */
   body.printing-review #payslips-print { display: none !important; }
   body:not(.printing-review) #commission-review-print { display: none !important; }
   .no-print { display: none !important; }
@@ -433,9 +436,17 @@ html[dir="rtl"] { --dock-dir: -1; }
      REPORTS tab 2 — printable statements.
      ===================================================================
      These PAGINATE (a revenue statement can run several pages), so they
-     must stay in NORMAL STATIC FLOW. The absolute + inset:0 trick used by
-     #history-print and #permit-print pins a subtree to a single page and
-     clips everything after it — right for a one-page gate pass, wrong here.
+     must stay in NORMAL STATIC FLOW. The absolute + inset:0 trick still used
+     by #history-print pins a subtree to a single page and clips everything
+     after it.
+
+     This used to name #permit-print alongside it and call the trick "right
+     for a one-page gate pass". BOTH halves of that were wrong, which is why
+     the permit is no longer in this file: a gate pass is one page UNTIL
+     someone loads twelve parts onto a truck, and the pin gave no sign that
+     the last three had been dropped. Nothing is "right" about a rule whose
+     failure mode is a document that looks complete. #history-print carries
+     the same pin and the same assumption, and is next in line.
 
      What that leaves is a HORIZONTAL problem, and it is the actual cause of
      the clipped PAID column on the revenue statement: `visibility: hidden`
@@ -554,35 +565,36 @@ html[dir="rtl"] { --dock-dir: -1; }
     overflow: visible !important;
   }
 
-  /* Exit permit — a SINGLE-page gate pass, same treatment as the payout
-     record: pinned edge-to-edge so the printed sheet is just the permit. It
-     is signed at a gate, so it must not spill onto a second page. */
-  #permit-print {
-    position: absolute;
-    inset: 0;
-    margin: 0;
-    padding: 1rem;
-    max-height: none !important;
-    overflow: visible !important;
-  }
-
-  /* THE INVOICE'S, THE STATEMENT'S AND NOW THE BREAKDOWN'S BLOCKS ARE ALL GONE,
-     AND THEIR ABSENCE IS THE FEATURE.
+  /* FIVE DOCUMENTS HAVE LEFT THIS STYLESHEET, AND THEIR ABSENCE IS THE FEATURE.
      They used to live here: `#invoice-print` + `body.printing-invoice`, then
      `#statement-print` + `body.printing-statement` + `.statement-print-portal`,
      then `#breakdown-print` + `body.printing-breakdown` +
      `.breakdown-print-portal` (which also carried a `table tr` break-inside
-     rule and a print-color-adjust override for its emerald figures) — all the
-     same portal/paginate pattern: hide the whole page, un-hide one modal
-     subtree, print the live React DOM. Each now prints as its own DOCUMENT into
-     a hidden same-origin iframe the browser prints on its own: the invoice from
+     rule and a print-color-adjust override for its emerald figures), and now
+     BOTH remaining ones at once: `#po-print` + `body.printing-po` +
+     `.po-print-portal` + its own `table tr` rule, and `#permit-print`'s
+     whitelist entry plus its `position: absolute; inset: 0` pin. All the same
+     portal/paginate pattern: hide the whole page, un-hide one modal subtree,
+     print the live React DOM. Each now prints as its own DOCUMENT into a hidden
+     same-origin iframe the browser prints on its own: the invoice from
      lib/invoicePrintTemplate.ts, the statement from lib/statementPdfTemplate.ts,
-     the breakdown from lib/docs/breakdown.ts through the ATLAS kit. Nothing in
-     this stylesheet reaches inside those iframes, which is the point — no
-     printed document inherits the app's screen styling, and no document's
-     layout can be broken from here. The breakdown's pagination, page-break
-     hygiene and B&W treatment are the kit's now (lib/atlas/shell.ts), which is
-     also why its colour override left with it: the document has no colour.
+     and the breakdown, the purchase order and the exit permit from
+     lib/docs/*.ts through the ATLAS kit. Nothing in this stylesheet reaches
+     inside those iframes, which is the point — no printed document inherits the
+     app's screen styling, and no document's layout can be broken from here.
+     Pagination, page-break hygiene and B&W treatment are the kit's now
+     (lib/atlas/shell.ts), which is also why the breakdown's colour override left
+     with it: the document has no colour.
+
+     THE PERMIT'S PIN IS THE ONE WORTH NAMING, because it was not merely
+     redundant — it was WRONG, and silently. `position: absolute; inset: 0` does
+     not paginate: it pins a subtree to a single page and DROPS whatever does not
+     fit. A permit with more lines than one sheet holds printed as a gate pass
+     listing some of its items and looking complete. The comment here called that
+     "right for a one-page gate pass", which assumed a permit is always one page;
+     nothing enforced that, and nothing marked the paper when it was not true.
+     `#history-print` above still carries the same pin and the same assumption —
+     it is next in line, and when it goes this whole mechanism goes with it.
 
      Also gone with the statement's block: the two rules that stripped a
      settlement row's green tint and ink at print time. They were only ever
@@ -590,45 +602,13 @@ html[dir="rtl"] { --dock-dir: -1; }
      settlement rows to make a long statement scannable. The document has no
      tint to strip — it is B&W by construction.
 
-     THIS IS WHY StatementModal AND BreakdownReport BOTH INTERCEPT CTRL/CMD+P.
-     This @media block opens with `body * { visibility: hidden }` and un-hides
-     by whitelist, so a subtree that leaves the whitelist without an intercept
-     prints a BLANK SHEET — a failure that reads like the printer's fault. The
-     breakdown's intercept was ADDED in the same commit that deleted its
-     whitelist entry, because deleting the entry is what arms the trap. Do not
-     delete a whitelist entry here without checking what its owner does with
-     the shortcut. */
-
-  /* Purchase Order detail (Inventory Phase 4) — the same portal/paginate
-     pattern, its own independent id/class/marker set. (This used to point at
-     the breakdown and the statement as the other examples; both have left this
-     stylesheet, see above, so the PO is now the only one left. It is next in
-     line, and when it goes this whole mechanism goes with it.) */
-  #po-print, #po-print * { visibility: visible !important; }
-  body.printing-po > *:not(.po-print-portal) { display: none !important; }
-
-  .po-print-portal,
-  .po-print-portal > * {
-    position: static !important;
-    inset: auto !important;
-    max-width: none !important;
-    max-height: none !important;
-    overflow: visible !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    display: block !important;
-  }
-  #po-print {
-    position: static !important;
-    margin: 0;
-    padding: 1rem;
-    max-height: none !important;
-    overflow: visible !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-  #po-print table tr { break-inside: avoid; }
+     THIS IS WHY EVERY ONE OF THOSE SURFACES INTERCEPTS CTRL/CMD+P. This @media
+     block opens with `body * { visibility: hidden }` and un-hides by whitelist,
+     so a subtree that leaves the whitelist without an intercept prints a BLANK
+     SHEET — a failure that reads like the printer's fault. Each intercept was
+     ADDED in the same commit that deleted its whitelist entry, because deleting
+     the entry is what arms the trap. Do not delete a whitelist entry here
+     without checking what its owner does with the shortcut. */
 }
 
 /* ===============================================================

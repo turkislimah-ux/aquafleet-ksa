@@ -256,6 +256,38 @@ export const ATLAS_CSS = `
     line-height: 1.72;
   }
 
+  /* ---------- THE COMPACT VARIANT ----------
+     One flag, for a document that is a SINGLE SHEET by nature rather than by
+     luck: an exit permit is a gate pass, signed on a bonnet, and the whole of
+     it has to be in one hand. The report scale is built for a spread that can
+     afford 26px between sections; here that spacing is what pushes a ten-line
+     permit onto a second page carrying nothing but signatures.
+
+     WHAT IT TIGHTENS IS SPACE, AND THE TITLE. Nothing else. The title drops
+     27px -> 21px because a permit number is an identifier to read once, not a
+     headline; every other change is a margin or a padding.
+
+     WHAT IT DELIBERATELY DOES NOT TOUCH IS TYPE SIZE, and that is the whole
+     discipline of it. body stays 9.5px and the Arabic body stays
+     10.6px/1.72, because the Arabic typography law above is a LEGIBILITY floor,
+     not a default to trade against a page count: beh, teh, theh, noon and yeh
+     differ only in dots, and a compact flag that shrank them would buy one page
+     by making the Arabic sheet a guess. A permit that still runs to two pages
+     runs to two pages — see the exit permit renderer on why clipping is not an
+     option available to this kit.
+
+     A body class rather than an extraCss string passed per document, so the
+     SECOND compact document inherits the same decisions instead of restating
+     them slightly differently. */
+  body.compact .mast { margin-bottom: 14px; }
+  body.compact .title { font-size: 21px; margin-top: 8px; }
+  body.compact .mast-foot { margin-top: 16px; }
+  body.compact section { margin-top: 17px; }
+  body.compact .ident { row-gap: 13px; }
+  body.compact td { padding: 6px 0; }
+  body.compact .signs { margin-top: 20px; gap: 26px; }
+  body.compact .sign-line { margin-top: 26px; }
+
   /* ---------- THE GRID ----------
      The single vertical the whole page is built on. grid-template-columns is
      already direction-aware: in an RTL document the gutter column lands on the
@@ -271,6 +303,11 @@ export const ATLAS_CSS = `
      full-measure title, then a 1fr/auto footing of meta against figure. */
   .mast { margin-bottom: 20px; }
   .mast-line { display: flex; justify-content: space-between; align-items: baseline; gap: 18px; }
+  /* The trailing-edge group: a reference and any status marks travel together.
+     Its own flex context, because as siblings of the eyebrow they would be
+     spread by the space-between above and the reference would land against the
+     opposite margin from the marks it qualifies. */
+  .mast-end { display: flex; align-items: baseline; gap: 12px; }
   .title {
     font-size: 27px; font-weight: 400; letter-spacing: -0.016em;
     line-height: 1.14; margin: 10px 0 0; max-width: 24ch;
@@ -305,6 +342,11 @@ export const ATLAS_CSS = `
   .letterhead span { color: var(--ink); }
 
   .rule-heavy { border-top: var(--rule-heavy) solid var(--ink); margin-top: 15px; }
+  /* The hairline counterpart, for a divide INSIDE a section: the block below it
+     belongs to the same head but is a different KIND of statement — a rejection
+     under the approvals it overrides, not one more of them. A heavy rule there
+     would read as the end of the section, which is the opposite claim. */
+  .rule { border-top: var(--rule-hair) solid var(--hair); margin-top: 11px; }
 
   /* ---------- SECTIONS ----------
      No break-after: avoid on the section head. It sits in the gutter COLUMN, so
@@ -333,6 +375,38 @@ export const ATLAS_CSS = `
      under it. An orphaned head reads as a page break; a floating rule reads as
      a printing fault. */
   section { margin-top: 26px; break-inside: avoid; }
+  /* ---------- ...EXCEPT A SECTION THAT HOLDS A TABLE ----------
+     The paragraph above says a section taller than a page "still fragments, and
+     Chromium drops the constraint rather than looping, which is the correct
+     fallback". It drops the constraint, but NOT before first shunting the whole
+     section to the next sheet — so a 34-line purchase order printed a
+     THREE-QUARTERS-EMPTY PAGE ONE, then split the table across pages two and
+     three anyway. The atomicity bought nothing and cost a sheet of A4.
+
+     A TABLE DOES NOT NEED THE SECTION TO BE ATOMIC, because it already solves
+     the same problem better. Atomicity exists to stop a gutter head being
+     stranded above zero rows; a table repeats its column heads on every page it
+     spills onto (table-header-group, below) and keeps each row whole (tr,
+     break-inside: avoid), so the reader can never meet an unlabelled fragment.
+     A pair grid has neither and keeps the rule.
+
+     break-after: avoid on the thead is the remaining guard: it stops Chromium
+     placing the column heads at the foot of a page with their first row
+     overleaf, which is the one orphan table-header-group cannot fix by itself.
+
+     :has() is the selector rather than a class because WHICH sections are
+     tables is a fact about the document's content, not a decision the caller
+     should have to remember — a new renderer that forgets to pass a flag gets a
+     wasted page and no error. On an engine without :has() the rule simply does
+     not match and the behaviour is today's, which is wasteful, not broken.
+
+     NO BACKTICKS IN THIS COMMENT, and none anywhere else in this string either:
+     the whole stylesheet is a TEMPLATE LITERAL, so a backtick quoting a CSS
+     keyword ENDS IT. The first draft of this paragraph quoted four of them and
+     turned the rest of the file into a syntax error at the next stray "table".
+     Quote CSS in prose bare, the way every comment above does. */
+  section:has(table) { break-inside: auto; }
+  thead { break-after: avoid; }
   .sec-head {
     font-size: 8px; font-weight: 700; letter-spacing: 0.18em;
     text-transform: uppercase; color: var(--ink); line-height: 1.5;
@@ -342,6 +416,68 @@ export const ATLAS_CSS = `
     display: block; font-weight: 400; letter-spacing: 0.08em;
     color: var(--quiet); margin-top: 4px;
   }
+
+  /* ---------- THE OTHER SECTION MODE: TITLE ON TOP ----------
+     Same section, same head element, same ranked label — the title simply sits
+     ABOVE its content at full measure instead of hanging in a leading column.
+     A REPORT chooses the gutter, because its titles form a scannable rail down
+     the edge of a page the reader skims. A DOCUMENT chooses this, because a
+     purchase order's line table has six columns to place and no width to lend
+     to a rail of headings nobody reads twice.
+
+     THERE IS NO .stack DISPLAY DECLARATION, AND THAT IS THE POINT. .row has to
+     declare a grid to make two columns; stacking is what a section does on its
+     own. Everything below is the consequence of losing the column, nothing more.
+
+     WIDTH IS THE ONE THING THAT DOES NOT SURVIVE THE MOVE. In the gutter the
+     head is 104px wide because the COLUMN is, so the Arabic label hairline
+     (html[lang=ar] .sec-head, far below) draws under the label and stops. Let
+     the same head be an ordinary block and it inherits the full measure, so
+     that hairline becomes a rule clean across the sheet — which is a section
+     DIVIDER, a different claim than this label makes, sitting directly above
+     content it would appear to separate rather than name. max-content restores
+     the gutter's behaviour without restoring the gutter: the box hugs the
+     longest of the label, its sub and its severity word, so both the Arabic
+     hairline and the Latin severity rule stay label-width in either mode.
+     max-width keeps a long head wrapping inside the measure instead of
+     overflowing it — the same asymmetric overflow the stat band documents,
+     where RTL loses text off the paper edge and LTR quietly shrinks the page.
+
+     No inline alignment is written and none is needed. A block box with
+     max-content width and no auto margins sits at the containing block's inline
+     START edge, which is the right edge under dir=rtl. Writing left/right here
+     would be the bug, not the fix.
+
+     BREAK-AFTER: AVOID IS CORRECT HERE AND WRONG ONE RULE ABOVE. The SECTIONS
+     comment bans it on a gutter head: there the head is a GRID ITEM, Chromium
+     propagates the constraint out to the container and pushes the whole flow off
+     page one. A stacked head is an ordinary block child, the constraint stays
+     local, and it is genuinely needed — a section holding a table has
+     break-inside: auto, so without this a head can print at the foot of a page
+     with its table overleaf. The child combinator is load-bearing: it scopes the
+     rule to this mode so it can never reach the grid-item case. */
+  /* 13px IS MEASURED, NOT CHOSEN. It was 9px first, which renders a real
+     computed gap of 8.4px between head and content — while the identity grid
+     INSIDE that content sets its own two rows 33px apart. That inverts the
+     hierarchy: the heading binds more tightly to the first row of fields than
+     the rows bind to each other, so ORDER reads as a label on PO NUMBER rather
+     than a title over all eight fields. The gutter never exposed this, because
+     there the head is in a different COLUMN and the eye never compares the two
+     gaps. Stacking is what puts them on the same axis, so the mode owns the fix.
+     13px is the value at which the head visibly floats above its block, and it
+     is bounded above by the 26px that separates one section from the next -
+     bought by re-rendering, not by taste: every purchase-order fixture holds its
+     page count at 13px, in both languages. */
+  .stack > .sec-head {
+    width: max-content; max-width: 100%;
+    padding-top: 0; margin-bottom: 13px;
+    break-after: avoid;
+  }
+  /* The Arabic head closes with a hairline and 4px of padding under it, so its
+     ink stops lower in the same box. Matching the Latin 13px would therefore
+     read TIGHTER, not equal. Two more, so the gap under the RULE matches the gap
+     under Latin TEXT. Keep this above the Latin value if that one moves. */
+  html[lang="ar"] .stack > .sec-head { margin-bottom: 15px; }
 
   /* ---------- STAT BAND ----------
      Figures on a shared baseline, no boxes. The cells are held apart by
@@ -740,6 +876,13 @@ export function atlasDocShell(opts: {
   dir: Dir;
   title: string;
   body: string;
+  /**
+   * The single-sheet scale: tighter spacing and a smaller title, same type
+   * sizes. For a document meant to be held rather than read at a desk. See THE
+   * COMPACT VARIANT in ATLAS_CSS for what it does and, more importantly, what
+   * it refuses to do.
+   */
+  compact?: boolean;
   extraCss?: string;
 }): string {
   return `<!doctype html>
@@ -753,7 +896,7 @@ ${ATLAS_CSS}
 ${opts.extraCss ?? ""}
 </style>
 </head>
-<body>
+<body${opts.compact ? ` class="compact"` : ""}>
 ${opts.body}
 </body>
 </html>`;

@@ -108,6 +108,18 @@ import {
 } from "./SharedCreateModals";
 import ScrollLock from "@/components/ScrollLock";
 import { arText, fill, plural, t } from "@/lib/i18n";
+// THE PRINTED PURCHASE ORDER IS A DOCUMENT, not this DOM with the chrome hidden.
+// The view-model decides every word and figure, the renderer only the look, and
+// printHtml owns the transport — a hidden same-origin iframe the browser prints
+// on its own, which nothing in app/globals.css can reach inside.
+import { buildPurchaseOrderVm } from "@/lib/docvm/purchaseOrder";
+import { buildPurchaseOrderHtml } from "@/lib/docs/purchaseOrder";
+import { printHtml } from "@/lib/printHtml";
+// Read LIVE, and deliberately not an invoice's frozen seller_snapshot: a
+// purchase order is not a tax document, so the identity it prints is who we are
+// today. It is a server action under app/, which is why the COMPONENT fetches it
+// and hands it to the view-model — no file under lib/ imports from app/.
+import { getCompanySettings } from "@/app/trips/invoiceActions";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -1223,9 +1235,19 @@ export function POListModal({
 
 // Read-only PO detail — preview's openPO (pages-2.js ~2318-2433), trimmed
 // to what this phase actually has: no approvals/rejection/received-vs-
-// ordered variance (Phases 5/6). Print reuses the app's existing
-// createPortal + body-class pattern (StatementModal/InvoiceDetailModal) —
-// #po-print / .po-print-portal / body.printing-po, app/globals.css.
+// ordered variance (Phases 5/6).
+//
+// THIS MODAL IS NOW A PREVIEW, AND THE PRINTOUT IS SOMETHING ELSE. It used to be
+// both: `#po-print` / `.po-print-portal` / `body.printing-po` in app/globals.css
+// hid the app and printed this live React DOM. All three are gone; the sheet is
+// assembled by lib/docvm/purchaseOrder.ts and rendered by lib/docs/purchaseOrder
+// .ts through the ATLAS kit, into a hidden same-origin iframe.
+//
+// What stays on screen is unchanged, deliberately: this is what the view-model
+// mirrors, so the two must keep saying the same thing. The one thing the sheet
+// carries that the screen does not is the LETTERHEAD, read live from
+// company_settings — a purchase order leaves the building and has to state who
+// is instructing, and a modal on our own screen does not.
 export function PODetailModal({
   lang,
   po,
@@ -1268,6 +1290,10 @@ export function PODetailModal({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const [issuing, setIssuing] = useState(false);
+  // The sheet needs the LIVE letterhead, so printing is now an awaited read and
+  // not an instant `window.print()`. The flag disables the button for the round
+  // trip: a second click would open a second print dialog over the first.
+  const [printing, setPrinting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const supplier = suppliers.find((s) => s.id === po.supplier_id);
@@ -1303,17 +1329,116 @@ export function PODetailModal({
   // preview's own approvalsHtml condition exactly.
   const showApprovals = po.status === "pending_approval" || po.status === "approved" || po.status === "rejected";
 
-  if (!mounted) return null;
-
-  function handlePrint() {
-    document.body.classList.add("printing-po");
-    const cleanup = () => {
-      document.body.classList.remove("printing-po");
-      window.removeEventListener("afterprint", cleanup);
-    };
-    window.addEventListener("afterprint", cleanup);
-    window.print();
+  // EVERY FIGURE IS PASSED, NOT RECOMPUTED. lib/docvm/purchaseOrder.ts takes
+  // computed numbers precisely so the two surfaces cannot disagree: the 0056
+  // money rule above (prefer the STORED header columns, let the received side
+  // win once anything is received, read a pre-0056 row as 0 honestly) has ONE
+  // expression, and this is it. Likewise every resolved string — the status word
+  // from this file's own STATUS_LABEL, each part name through its own `arText`.
+  async function handlePrint() {
+    setPrinting(true);
+    setError(null);
+    // The sheet cannot be drawn without the letterhead, so a failed read is a
+    // refusal to print and not a purchase order issued anonymously.
+    const res = await getCompanySettings();
+    setPrinting(false);
+    if (res.error || !res.data) {
+      setError(res.error ?? t("inventory.po.printAsInvoice", lang));
+      return;
+    }
+    printHtml(
+      buildPurchaseOrderHtml(
+        buildPurchaseOrderVm({
+          lang,
+          // Stamped when the sheet is PRODUCED, which for a printout is now.
+          generatedAt: new Date(),
+          poNumber: po.po_number,
+          statusLabel: lang === "en" ? STATUS_LABEL[po.status].en : STATUS_LABEL[po.status].ar,
+          // Which states have HAPPENED. Draft and pending-approval have not.
+          statusSettled: po.status !== "draft" && po.status !== "pending_approval",
+          aiGenerated: po.ai_generated,
+          requestDate: po.request_date,
+          expectedDelivery: po.expected_delivery,
+          receivedDate: po.received_date,
+          requestedBy: po.requested_by,
+          receivedBy: po.received_by,
+          warehouseName: warehouse?.name ?? null,
+          supplier: supplier
+            ? {
+                name: supplier.name,
+                contactPerson: supplier.contact_person,
+                phone: supplier.phone,
+                email: supplier.email,
+              }
+            : null,
+          lines: poLines.map((l) => {
+            const p = partsById.get(l.part_id);
+            return {
+              id: l.id,
+              partName: p ? arText(p.name, p.name_ar, lang) : "—",
+              partSku: p?.sku ?? "—",
+              qtyOrdered: l.qty,
+              qtyReceived: l.received_qty,
+              unitPriceOrdered: l.unit_price_sar,
+              unitPriceReceived: l.received_unit_price_sar,
+              // THE SAME EXPRESSION THE TABLE BELOW USES, character for
+              // character: `received_line_vat_sar ?? line_vat_sar`. It is NOT
+              // keyed on `received_qty != null` like the qty and price beside
+              // it — the received VAT column is its own nullable and answers for
+              // itself. Writing the qty's condition here would make the sheet
+              // disagree with the screen on any line received without a booked
+              // received-side VAT, and a pre-0056 line reads 0 either way.
+              lineVat: l.received_line_vat_sar ?? l.line_vat_sar,
+            };
+          }),
+          hasReceivedFigures,
+          docSubtotal,
+          docVat,
+          docTotal,
+          note: po.note,
+          showApprovals,
+          approvals: approvals.map((a) => ({
+            id: a.id,
+            approver: a.approver_email,
+            approvedAt: a.approved_at,
+            comment: a.comment,
+          })),
+          rejected:
+            po.status === "rejected"
+              ? { by: po.rejected_by, at: po.rejected_at, reason: po.rejection_reason }
+              : null,
+          company: res.data,
+        }),
+      ),
+    );
   }
+
+  // CTRL/CMD+P PRINTS THE DOCUMENT TOO. Without this the shortcut prints a BLANK
+  // SHEET: app/globals.css hides everything and un-hides by whitelist, and this
+  // modal's whitelist entry went with its print CSS. Same intercept
+  // BreakdownReport, StatementModal and InvoiceDetailModal carry, for the same
+  // reason. Capture phase, so it runs before anything else can swallow the key.
+  //
+  // Registered BEFORE the `!mounted` bail-out below, because hooks must be, and
+  // guarded on the same condition so a handler can never run for a render that
+  // did not happen.
+  useEffect(() => {
+    if (!mounted) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      void handlePrint();
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+    // The deps are what the SHEET is made of, so a registered handler cannot
+    // print a stale order or the wrong language.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, po, lines, approvals, suppliers, warehouses, parts, lang]);
+
+  if (!mounted) return null;
 
   async function handleIssue() {
     setIssuing(true);
@@ -1329,10 +1454,14 @@ export function PODetailModal({
   }
 
   return createPortal(
-    <div className="po-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+    // NO `po-print-portal` AND NO `id="po-print"`. Both were hooks for the print
+    // stylesheet that printed this DOM, and both were deleted from globals.css in
+    // the same commit. A hook left behind after its rule is gone is worse than
+    // dead markup: it reads as a live print path and invites someone to write the
+    // rule back.
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <ScrollLock />
       <div
-        id="po-print"
         className="card p-6 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
@@ -1344,8 +1473,15 @@ export function PODetailModal({
             </h2>
             <p className="text-sm muted mt-0.5">{supplier?.name ?? "—"}</p>
           </div>
-          <div className="no-print flex items-center gap-2">
-            <Btn variant="outline" onClick={handlePrint}>
+          {/* NO `no-print` ON ANY OF THIS MODAL'S CHROME ANY MORE. That class is
+              `display: none` inside @media print, and it earned its place when
+              this DOM *was* the printout and its buttons would have printed with
+              it. Nothing in this subtree reaches paper now — the sheet is built
+              from the view-model in an iframe — so the class controls nothing
+              here. It is still a live global rule serving the Reports
+              statements; it is only THIS modal's four usages that are dead. */}
+          <div className="flex items-center gap-2">
+            <Btn variant="outline" onClick={handlePrint} disabled={printing}>
               <Printer className="h-4 w-4" />
               {/* preview's inv.printInvoice ("Print as Invoice", i18n.js:636) */}
               {t("inventory.po.printAsInvoice", lang)}
@@ -1358,7 +1494,7 @@ export function PODetailModal({
 
         {po.ai_generated && (po.ai_rationale || po.ai_rationale_ar) && (
           <div
-            className="no-print flex items-start gap-2.5 px-3 py-2.5 mb-4 rounded-lg border"
+            className="flex items-start gap-2.5 px-3 py-2.5 mb-4 rounded-lg border"
             style={{
               background: "linear-gradient(135deg, rgba(139,92,246,.08), rgba(11,126,234,.08))",
               borderColor: "rgba(139,92,246,.2)",
@@ -1462,7 +1598,7 @@ export function PODetailModal({
                 <TH>{t("common.part", lang)}</TH>
                 <TH>{t("common.qty", lang)}</TH>
                 <TH>{t("inventory.shared.unitCost", lang)}</TH>
-                <TH>VAT (15%)</TH>
+                <TH>{t("inventory.po.vatPct", lang)}</TH>
                 <TH>{t("inventory.shared.subtotal", lang)}</TH>
               </tr>
             </thead>
@@ -1584,9 +1720,9 @@ export function PODetailModal({
           </Card>
         )}
 
-        {error && <p className="text-sm text-rose-600 dark:text-rose-400 mb-2 no-print">{error}</p>}
+        {error && <p className="text-sm text-rose-600 dark:text-rose-400 mb-2">{error}</p>}
 
-        <div className="no-print flex flex-wrap justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <Btn variant="outline" onClick={onClose}>
             {t("common.close", lang)}
           </Btn>

@@ -281,7 +281,19 @@ const COMPANY = "Bin Slimah Group · Bousla";
 export function buildBreakdownVm(input: BreakdownDocInput): BreakdownDocVm {
   const { lang } = input;
   const month = monthLabel(input.monthKey, lang, "short");
-  const sarUnit = t("trips.breakdown.doc.sarUnit", lang);
+  // A LITERAL, NOT A TRANSLATED KEY. The breakdown SCREEN writes every one of
+  // these figures through formatSar (lib/utils.ts), whose unit is a hard-coded
+  // " SAR" in both languages — the same en-US pinning that keeps this app's
+  // digits and dates Latin whatever the toggle says. This used to read
+  // t("trips.breakdown.doc.sarUnit", lang), which gave the Arabic SHEET "ريال"
+  // beside an Arabic SCREEN saying "SAR": a WORDING deviation, which the
+  // printable law forbids as squarely as a wrong number. The key is gone; its
+  // epitaph in lib/i18n.ts says why it must not come back, and
+  // lib/docvm/purchaseOrder.ts carries the same literal for the same reason.
+  //
+  // NOT the masthead's figureUnit, which stays a key: that one is the spelled
+  // -out caption, and English spells it out too.
+  const sarUnit = "SAR";
   const listSep = t("trips.breakdown.doc.listSep", lang);
   // The same stamp the on-screen footer shows, from the same expression: a
   // DISPLAY render of the instant the sheet was produced. It appears three
