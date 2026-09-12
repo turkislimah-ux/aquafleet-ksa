@@ -9605,6 +9605,102 @@ export const dict = {
       // languages. The company name beside it is fenced with translate="no"
       // in the JSX and is not a leaf.
       generated: { en: "Generated {date}", ar: "أُنشئ في {date}" },
+
+      /**
+       * THE PRINTED DOCUMENT'S OWN WORDS — the ATLAS sheet, not the screen.
+       *
+       * WHY THIS BLOCK EXISTS AT ALL, given every key above it. The report on
+       * screen and the report on paper state the SAME FACTS, and every fact
+       * they share reads from ONE key: the stat labels, the table heads, the
+       * driver fallbacks, the empty lines, the footer stamp and the sign
+       * readings are all reused from the block above and are NOT restated here.
+       * What is here is the wording the printed sheet needs and the screen has
+       * no place for — a section head that sits in a hanging gutter beside its
+       * own sub, a masthead caption, a footnote that states the scope a chart
+       * cannot state itself.
+       *
+       * These are the APPROVED ATLAS words, carried over from the signed-off
+       * proof sheets rather than written fresh: English from the design Turki
+       * approved, Arabic from the Arabic proof that was approved beside it.
+       * Rewording a leaf here changes a document he has already seen.
+       *
+       * ONE ARABIC NOTE THAT IS NOT A TRANSLATION. The approved Arabic trend
+       * footnote named the axis SIDES, mirrored, because the chart mirrors and
+       * the sentence could not be translated word for word. That trap is gone:
+       * the doc reuses `trips.breakdown.trendNote` above, which names the
+       * SERIES instead of a side and therefore reads correctly in both
+       * directions. Do not reintroduce a side-naming sentence here.
+       */
+      doc: {
+        // The <title> of the printed document. Never seen on the sheet; it is
+        // what the print dialog and a saved PDF are named.
+        docTitle: { en: "Project breakdown — {project}", ar: "تفصيل المشروع — {project}" },
+        eyebrow: { en: "Project breakdown", ar: "تفصيل المشروع" },
+        contact: { en: "Contact", ar: "جهة الاتصال" },
+        ratePer: { en: "per delivered trip", ar: "لكل رحلة مُسلَّمة" },
+        // LEADING PUNCTUATION IS PART OF THE LEAF. The Arabic comma is U+060C,
+        // a different character and not a different style, so it cannot be left
+        // to the renderer or to CSS.
+        commissionTail: { en: ", {type}", ar: "، {type}" },
+        terms: { en: "Terms", ar: "طريقة الدفع" },
+        issued: { en: "Issued", ar: "تاريخ الإصدار" },
+        figureCaption: { en: "Revenue, {month}", ar: "الإيرادات، {month}" },
+        figureUnit: { en: "Saudi Riyals", ar: "ريال سعودي" },
+        // The currency word set BESIDE a figure, in running text and in a
+        // window's sub-line. NOT in a column head — a head is a whole phrase
+        // and is its own key, because Arabic does not put the unit where
+        // English does.
+        sarUnit: { en: "SAR", ar: "ريال" },
+        listSep: { en: ", ", ar: "، " },
+
+        financialHead: { en: "Financial", ar: "المالية" },
+        financialNote: {
+          en: "Revenue sums the rate frozen on each delivered trip on the day it ran, so a later change to the project rate prices new work only and never re-prices this month. Commission is the amount frozen at delivery.",
+          ar: "تجمع الإيرادات السعر المُثبَّت على كل رحلة مُسلَّمة يوم تنفيذها، لذا فإن أي تغيير لاحق في سعر المشروع يُسعِّر الأعمال الجديدة وحدها ولا يُعيد تسعير هذا الشهر. والعمولة هي المبلغ المُثبَّت عند التسليم.",
+        },
+
+        paymentsHead: { en: "Payments received", ar: "المدفوعات المستلمة" },
+        paymentsSub: { en: "In month", ar: "خلال الشهر" },
+        colAmountSar: { en: "Amount SAR", ar: "المبلغ بالريال" },
+        receivedIn: { en: "Received in {month}", ar: "المستلم في {month}" },
+
+        payableSub: { en: "All periods, as at today", ar: "كل الفترات، حتى تاريخه" },
+        payableNote: {
+          en: "Scoped differently from everything above it. This is a running figure over all periods as at {generated}, not a figure for {month}: the value of every delivered trip and every live special charge that is not yet on a paid invoice.",
+          ar: "نطاق هذا الرقم يختلف عن كل ما سبقه. فهو رقم جارٍ لكل الفترات حتى {generated}، لا رقم شهر {month}: قيمة كل رحلة مُسلَّمة وكل رسم خاص قائم لم يُدرج بعد في فاتورة مدفوعة.",
+        },
+
+        trendHead: { en: "Six-month trend", ar: "اتجاه ستة أشهر" },
+        trendSub: { en: "To {month}", ar: "حتى {month}" },
+        // The chart legend's money series. The count series reuses
+        // `kTripsDelivered` above — same words, one leaf. This one cannot,
+        // because the legend has to say which of the two axes is riyals.
+        seriesRevenue: { en: "Revenue (SAR)", ar: "الإيرادات (ريال)" },
+        trendAria: {
+          en: "Revenue and trips delivered, six months to {month}",
+          ar: "الإيرادات والرحلات المُسلَّمة، ستة أشهر حتى {month}",
+        },
+
+        operationalHead: { en: "Operational", ar: "التشغيل" },
+        barTotal: { en: "{n} trips scheduled", ar: "{n} رحلة مجدولة" },
+        barFootnote: { en: "Hatched = not delivered", ar: "المُظلَّل = غير مُسلَّمة" },
+        barAria: { en: "Delivered against scheduled", ar: "المُسلَّم مقابل المجدول" },
+
+        deliveriesSub: { en: "Rolling, to today", ar: "متجدد، حتى اليوم" },
+        deliveriesNote: {
+          en: "Anchored to {generated} and not to the month above, so the 30-day window overlaps {month} without matching it.",
+          ar: "مرتبطة بتاريخ {generated} لا بالشهر أعلاه، لذا تتداخل نافذة الثلاثين يوماً مع {month} دون أن تطابقه.",
+        },
+
+        dailyHead: { en: "Trips per day", ar: "الرحلات اليومية" },
+        dailyAria: { en: "Trips per day, {month}", ar: "الرحلات اليومية، {month}" },
+
+        sourcesHead: { en: "Sources", ar: "المصادر" },
+
+        byDriverHead: { en: "By driver", ar: "حسب السائق" },
+        colCommissionSar: { en: "Commission SAR", ar: "العمولة بالريال" },
+        colRevenueSar: { en: "Revenue SAR", ar: "الإيراد بالريال" },
+      },
     },
 
     /**

@@ -149,13 +149,65 @@ function line(f: Frame, x1: number, y1: number, x2: number, y2: number, attrs: s
   return `<line x1="${num(f.x(x1))}" y1="${num(y1)}" x2="${num(f.x(x2))}" y2="${num(y2)}" ${attrs}/>`;
 }
 
-/** Nice round axis maximum and a tick step that lands on it. */
-function niceScale(max: number, targetTicks: number): { max: number; step: number } {
+/** Nice round axis maximum and a tick step that lands on it.
+ *
+ *  `whole` is for the axes that carry a COUNT. Trips are indivisible, so a
+ *  quarter-trip gridline is not a rounding preference, it is a measurement that
+ *  cannot exist. The bare arithmetic produces one: niceScale(1, 4) gives a
+ *  0.25 step — ticks at 0.25, 0.5, 0.75 — which is what a project with a single
+ *  trip in its busiest month of the window would print. That is one trip away
+ *  from live data, not a hypothetical; the sample never reaches it because its
+ *  counts run to 200 a month, where the step is already 100. Clamping to a
+ *  whole step therefore moves no approved raster. */
+function niceScale(max: number, targetTicks: number, whole = false): { max: number; step: number } {
+  // A ZERO OR ABSENT MAXIMUM POISONS EVERY COORDINATE BELOW. Math.log10(0) is
+  // -Infinity, so mag is 0, norm is NaN and step is 0 — then the returned max is
+  // NaN and every y() the caller computes is NaN, which Chromium draws as no
+  // geometry at all. Math.max(...[]) is -Infinity and lands in the same place.
+  // A one-unit axis is the honest answer: the series is flat at zero, so the
+  // chart should show a baseline, not vanish.
+  // This CANNOT fire on the approved sample data — every proof month has revenue
+  // and trips — so it changes no signed-off raster. It fires on REAL data: a
+  // project month with nothing delivered, which is a legitimate month.
+  if (!(max > 0)) return { max: 1, step: 1 };
   const rough = max / targetTicks;
   const mag = Math.pow(10, Math.floor(Math.log10(rough)));
   const norm = rough / mag;
-  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+  const raw = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+  // Rounded UP, never to nearest: a 1.5 step rounding down to 1 would add ticks
+  // rather than remove the fraction, and 2.5 -> 2 would no longer land on the
+  // maximum the line below computes from it.
+  const step = whole ? Math.max(1, Math.ceil(raw)) : raw;
   return { max: Math.ceil(max / step) * step, step };
+}
+
+/** A money tick, in thousands ONLY WHEN THAT IS STILL THE SAME NUMBER.
+ *
+ *  The axis used to read `(v / 1000).toFixed(0) + "k"` unconditionally, which
+ *  is exact for the approved sample (its steps are 5,000 and 20,000) and WRONG
+ *  the moment a real project is small: at a 500 step the ticks 500 / 1,000 /
+ *  1,500 all round to "1k", "1k", "2k" — two gridlines carrying one label, and
+ *  a line labelled 1k that is really 500. The empty month is worse still: the
+ *  zero-max guard above hands back a one-unit axis, and BOTH its ticks print
+ *  "0k". A tick that misstates its own gridline is a false figure on a finance
+ *  sheet, not a typographic nit.
+ *
+ *  So the unit is chosen from the STEP, once per axis, and never per tick —
+ *  mixed units down one axis would be its own lie. `k` survives only where it
+ *  loses nothing; otherwise the value is spelt out, grouped like every other
+ *  figure on the sheet. Steps under 1,000 cap the axis at a few thousand, so
+ *  the spelt-out form cannot outgrow the 44px the label well affords.
+ *
+ *  Sample data is untouched: both proof steps are whole thousands, so they take
+ *  the same branch they always did and no signed-off raster moves. */
+function moneyTick(v: number, step: number): string {
+  if (step % 1000 === 0) return (v / 1000).toFixed(0) + "k";
+  const [int, frac] = Math.abs(v).toFixed(2).split(".");
+  const dec = frac.replace(/0+$/, "");
+  // Grouping by hand rather than toLocaleString: the kit renders one document
+  // in one language, and a locale-aware separator would put Arabic-Indic digits
+  // on the Arabic sheet, where every other chart figure is Latin.
+  return (v < 0 ? "-" : "") + int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (dec ? "." + dec : "");
 }
 
 const hatchId = (k: string) => `atlas-hatch-${k}`;
@@ -212,7 +264,8 @@ export function trendChart(
   const pw = w - L - R, ph = h - T - B;
 
   const pri = niceScale(Math.max(...data.map((d) => d.primary)), 4);
-  const sec = niceScale(Math.max(...data.map((d) => d.secondary)), 4);
+  // The secondary series is a TRIP COUNT, so its axis is whole (niceScale).
+  const sec = niceScale(Math.max(...data.map((d) => d.secondary)), 4, true);
 
   const x = (i: number) => L + (pw * i) / (data.length - 1);
   const yPri = (v: number) => T + ph - (ph * v) / pri.max;
@@ -240,7 +293,7 @@ export function trendChart(
   // buries the shape of the line under its own labels.
   for (let v = 0; v <= pri.max + 0.001; v += pri.step) {
     g += line(f, L - 4, yPri(v), L, yPri(v), `stroke="${s.ink}" stroke-width="${num(s.axis)}"`);
-    g += txt(f, L - 8, yPri(v) + s.labelSize * 0.35, (v / 1000).toFixed(0) + "k",
+    g += txt(f, L - 8, yPri(v) + s.labelSize * 0.35, moneyTick(v, pri.step),
       { anchor: "end", mono: true });
   }
   for (let v = 0; v <= sec.max + 0.001; v += sec.step) {
@@ -272,10 +325,26 @@ export function trendChart(
 
   // DIRECT labels on the final point of each series. The reader should not have
   // to travel to a legend to learn which line is which.
+  //
+  // THE SECONDARY LABEL SITS BELOW ITS POINT, AND BELOW RUNS OUT. The month
+  // ticks are drawn at T + ph + 16, so a series ending ON the baseline puts its
+  // label at T + ph + 15 — one pixel clear of a row of month names, which is to
+  // say printed straight through them. Real data ends at zero routinely: an
+  // empty month ends both series there, and a project's last month often has no
+  // trips yet. So when below would land in the tick band the label flips ABOVE
+  // its own point, and takes a second row only when the primary label is
+  // already occupying the first. The proof's series both end high, so neither
+  // branch fires on the approved rasters.
   const last = data.length - 1;
-  g += txt(f, x(last) - 10, yPri(data[last].primary) - 9, opt.primaryLabel,
+  const py = yPri(data[last].primary);
+  const sy = ySec(data[last].secondary);
+  g += txt(f, x(last) - 10, py - 9, opt.primaryLabel,
     { anchor: "end", fill: s.ink, weight: 600, size: s.labelSize * 0.95 });
-  g += txt(f, x(last) - 10, ySec(data[last].secondary) + 15, opt.secondaryLabel,
+  const below = sy + 15;
+  const secY = below > T + ph + 2
+    ? sy - 9 - (Math.abs(sy - py) < s.labelSize * 1.8 ? s.labelSize * 1.4 : 0)
+    : below;
+  g += txt(f, x(last) - 10, secY, opt.secondaryLabel,
     { anchor: "end", fill: s.mid, size: s.labelSize * 0.95 });
 
   return svg(w, h, opt.aria, g);
@@ -291,7 +360,8 @@ export function dailyChart(
   const f = frame(s, w);
   const L = 30, R = 6, T = 14, B = 26;
   const pw = w - L - R, ph = h - T - B;
-  const sc = niceScale(Math.max(...data), 3);
+  // Every bar here is a count of trips on one day — a whole axis, same reason.
+  const sc = niceScale(Math.max(...data), 3, true);
   // Gridlines stay on the round values niceScale picked, but the bars are
   // mapped against a slightly taller ceiling so a peak day stops short of the
   // plot's top edge. A bar welded to the frame reads as a clipped chart.

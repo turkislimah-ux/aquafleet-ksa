@@ -69,6 +69,12 @@ import { t, fill, type Lang } from "@/lib/i18n";
 // db-types' three `_LABELS` maps stay as they are and are no longer read here.
 import { paymentMethodLabel, paymentModeLabel, waterTypeLabel } from "@/lib/enum-labels";
 import DeliveriesReportBand, { buildDeliveriesReport } from "./DeliveriesReportBand";
+// PRINT = an ATLAS document in a hidden iframe, never this DOM. The view-model
+// decides every word and figure, the renderer only the look; printHtml owns the
+// transport. Nothing in globals.css reaches inside that iframe.
+import { buildBreakdownHtml } from "@/lib/docs/breakdown";
+import { buildBreakdownVm } from "@/lib/docvm/breakdown";
+import { printHtml } from "@/lib/printHtml";
 // round2 from the money engine, not a local copy — a revenue figure should round
 // the same way the balance it is compared against does.
 import { round2 } from "@/lib/prepaid";
@@ -228,17 +234,10 @@ export default function BreakdownReport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, project?.id]);
 
-  // Print: tag <body> so the print CSS can drop the app chrome from flow and let
-  // the report paginate (static flow), then untag once the dialog closes.
-  function handlePrint() {
-    document.body.classList.add("printing-breakdown");
-    const cleanup = () => {
-      document.body.classList.remove("printing-breakdown");
-      window.removeEventListener("afterprint", cleanup);
-    };
-    window.addEventListener("afterprint", cleanup);
-    window.print();
-  }
+  // THE PRINT PATH IS NOT HERE ANY MORE. It sits below every figure it needs
+  // (grep handlePrint), because it assembles a document out of them and a
+  // function reading a const declared 300 lines further down reads as a bug.
+  // What it no longer does: tag <body> and call window.print() on this DOM.
 
   // The project's CURRENT rate. It is a DISPLAY figure (the header money block)
   // and a FALLBACK — it is no longer what any revenue number is computed from.
@@ -419,13 +418,22 @@ export default function BreakdownReport({
     for (const t of totalInMonth) if (t.water_station) set.add(t.water_station);
     return Array.from(set).map((k) => stationName.get(k) ?? k);
   }, [totalInMonth, stationName]);
+  // TWO MEMOS OVER ONE SET, SPLIT ON PURPOSE. The set itself is DATA and has no
+  // language; the labels are DISPLAY. The document needs the enum values (it
+  // labels them in its own view-model, in the language of the sheet being
+  // printed, which is not necessarily the one on screen), the screen needs the
+  // strings. Deriving the second from the first is what keeps them one set.
+  const waterTypesSeen = useMemo(() => {
+    const set = new Set<WaterType>();
+    for (const tr of totalInMonth) if (tr.water_type) set.add(tr.water_type);
+    return Array.from(set);
+  }, [totalInMonth]);
   // `lang` IS A DEPENDENCY: this memo composes DISPLAY strings, so without it
   // the list would keep the language it was first computed in.
-  const waterTypesUsed = useMemo(() => {
-    const set = new Set<string>();
-    for (const tr of totalInMonth) if (tr.water_type) set.add(tr.water_type);
-    return Array.from(set).map((k) => waterTypeLabel(k as WaterType, lang) || k);
-  }, [totalInMonth, lang]);
+  const waterTypesUsed = useMemo(
+    () => waterTypesSeen.map((k) => waterTypeLabel(k, lang) || k),
+    [waterTypesSeen, lang],
+  );
 
   // --- Section 3: Two driver tables (delivered_at basis) -----------------
   const driverRows = useMemo(() => {
@@ -555,8 +563,6 @@ export default function BreakdownReport({
   );
   const hasStatusData = deliveredCount + notDelivered > 0;
 
-  if (!open || !project || !mounted) return null;
-
   const monthInProgress = selMonth === currentMonth;
   // Terms in force TODAY. Null mode = the view had no row (or the report opened
   // before the read landed) — render an em dash, never a zero: "0 SAR fixed" is
@@ -569,6 +575,106 @@ export default function BreakdownReport({
     commMode === "scalable"
       ? `${t("labels.commScalable", lang)} +${commissionNow?.commission_bump_pct ?? 0}%`
       : t("labels.commFixed", lang);
+
+  // --- Print ---------------------------------------------------------------
+  // The printed sheet is a DOCUMENT, assembled from the memos above and pushed
+  // through the ATLAS kit into a hidden same-origin iframe. It is not this DOM
+  // with the chrome hidden, and the CSS that used to do that is gone.
+  //
+  // EVERY FIGURE IS PASSED, NOT RECOMPUTED. lib/docvm/breakdown.ts takes
+  // computed numbers precisely so that the two surfaces cannot disagree: the
+  // payable rule and the deliveries builder live in this directory, and no file
+  // under lib/ imports from app/, so a document that computed its own would be a
+  // second expression of a money rule. One computation, this one.
+  function handlePrint() {
+    if (!project) return;
+    printHtml(
+      buildBreakdownHtml(
+        buildBreakdownVm({
+          lang,
+          // Stamped when the sheet is PRODUCED, which for a printout is now.
+          generatedAt: new Date(),
+          project: { id: project.id, name: project.name, ratePerTripSar: rate },
+          paymentMode: project.payment_mode,
+          customerName,
+          contactName,
+          phone,
+          monthKey: selMonth,
+          monthInProgress,
+          commission: {
+            value: commMode ? commissionNow?.commission_value ?? 0 : null,
+            // The composed display string, because the `+N%` is spliced into it
+            // here and the document must say the same words the screen does.
+            typeLabel: commMode ? commType : null,
+            nextEffectiveFrom: commissionNow?.next_effective_from ?? null,
+          },
+          financial: { deliveredCount, revenue, commission, netMargin, avgRevenue },
+          operational: { totalCount, deliveredCount, notDelivered, completion },
+          payments: monthPayments.map((p) => ({
+            date: p.date,
+            invoiceNumber: p.inv.invoice_number,
+            method: p.inv.payment_method,
+            reference: p.inv.payment_reference,
+            amount: p.inv.grand_total_sar,
+          })),
+          paymentsTotal: monthPaymentsTotal,
+          amountPayable,
+          trend: trendData,
+          daily: dailyData.map((d) => d.trips),
+          deliveries: deliveriesWindows,
+          stations: stationsUsed,
+          waterTypes: waterTypesSeen,
+          // Both tables are the same rows in two orders, and each carries its
+          // own money column into `amount` — which is what lets one table
+          // builder in the renderer serve both.
+          commissionByDriver: commissionTable.map((r) => ({
+            key: r.key,
+            name: r.name,
+            unassigned: r.key === UNASSIGNED,
+            tripsDelivered: r.tripsDelivered,
+            amount: r.commission,
+          })),
+          revenueByDriver: revenueTable.map((r) => ({
+            key: r.key,
+            name: r.name,
+            unassigned: r.key === UNASSIGNED,
+            tripsDelivered: r.tripsDelivered,
+            amount: r.revenue,
+          })),
+        }),
+      ),
+    );
+  }
+
+  // CTRL/CMD+P PRINTS THE DOCUMENT TOO. Without this the shortcut prints a BLANK
+  // SHEET: globals.css hides everything and un-hides by whitelist, and this
+  // report's whitelist entry went with its print CSS. Same intercept
+  // StatementModal and InvoiceDetailModal carry, for the same reason.
+  //
+  // Capture phase, so it runs before anything else can swallow the key. The
+  // guard MIRRORS the render guard below: a handler registered by a render that
+  // bailed out early would close over consts that render never initialised.
+  useEffect(() => {
+    if (!open || !project || !mounted) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      handlePrint();
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+    // The deps are what the SHEET is made of — month, language and the data
+    // props — so a registered handler cannot print a stale month.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    open, project, mounted, selMonth, lang,
+    trips, drivers, stations, specialCharges, paidInvoices, commissionNow,
+  ]);
+
+  if (!open || !project || !mounted) return null;
+
   // RECHARTS SERIES NAMES, resolved ONCE. Each is read twice — as the `name`
   // prop and by a tooltip formatter — and the formatter compares against THIS
   // const, never a hard-coded English word, so the money formatting follows the
@@ -588,7 +694,9 @@ export default function BreakdownReport({
 
   return createPortal(
     <div
-      className="breakdown-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40"
+      // NO .breakdown-print-portal: this overlay is a SCREEN overlay now and
+      // nothing about it is printed, so it needs no print hook.
+      className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40"
       onClick={onClose}
     >
       <ScrollLock />
@@ -601,8 +709,9 @@ export default function BreakdownReport({
         className="card p-0 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Toolbar — not printed. */}
-        <div className="no-print sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-app bg-[rgb(var(--card))] px-5 py-3">
+        {/* Toolbar. NO .no-print: nothing in this modal is printed any more, so
+            there is nothing to hide from a printout. */}
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-app bg-[rgb(var(--card))] px-5 py-3">
           <div className="flex items-center gap-2">
             <label className="text-sm muted">{t("trips.breakdown.month", lang)}</label>
             <select
@@ -628,8 +737,9 @@ export default function BreakdownReport({
           </div>
         </div>
 
-        {/* Printable report area. */}
-        <div id="breakdown-print" className="p-5 space-y-6">
+        {/* The ON-SCREEN report. NO id="breakdown-print": the printed sheet is
+            built by lib/docs/breakdown.ts and this subtree is never printed. */}
+        <div className="p-5 space-y-6">
           {/* Header — two-side formal document layout: left overview, right money. */}
           <div className="flex items-start justify-between gap-6">
             {/* Left: project / customer / contact overview. */}
@@ -668,8 +778,9 @@ export default function BreakdownReport({
             </div>
 
             {/* Right: rate + commission money block. Numbers green; labels/type
-                plain. print-color-adjust (globals.css #breakdown-print) keeps the
-                green from flattening to black in the printed PDF. */}
+                plain. A SCREEN treatment only — the print-color-adjust override
+                that kept this green alive on paper left with the print CSS, and
+                the document is B&W by construction. */}
             <div className="shrink-0 text-end text-sm">
               <div>
                 <span>{t("common.rate", lang)} </span>

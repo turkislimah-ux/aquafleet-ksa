@@ -393,13 +393,12 @@ html[dir="rtl"] { --dock-dir: -1; }
    that is meant to be signed and filed. */
 @page { size: A4; margin: 14mm; }
 
-/* Print isolation — show only the report subtree (#history-print payout, or
-   #breakdown-print project report). Everything else is hidden so the printout is
-   just the record, edge-to-edge. */
+/* Print isolation — show only the report subtree (#history-print payout, or one
+   of the statements below). Everything else is hidden so the printout is just
+   the record, edge-to-edge. */
 @media print {
   body * { visibility: hidden !important; }
   #history-print, #history-print *,
-  #breakdown-print, #breakdown-print *,
   #permit-print, #permit-print *,
   /* Reports tab 2 — one id per statement, so "print" means "print THIS
      statement". Only one statement is mounted at a time, so exactly one of
@@ -421,8 +420,8 @@ html[dir="rtl"] { --dock-dir: -1; }
      Every other statement is mounted alone, so "one id visible" is enough.
      Here the register and the commission review render together, so a body
      class set by the review table's own Print button decides which survives —
-     same mechanism as body.printing-breakdown below. Without this, printing
-     either one would emit both. */
+     same mechanism as body.printing-po below. Without this, printing either one
+     would emit both. */
   body.printing-review #payslips-print { display: none !important; }
   body:not(.printing-review) #commission-review-print { display: none !important; }
   .no-print { display: none !important; }
@@ -567,55 +566,23 @@ html[dir="rtl"] { --dock-dir: -1; }
     overflow: visible !important;
   }
 
-  /* Breakdown report — a MULTI-section document that must PAGINATE. An absolute/
-     fixed container clips to a single page, so the report flows in NORMAL static
-     flow instead. The modal is portaled to <body> (class .breakdown-print-portal)
-     and printed with the body.printing-breakdown marker, so we can drop the app
-     chrome from flow entirely (no blank leading pages) and un-clip the modal's
-     scroll container (max-height/overflow). */
-  body.printing-breakdown > *:not(.breakdown-print-portal) { display: none !important; }
-
-  .breakdown-print-portal,
-  .breakdown-print-portal > * {
-    position: static !important;
-    inset: auto !important;
-    max-width: none !important;
-    max-height: none !important;
-    overflow: visible !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    display: block !important;
-  }
-  #breakdown-print {
-    position: static !important;
-    margin: 0;
-    padding: 1rem;
-    max-height: none !important;
-    overflow: visible !important;
-    /* print-color-adjust is inherited — keep the emerald numbers / chart fills
-       from flattening to black in the PDF. */
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-
-  /* Page-break hygiene: don't slice a chart or KPI row in half; long driver
-     tables may still break across pages, but never mid-row. */
-  #breakdown-print table tr { break-inside: avoid; }
-
-  /* THE INVOICE'S AND THE STATEMENT'S BLOCKS ARE BOTH GONE, AND THEIR ABSENCE
-     IS THE FEATURE.
+  /* THE INVOICE'S, THE STATEMENT'S AND NOW THE BREAKDOWN'S BLOCKS ARE ALL GONE,
+     AND THEIR ABSENCE IS THE FEATURE.
      They used to live here: `#invoice-print` + `body.printing-invoice`, then
      `#statement-print` + `body.printing-statement` + `.statement-print-portal`,
-     both the same portal/paginate pattern as the breakdown above — hide the
-     whole page, un-hide one modal subtree, print the live React DOM. Each now
-     prints as its own DOCUMENT into a hidden same-origin iframe the browser
-     prints on its own: the invoice from lib/invoicePrintTemplate.ts, the
-     statement from lib/statementPdfTemplate.ts, both off the SAME shared
-     view-model their download path uses. Nothing in this stylesheet reaches
-     inside those iframes, which is the point — neither printed document
-     inherits the app's screen styling, and neither layout can be broken from
-     here.
+     then `#breakdown-print` + `body.printing-breakdown` +
+     `.breakdown-print-portal` (which also carried a `table tr` break-inside
+     rule and a print-color-adjust override for its emerald figures) — all the
+     same portal/paginate pattern: hide the whole page, un-hide one modal
+     subtree, print the live React DOM. Each now prints as its own DOCUMENT into
+     a hidden same-origin iframe the browser prints on its own: the invoice from
+     lib/invoicePrintTemplate.ts, the statement from lib/statementPdfTemplate.ts,
+     the breakdown from lib/docs/breakdown.ts through the ATLAS kit. Nothing in
+     this stylesheet reaches inside those iframes, which is the point — no
+     printed document inherits the app's screen styling, and no document's
+     layout can be broken from here. The breakdown's pagination, page-break
+     hygiene and B&W treatment are the kit's now (lib/atlas/shell.ts), which is
+     also why its colour override left with it: the document has no colour.
 
      Also gone with the statement's block: the two rules that stripped a
      settlement row's green tint and ink at print time. They were only ever
@@ -623,17 +590,20 @@ html[dir="rtl"] { --dock-dir: -1; }
      settlement rows to make a long statement scannable. The document has no
      tint to strip — it is B&W by construction.
 
-     THE STATEMENT'S REMOVAL FROM THIS BLOCK IS WHY StatementModal INTERCEPTS
-     CTRL/CMD+P. This @media block opens with `body * { visibility: hidden }`
-     and un-hides by whitelist, so a subtree that leaves the whitelist without
-     an intercept prints a BLANK SHEET — a failure that reads like the
-     printer's fault. Do not delete a whitelist entry here without checking
-     what its owner does with the shortcut. */
+     THIS IS WHY StatementModal AND BreakdownReport BOTH INTERCEPT CTRL/CMD+P.
+     This @media block opens with `body * { visibility: hidden }` and un-hides
+     by whitelist, so a subtree that leaves the whitelist without an intercept
+     prints a BLANK SHEET — a failure that reads like the printer's fault. The
+     breakdown's intercept was ADDED in the same commit that deleted its
+     whitelist entry, because deleting the entry is what arms the trap. Do not
+     delete a whitelist entry here without checking what its owner does with
+     the shortcut. */
 
-  /* Purchase Order detail (Inventory Phase 4) — same portal/paginate
-     pattern as the breakdown above, its own independent id/class/marker set.
-     (This used to read "breakdown/statement"; the statement left this
-     stylesheet, see above. The breakdown is now the only remaining example.) */
+  /* Purchase Order detail (Inventory Phase 4) — the same portal/paginate
+     pattern, its own independent id/class/marker set. (This used to point at
+     the breakdown and the statement as the other examples; both have left this
+     stylesheet, see above, so the PO is now the only one left. It is next in
+     line, and when it goes this whole mechanism goes with it.) */
   #po-print, #po-print * { visibility: visible !important; }
   body.printing-po > *:not(.po-print-portal) { display: none !important; }
 
