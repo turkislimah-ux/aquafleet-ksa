@@ -964,7 +964,21 @@ export function buildNarrative(args: {
             d.dir === "up" ? "reports.narrative.revenueUp"
               : d.dir === "down" ? "reports.narrative.revenueDown"
               : "reports.narrative.revenueFlat",
-            { v: sar(c.revenue_sar), d: formatPct(d.pct), p: periodLabel(p!, lang) },
+            // UNSIGNED, because the TEMPLATE already carries the direction.
+            // The key is chosen from `d.dir`, and `d.dir` is the sign of this
+            // very number (`delta()` above: dir is `abs > 0` / `abs < 0`, and
+            // pct divides by `Math.abs(prev)` so it cannot disagree). A signed
+            // figure therefore states the direction a SECOND time, in a second
+            // encoding, and the two readings collide: `formatPct` gave
+            // "down -60.0%" and "up +60.0%".
+            //
+            // `Math.abs` ALONE DOES NOT FIX IT — `formatPct` re-adds a "+" to
+            // any positive, so abs-into-formatPct turns the fall into
+            // "down +60.0%", which is worse than the bug. The sign has to be
+            // STRIPPED, which is what `formatShare` is for: same one decimal,
+            // no sign. Flat is unaffected either way (0 takes no sign from
+            // either function).
+            { v: sar(c.revenue_sar), d: formatShare(Math.abs(d.pct)), p: periodLabel(p!, lang) },
           )
         : p
           ? say("reports.narrative.revenueVsNothing", { v: sar(c.revenue_sar), p: periodLabel(p, lang) })

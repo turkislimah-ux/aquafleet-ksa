@@ -1441,13 +1441,13 @@ instruction.
    server-side, the other 17 pass the server's own English through. Do not
    "reconcile" them, and do not re-open this from a fresh grep.
 
-### (b) Doable FIX — THREE entries. 1 and 2 CLOSED; **entry 3 is OPEN**
+### (b) Doable FIX — THREE entries, ALL THREE CLOSED
 
 **This section read "EMPTY again" from 2026-09-09 until entry 1 opened it, and
-was effectively EMPTY again from 2026-09-11 until entry 3 opened it on
-2026-09-13.** Entry 1 closed 2026-09-10 on the pristine replay; entry 2 closed
-2026-09-11 as `0fa3969`. Both are kept below for their mechanism and their
-lesson, **not as work** — do not reopen either. **Entry 3 is live work.**
+is effectively EMPTY again as of 2026-09-13.** Entry 1 closed 2026-09-10 on the
+pristine replay; entry 2 closed 2026-09-11 as `0fa3969`; entry 3 opened and
+closed on 2026-09-13. All three are kept below for their mechanism and their
+lesson, **not as work** — do not reopen any of them.
 
 1. **CLOSED 2026-09-10 — POST-DEPLOY: THE MIGRATION SET WAS NOT SELF-REBUILDABLE.
    SIX instances, every one measured 2026-09-10, ALL SIX NOW RESOLVED.** Four
@@ -1928,10 +1928,11 @@ For the record, what they were and what measurement showed:
   and never will — this file has no numbered sections. It now states the fact it
   meant: no role gate exists, so RLS alone scopes the result set.
 
-3. **OPEN, opened 2026-09-13 — THE NARRATIVE'S FALL BULLET DOUBLE-NEGATES ITS
-   OWN PERCENTAGE. A CONTENT bug in the composer, NOT a print bug.** Surfaced by
-   batch 3's print work and flagged rather than fixed there, on Turki's ruling
-   the same day. Measured on the live Sep 2026 narrative, **both languages**:
+3. **CLOSED 2026-09-13, same day it opened — THE NARRATIVE'S FALL BULLET
+   DOUBLE-NEGATED ITS OWN PERCENTAGE. A CONTENT bug in the composer, NOT a print
+   bug.** Surfaced by batch 3's print work and flagged rather than fixed there,
+   on Turki's ruling; fixed in the next commit on his instruction. Measured on
+   the live Sep 2026 narrative before the fix, **both languages**:
 
    - EN — `Revenue was 20,290 SAR, down -60.0% on Aug 2026.`
    - AR — `بلغت الإيرادات 20,290 SAR، بانخفاض -60.0% عن أغسطس 2026.`
@@ -1943,26 +1944,49 @@ For the record, what they were and what measurement showed:
    `lib/reports.ts:818` from the sign of that very number, so the word and the
    minus are two expressions of ONE fact and the sentence says it twice.
 
-   **Only the DOWN branch reads wrong.** `revenueUp` (`lib/i18n.ts:5736`) gets a
-   positive pct and renders `up 60.0%`, which is correct — which is exactly why
-   this survived: half the cases look fine.
+   **THE FIRST DIAGNOSIS SAID "ONLY THE DOWN BRANCH READS WRONG" AND THAT WAS
+   WRONG — `formatPct` IS SIGNED IN BOTH DIRECTIONS.** It prepends a `+` to any
+   positive, so `revenueUp` (`lib/i18n.ts:5736`) rendered **`up +60.0%`**, the
+   same collision mirrored. It went unrecorded because **no live month could
+   show it**: measured 2026-09-13, Jul 2026's prior month is zero, so that
+   bullet takes `revenueVsNothing` and never reaches the up branch at all. The
+   defect was read out of the code and then PROVEN by calling `delta()` and the
+   template directly on a synthetic up/down/flat triple, rather than inferred
+   from the one live sheet that happened to fall.
 
-   **ONE call site.** `formatPct(` appears twice in `lib/reports.ts` — its
-   definition at `:862` and this call at `:967`. Nothing else in the file feeds a
-   signed percentage into a worded direction, so the blast radius is one
-   argument. Verify with `npx tsx scripts/code-grep.ts formatPct lib/reports.ts`
-   before assuming that is still true.
+   **THE CONSEQUENCE FOR THE FIX IS NOT COSMETIC: `Math.abs` ALONE MAKES IT
+   WORSE.** Abs-then-`formatPct` re-adds the sign it just removed, turning the
+   fall into **`down +60.0%`** — a sentence that now contradicts itself outright
+   instead of merely repeating itself. The sign has to be **stripped**, not
+   flipped, which is what `formatShare` is for: same one decimal, no sign. The
+   call is now `formatShare(Math.abs(d.pct))`, and it corrects up and down at
+   once. Flat is untouched — zero takes a sign from neither function.
 
-   **DO NOT FIX THIS IN `lib/docvm/narrative.ts` OR `lib/docs/narrative.ts`.**
-   The printable law is that every sheet mirrors its on-screen source exactly —
-   0% deviation in DATA, GROUPING and WORDING. The renderer takes the composed
-   bullet as WORDING and must not improve it; a renderer-side `Math.abs` would
-   make the sheet disagree with the screen it prints, which is the one failure
-   the whole kit is built to prevent. **Fix at the composer and both surfaces
-   move together** — that is the point of there being one composer.
+   **`formatPct` STAYS, and its other three callers are CORRECT.**
+   `app/reports/OverviewTab.tsx:675`, `:705` and
+   `app/reports/StatementsTab.tsx:1192` print a bare delta chip with **no
+   direction word beside it**, so there the sign IS the direction and carries
+   the only copy of it. The bug was never `formatPct`; it was feeding a signed
+   figure to a template that had already said which way it went.
 
-   Scope note: this is `buildNarrative`'s output, so it is screen copy first. It
-   is not blocked on anything and it is not part of the print batches.
+   **ONE call site**, which is why a one-argument change closed it. Nothing else
+   in `lib/reports.ts` feeds a signed percentage into a worded direction.
+
+   **IT WAS FIXED IN THE COMPOSER, NOT IN THE RENDERER, AND THAT WAS THE WHOLE
+   POINT.** The printable law is that every sheet mirrors its on-screen source
+   exactly — 0% deviation in DATA, GROUPING and WORDING. The renderer takes the
+   composed bullet as WORDING and must not improve it; a renderer-side fix in
+   `lib/docvm/narrative.ts` or `lib/docs/narrative.ts` would have made the sheet
+   disagree with the screen it prints, which is the one failure the kit exists to
+   prevent. One composer, so one edit moved both surfaces — verified by
+   re-rendering the Sep narrative in both languages after the change.
+
+   **The general lesson, and the reason this entry is kept:** a figure and a word
+   that encode the SAME fact will eventually be combined by a caller that does
+   not know they overlap. `formatPct` is not wrong and neither is `revenueDown`;
+   the defect lived only at the junction. When a template names a direction, the
+   number it interpolates has to be unsigned — check that before adding any new
+   `{d}`-style key.
 
 ### (c) FORWARD-ONLY — nothing to do, no owner, not defects
 
