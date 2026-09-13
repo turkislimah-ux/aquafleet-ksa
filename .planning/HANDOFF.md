@@ -77,7 +77,7 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Git
 
-- **`main` was at `410de67` when this line was written, and the commit carrying
+- **`main` was at `d1629dc` when this line was written, and the commit carrying
   this file is its child.** Measured with `git rev-parse HEAD`.
 - **Level with origin, measured BOTH required ways**: the BRANCH line of
   `git status -sb` reads `## main...origin/main` with no ahead/behind marker,
@@ -712,23 +712,27 @@ before running any build while dev is up.
 ### Printing — THREE models now, and which surfaces are on which
 
 - **The ATLAS DOCUMENT model** — `lib/docvm/*` decides what the sheet SAYS,
-  `lib/docs/*` decides only where it sits, `printHtml()` prints it. Nine
-  surfaces as of `62dae53`: revenue, receivables, **cost**, **operations**,
-  narrative, custom, breakdown, purchase orders, exit permits. These carry **no
-  print id, no PrintBand and nothing in `globals.css`** — the DOM below them is
-  screen-only.
+  `lib/docs/*` decides only where it sits, `printHtml()` prints it. Eleven
+  surfaces as of `d1629dc`: revenue, receivables, cost, operations, narrative,
+  custom, **P&L**, **daily trips**, breakdown, purchase orders, exit permits.
+  These carry **no print id, no PrintBand and nothing in `globals.css`** — the
+  DOM below them is screen-only.
 - **The older DOCUMENT model** (own stylesheet, hidden same-origin iframe, no app
   CSS reaches inside): **invoice** (`lib/invoicePrintTemplate.ts`) and
   **statement** (`lib/statementPdfTemplate.ts`), both off
   `lib/plainDocStyles.ts`'s `plainDocShell`, both sharing their download path's
   view-model. Not migrated to ATLAS and not scheduled to be.
 - **The SCREEN-DOM model** (`app/globals.css`, `body * { visibility: hidden }`
-  plus an un-hide whitelist): what is left. **Re-measured 2026-09-13 the
-  whitelist carries 5 ids**, down from 13 before the batches: `history`, `pnl`,
-  `payslips`, `commission-review`, `daily-trips`. `#permit-print` is gone
+  plus an un-hide whitelist): what is left. **Re-measured 2026-09-13 after batch
+  5 (`d1629dc`) the whitelist carries 3 ids**, down from 13 before the batches:
+  `history`, `payslips`, `commission-review`. On the Reports tab it is **2** —
+  `history` belongs to the driver history surface, not to that tab. `#pnl-print`
+  and `#daily-trips-print` left with this batch; `#permit-print` is gone
   entirely; `#po-print` and `#breakdown-print` still exist as ids but print
   through ATLAS, so neither is on the whitelist. **Do not read that count off
-  this line next time — grep `-print` in `app/globals.css`.**
+  this line next time — grep `-print` in `app/globals.css`, and strip comments
+  before trusting it: the epitaph naming the departed rules is still in the
+  file** (CLAUDE.md §5; `npx tsx scripts/code-grep.ts pnl-print` exits 0).
 - **A subtree that leaves the whitelist without an intercept prints a BLANK
   SHEET**, which reads like the printer's fault. That is why `StatementModal`
   intercepts Ctrl/Cmd+P. Do not delete a whitelist entry without checking what
@@ -736,7 +740,52 @@ before running any build while dev is up.
 
 ---
 
-## Completed this session (2026-09-11, Arabic/RTL/numeral localization — `1adf8a3` → `1bf52bc`)
+## Completed this session (2026-09-13, ATLAS print batch 5 — P&L + daily trips, `d1629dc`)
+
+**Both statements print as ATLAS documents, and both old print paths left in the
+same commit.** Turki verified in-browser first — both languages, the Print button
+and Cmd/Ctrl+P, statement-switching, the empty-data cases, and that the
+payslips / commission-review surface still prints unchanged.
+
+- `"pnl"` and `"daily"` joined `MIGRATED` in `StatementsTab.tsx`. That set is
+  what arms the Cmd/Ctrl+P intercept, so an entry is required even for Daily
+  Trips, which keeps its OWN Print button — the tab's period controls cannot
+  express a single day, and the window listener has no button to consult.
+- **The six VAT lines moved to a module-level `pnlVatLines()`.** `usePrintSource`
+  is a hook and cannot sit below the `if (!current) return`, which is where the
+  VAT consts lived. Hoisting the RULE rather than recomputing it in the print
+  callback is what keeps the sheet and the on-screen panel from drifting.
+- Removed together: both print ids, DailyTripsTab's `print-only` masthead band
+  and all seven of its `no-print` classes, the two whitelist entries, and the
+  `#pnl-print` / `#daily-trips-print` reset, table and pagination groups. **The
+  P&L SCREEN JSX was NOT removed** — an inherited note said to delete
+  `StatementsTab.tsx:720-1000`, and reading it showed line 720 is
+  `{statement === "pnl" && (`, i.e. the statement itself. Only `id="pnl-print"`
+  went. **Measure before acting on an address in a note.**
+- An epitaph in `globals.css` names both departed pagination rule sets and points
+  at their kit replacements, `.stack > .sec-head` and `tfoot` in
+  `lib/atlas/shell.ts`.
+
+**A `next build` run while dev was up broke the app's styling, and this is the
+THIRD time.** Every `/_next/static/*` asset 404s and the page renders unstyled;
+it was misdiagnosed in the moment as a CSS syntax error in `globals.css`
+introduced by the whitelist removals. It was not — `postcss` parsed the file
+clean, braces balanced at 0. **`scripts/safe-build.sh` exists for exactly this,
+its header says the mistake had already cost the project time twice, and the
+Printing section above already said to read it.** Stating the rule in three
+places did not prevent a fourth violation. **Never run `npx next build` on this
+repo; use `./scripts/safe-build.sh --dist-dir .next-verify`.** Recovery is
+`rm -rf .next` plus a dev restart.
+
+**Also re-proved the CLAUDE.md §5 comment trap, twice in one session.** A grep of
+the COMPILED dev CSS still hit `#pnl-print` twice and `#daily-trips-print` once
+— the epitaph, not live rules. `postcss` walking rules returned 0 live selectors
+and `code-grep` exited 0. **A grep for a removed identifier hits the comment
+documenting the removal.**
+
+---
+
+## Completed the previous session (2026-09-11, Arabic/RTL/numeral localization — `1adf8a3` → `1bf52bc`)
 
 Three commits. **Two separate pieces of work under one heading, and the second
 is deliberately SMALL** — do not read the third commit as the start of the
@@ -2254,12 +2303,12 @@ Changing either rule means changing `scripts/amount-payable-check.ts` first.
 `app/globals.css`'s visibility whitelist**, which inherits screen styling and is
 where the clipped-column and blank-sheet failures came from.
 
-**RE-MEASURED 2026-09-13, after batch 4 (`62dae53`), off the whitelist itself
-rather than off this list.** Six statements now build a document through
+**RE-MEASURED 2026-09-13, after batch 5 (`d1629dc`), off the whitelist itself
+rather than off this list.** Eight statements now build a document through
 `lib/docvm/*` + `lib/docs/*` and hand it to `printHtml()`: revenue, receivables,
-**cost**, **operations**, narrative, custom. Purchase Orders, Exit Permits and
-the Breakdown report migrated in the earlier batches (`a05eab9`, `0ca3389`), and
-`#permit-print` no longer exists at all.
+cost, operations, narrative, custom, **P&L** and **daily trips**. Purchase
+Orders, Exit Permits and the Breakdown report migrated in the earlier batches
+(`a05eab9`, `0ca3389`), and `#permit-print` no longer exists at all.
 
 What is genuinely LEFT on the visibility whitelist — grep `-print` in
 `app/globals.css`, not these addresses:
@@ -2267,8 +2316,9 @@ What is genuinely LEFT on the visibility whitelist — grep `-print` in
 - **`#payslips-print` and `#commission-review-print`** (`StatementViews.tsx`) —
   the last two Reports-page statements on the old model, and the reason
   `PrintBand` and the `MIGRATED` fallback in `StatementsTab.tsx` still exist.
-- **`#pnl-print`** (`StatementsTab.tsx`) — the one print id that wraps TWO cards.
-- **`#daily-trips-print`** (`DailyTripsTab.tsx`).
+  **Both are live and neither was deleted in batch 5** — that surface is the one
+  place two print subtrees coexist in one DOM, which is what the whole
+  one-id-per-statement isolation rule is written against.
 - **`#history-print`** (`app/drivers/HistoryTab.tsx`) — carries the single-page
   PIN, which CLIPS rather than paginating. Its removal is its own job; see the
   standing note at `globals.css:443`.
