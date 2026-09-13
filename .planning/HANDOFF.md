@@ -709,18 +709,26 @@ middleware through that same sandbox and answers `/archive` and `/` with 307 to
 `./scripts/safe-build.sh --dist-dir .next-verify`. Read that script's header
 before running any build while dev is up.
 
-### Printing — two models, and which surfaces are on which
+### Printing — THREE models now, and which surfaces are on which
 
-- **The DOCUMENT model** (own stylesheet, hidden same-origin iframe, no app CSS
-  reaches inside): **invoice** (`lib/invoicePrintTemplate.ts`) and **statement**
-  (`lib/statementPdfTemplate.ts`), both off `lib/plainDocStyles.ts`'s
-  `plainDocShell`, both sharing their download path's view-model.
+- **The ATLAS DOCUMENT model** — `lib/docvm/*` decides what the sheet SAYS,
+  `lib/docs/*` decides only where it sits, `printHtml()` prints it. Nine
+  surfaces as of `62dae53`: revenue, receivables, **cost**, **operations**,
+  narrative, custom, breakdown, purchase orders, exit permits. These carry **no
+  print id, no PrintBand and nothing in `globals.css`** — the DOM below them is
+  screen-only.
+- **The older DOCUMENT model** (own stylesheet, hidden same-origin iframe, no app
+  CSS reaches inside): **invoice** (`lib/invoicePrintTemplate.ts`) and
+  **statement** (`lib/statementPdfTemplate.ts`), both off
+  `lib/plainDocStyles.ts`'s `plainDocShell`, both sharing their download path's
+  view-model. Not migrated to ATLAS and not scheduled to be.
 - **The SCREEN-DOM model** (`app/globals.css`, `body * { visibility: hidden }`
-  plus an un-hide whitelist): everything else. **Measured today the whitelist
-  carries 13 ids**, not the 12 an earlier revision claimed: `history`,
-  `breakdown`, `permit`, `pnl`, `revenue`, `receivables`, `cost`, `ops`,
-  `narrative`, `payslips`, `commission-review`, `custom`, `daily-trips`. Two
-  portal/marker pairs remain, `#breakdown-print` and `#po-print`.
+  plus an un-hide whitelist): what is left. **Re-measured 2026-09-13 the
+  whitelist carries 5 ids**, down from 13 before the batches: `history`, `pnl`,
+  `payslips`, `commission-review`, `daily-trips`. `#permit-print` is gone
+  entirely; `#po-print` and `#breakdown-print` still exist as ids but print
+  through ATLAS, so neither is on the whitelist. **Do not read that count off
+  this line next time — grep `-print` in `app/globals.css`.**
 - **A subtree that leaves the whitelist without an intercept prints a BLANK
   SHEET**, which reads like the printer's fault. That is why `StatementModal`
   intercepts Ctrl/Cmd+P. Do not delete a whitelist entry without checking what
@@ -1441,13 +1449,12 @@ instruction.
    server-side, the other 17 pass the server's own English through. Do not
    "reconcile" them, and do not re-open this from a fresh grep.
 
-### (b) Doable FIX — THREE entries, ALL THREE CLOSED
+### (b) Doable FIX — FOUR entries, THREE CLOSED, entry 4 OPEN
 
-**This section read "EMPTY again" from 2026-09-09 until entry 1 opened it, and
-is effectively EMPTY again as of 2026-09-13.** Entry 1 closed 2026-09-10 on the
-pristine replay; entry 2 closed 2026-09-11 as `0fa3969`; entry 3 opened and
-closed on 2026-09-13. All three are kept below for their mechanism and their
-lesson, **not as work** — do not reopen any of them.
+**Entries 1-3 are CLOSED and kept for their mechanism, not as work — do not
+reopen any of them.** Entry 1 closed 2026-09-10 on the pristine replay; entry 2
+closed 2026-09-11 as `0fa3969`; entry 3 opened and closed on 2026-09-13.
+**Entry 4 is the only live item in this section.**
 
 1. **CLOSED 2026-09-10 — POST-DEPLOY: THE MIGRATION SET WAS NOT SELF-REBUILDABLE.
    SIX instances, every one measured 2026-09-10, ALL SIX NOW RESOLVED.** Four
@@ -1988,6 +1995,54 @@ For the record, what they were and what measurement showed:
    number it interpolates has to be unsigned — check that before adding any new
    `{d}`-style key.
 
+4. **OPEN — SOURCE-SIDE REPORTING BUGS, FIX AFTER THE PRINT REDESIGN. Two
+   entries, both surfaced by the print work and both deliberately NOT fixed
+   there.** Turki's ruling, 2026-09-13, on batch 4's acceptance: **a printable
+   mirrors its screen exactly in DATA, GROUPING and WORDING**, so correcting
+   either of these inside `lib/docvm/*` or `lib/docs/*` would make the sheet
+   disagree with the page it prints — the one failure the kit exists to prevent.
+   They get their own cleanup pass, **NOT folded into a print batch.**
+
+   **(a) The cost sheet's Parts figure is stated twice from two different views,
+   and they differ by about 240 SAR.** Re-measured on the August sheet: the
+   ranked bar reads **3,779.00**, the maintenance table's own foot reads
+   **3,539.00**. Confirmed again on Q3, so it is not one month's accident. The
+   two query sites, both in `app/reports/page.tsx`:
+
+   - **the bar** — `v_pnl_by_period` (`:123`), column `parts_cost_sar`, reaching
+     the sheet as `pnl.parts_cost_sar` at `StatementViews.tsx:798`. The masthead
+     figure is `operating_cost_sar` off the same row and the bar is that row's
+     own five-bucket decomposition of it, so the bar CANNOT be sourced from the
+     table without the chart ceasing to add up to its own headline.
+   - **the table foot** — `v_maintenance_cost_per_truck_monthly` (`:113`), summed
+     per truck across the period at `StatementViews.tsx:615`.
+
+   **Neither number is known to be the wrong one yet** — that is the
+   investigation, and it is a VIEW question, not a TypeScript one. Start at
+   `0167_cost_views_ex_vat_and_archive_date_aware.sql:335` and `:374`, where the
+   P&L's parts arm is built, and compare its date/VAT/archive predicates against
+   the per-truck view's. **Do not "reconcile" them in the component.** The screen
+   shows both figures too; whatever moves must move in SQL so both surfaces move
+   together.
+
+   **(i) `Payouts N` prints a COUNT under an AMOUNT column head.**
+   `app/reports/StatementViews.tsx:1091` renders `formatNum(payoutCount)` in a
+   table whose second `TH` is `reports.th.amount` (`:1084`). The printed sheet
+   mirrors it at `lib/docvm/cost.ts:536`. Every other row in that panel is money,
+   so a bare `7` under "Amount" reads as 7 riyals. **This is a LABEL bug, not a
+   data one** — the count is correct and wanted. The fix is on the screen: either
+   a column head that covers both kinds, or the count moved out of the money
+   column. Change the screen and the sheet follows on its own, because the
+   view-model reads the same `payoutCount` const.
+
+   **A third item was proposed for this entry and is NOT here, because it is
+   already fixed.** Batch 3's narrative double-negative
+   (`lib/reports.ts` → `reports.narrative.revenueDown`) closed the same day it
+   opened, as `4805dde`, and is entry 3 above. Re-measured before writing this:
+   the call is `formatShare(Math.abs(d.pct))` in `HEAD`, both directions
+   corrected. **Recording a fixed bug as open is how a closed item gets worked
+   twice** — the pointer stays, the item does not.
+
 ### (c) FORWARD-ONLY — nothing to do, no owner, not defects
 
 3. **There is NO role gate anywhere in the app.** Three live sites say so:
@@ -2197,29 +2252,37 @@ Changing either rule means changing `scripts/amount-payable-check.ts` first.
 `lib/plainDocStyles.ts`, off the same view-model their download path uses.
 **Everything else still prints the live React DOM through
 `app/globals.css`'s visibility whitelist**, which inherits screen styling and is
-where the clipped-column and blank-sheet failures came from. The pending set,
-measured today:
+where the clipped-column and blank-sheet failures came from.
 
-- **Every Reports-page report** — `revenue`, `receivables`, `cost`, `ops`,
-  `narrative`, `custom`, `payslips`, `commission-review` (all in
-  `app/reports/StatementViews.tsx`), `pnl` (`StatementsTab.tsx:634`, the one
-  print id that wraps TWO cards) and `daily-trips` (`DailyTripsTab.tsx:331`).
-- **Inventory Purchase Orders** — `#po-print` (`PurchaseOrders.tsx:1335`), still
-  on the portal/marker pattern with its own independent id/class/marker set.
-- **Consumption Exit Permits** — `#permit-print`
-  (`app/consumption/ExitPermitModals.tsx:1214`).
-- **Part details — a NEW clean print, mirroring its view.** There is no print
-  surface for it at all today: `app/inventory/` contains no `*-print` id outside
-  `PurchaseOrders.tsx`. This one is a build, not a migration.
-- Also still on the old model, not named in the request but adjacent:
-  `#breakdown-print` (`app/trips/BreakdownReport.tsx:632`) and `#history-print`
-  (`app/drivers/HistoryTab.tsx:307`).
+**RE-MEASURED 2026-09-13, after batch 4 (`62dae53`), off the whitelist itself
+rather than off this list.** Six statements now build a document through
+`lib/docvm/*` + `lib/docs/*` and hand it to `printHtml()`: revenue, receivables,
+**cost**, **operations**, narrative, custom. Purchase Orders, Exit Permits and
+the Breakdown report migrated in the earlier batches (`a05eab9`, `0ca3389`), and
+`#permit-print` no longer exists at all.
 
-**Two line numbers in this section and one below it MOVED on 2026-09-09** —
-`00cfb9e` edited `BreakdownReport.tsx`, so `#breakdown-print` went `:624` → `:632`
-(re-measured this turn). **A commit that touches none of the print surfaces still
-invalidates every line number in a file it touches.** Grep the id, not the
-address.
+What is genuinely LEFT on the visibility whitelist — grep `-print` in
+`app/globals.css`, not these addresses:
+
+- **`#payslips-print` and `#commission-review-print`** (`StatementViews.tsx`) —
+  the last two Reports-page statements on the old model, and the reason
+  `PrintBand` and the `MIGRATED` fallback in `StatementsTab.tsx` still exist.
+- **`#pnl-print`** (`StatementsTab.tsx`) — the one print id that wraps TWO cards.
+- **`#daily-trips-print`** (`DailyTripsTab.tsx`).
+- **`#history-print`** (`app/drivers/HistoryTab.tsx`) — carries the single-page
+  PIN, which CLIPS rather than paginating. Its removal is its own job; see the
+  standing note at `globals.css:443`.
+- **Part details — a NEW clean print, mirroring its view.** Still no print
+  surface at all: `app/inventory/` contains no `*-print` id outside
+  `PurchaseOrders.tsx`, which is already migrated. A build, not a migration.
+
+**THE LINE NUMBERS ARE GONE FROM THIS LIST ON PURPOSE, and that is the lesson
+this paragraph used to teach the hard way.** It previously recorded that
+`00cfb9e` moved `#breakdown-print` from `:624` to `:632` while touching no print
+surface at all — **a commit that changes nothing here still invalidates every
+address in a file it touches**, and batch 4 has just moved several hundred lines
+in `StatementViews.tsx`. An id is stable and an address is not, so the list names
+ids and the instruction is: **grep the id.**
 
 **Before removing any id from the whitelist, check what its owner does with
 Ctrl/Cmd+P** — a subtree that leaves the whitelist without an intercept prints a
