@@ -4876,6 +4876,29 @@ export const dict = {
       custom: {
         docTitle: { en: "Custom report — {p}", ar: "تقرير مخصص — {p}" },
       },
+
+      costs: {
+        docTitle: { en: "Cost statement — {p}", ar: "قائمة التكاليف — {p}" },
+        // The ranked bar's alt text. Names the MEASURE and the RANKING, which
+        // is the whole of what a sighted reader takes from the shape; the five
+        // figures themselves are read out by the tables below it.
+        chartAria: {
+          en: "Operating cost by category, largest first",
+          ar: "التكلفة التشغيلية حسب الفئة، الأكبر أولاً",
+        },
+      },
+
+      ops: {
+        docTitle: { en: "Operations statement — {p}", ar: "قائمة العمليات — {p}" },
+        // The masthead figure is a PERCENTAGE, so its unit slot cannot say SAR
+        // like every other sheet's. It says what the percentage is OF — without
+        // it "94.2%" on a masthead names no denominator.
+        figureUnit: { en: "Of trips scheduled", ar: "من الرحلات المجدولة" },
+        chartAria: {
+          en: "Trips and completion rate by month",
+          ar: "الرحلات ونسبة الإنجاز حسب الشهر",
+        },
+      },
     },
 
     // --- the REVENUE statement ----------------------------------------------

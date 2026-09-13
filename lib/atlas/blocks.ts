@@ -111,28 +111,76 @@ import { esc } from "../docPrimitives";
 const RTL_RUN =
   /([֐-׿؀-ۿ܀-ݏݐ-ݿހ-޿ࢠ-ࣿיִ-﷿ﹰ-ﻼ]+)/;
 
+/**
+ * An ITEM SEPARATOR, with whatever whitespace it is padded by.
+ *
+ * THE SAME RULE AS THE WHITESPACE ONE ABOVE, applied to the other thing that
+ * sits BETWEEN runs rather than inside one. A middot joining "AAA-5552" to
+ * "drove 2 trucks" is not part of either phrase; it is the punctuation of the
+ * LINE. Swept into the LTR run it renders at that run's right-hand end, which
+ * on an Arabic line puts it BEFORE the plate it was meant to follow - the
+ * reader meets the separator first and the thing it separates second. Measured
+ * on 29 driver cells across the three operations sheets.
+ *
+ * DELIBERATELY THREE CHARACTERS, and the exclusions matter more than the
+ * inclusions. Each of these is a list separator in every use this app has and
+ * can never be part of a value:
+ *
+ *   hyphen-minus  EXCLUDED. A minus sign, a plate's own hyphen, an ISO date's.
+ *                 Pulling it out would strand the sign of a negative figure.
+ *   comma, stop   EXCLUDED. Thousands and decimal marks; 6,950.00 is ONE run.
+ *   colon, slash  EXCLUDED. Inside times and dates.
+ *   en/em dash    EXCLUDED, though both read as separators in prose. The
+ *                 EMPTY-CELL DASH is a lone em dash that iso() wraps on its
+ *                 own - 210 of them across the 50 rendered sheets - and
+ *                 treating it as a separator would unwrap every one, rewriting
+ *                 documents that have nothing wrong with them.
+ *
+ * Whitespace is taken WITH the separator, so a stripped " (middot) " leaves no
+ * double space behind and the isolate's edges stay clean without a second trim.
+ */
+const SEP_RUN = /(\s*[·•|]\s*)/;
+
 const ltrRun = (t: string): string =>
   `<span class="iso" dir="ltr">${esc(t)}</span>`;
+
+/**
+ * One non-RTL fragment: isolate its core, leave its outer whitespace behind.
+ *
+ * A core of PURE NEUTRALS is left bare. An isolate pins a base direction, and a
+ * fragment with no letter and no digit has none to pin - an em dash between two
+ * Arabic phrases resolves to the paragraph either way, so wrapping it only adds
+ * markup to read past. Note this is the SPLIT path only: a value that is a lone
+ * dash reaches iso() with no RTL anywhere and takes the early return above,
+ * which still wraps it, so the 210 empty cells on the sheets are untouched.
+ */
+const isoCore = (part: string): string => {
+  const lead = part.length - part.trimStart().length;
+  const trail = part.length - part.trimEnd().length;
+  const core = part.slice(lead, part.length - trail);
+  if (core === "") return esc(part); // whitespace, or the empty edges of a split
+  if (!/[\p{L}\p{N}]/u.test(core)) return esc(part);
+  return (
+    esc(part.slice(0, lead)) + ltrRun(core) + esc(part.slice(part.length - trail))
+  );
+};
 
 export function iso(value: string | number): string {
   const s = String(value);
   // The common case, and the ONLY case in an English document: no strong RTL
   // character anywhere, so the whole value is a single run. Same bytes this
-  // function emitted before it learned to split.
+  // function emitted before it learned to split - and the separator rule below
+  // is deliberately NOT applied here, because in an LTR paragraph a middot has
+  // nowhere wrong to go.
   if (!RTL_RUN.test(s)) return ltrRun(s);
   return s
     .split(RTL_RUN)
     .map((part, i) => {
       if (i % 2 === 1) return esc(part); // an RTL run: never isolated
-      const lead = part.length - part.trimStart().length;
-      const trail = part.length - part.trimEnd().length;
-      const core = part.slice(lead, part.length - trail);
-      if (core === "") return esc(part); // whitespace, or the empty edges of a split
-      return (
-        esc(part.slice(0, lead)) +
-        ltrRun(core) +
-        esc(part.slice(part.length - trail))
-      );
+      return part
+        .split(SEP_RUN)
+        .map((piece, j) => (j % 2 === 1 ? esc(piece) : isoCore(piece)))
+        .join("");
     })
     .join("");
 }
@@ -786,9 +834,26 @@ export function pair(
  * a window is anchored to, whether a rate was frozen, what a total excludes.
  * Measured at 72ch, which is where a line stops being comfortable to track back
  * from at this size.
+ *
+ * `iso` IS OPT-IN, AND THAT IS A SCOPE DECISION RATHER THAN A DESIGN ONE. A
+ * note is prose, so most of them are one direction throughout and isolation is
+ * inert; but a note that quotes FIGURES is a mixed line like any other, and the
+ * browser reorders it. The cost sheet's fill lead is the measured case - Arabic
+ * renders "210.00 SAR" with the unit displaced past the next count, so the
+ * sheet reads 210.00, then 18, then SAR.
+ *
+ * It is the ONLY one. Every mixed-direction string on all 25 Arabic sheets was
+ * laid out and its runs read back off their boxes; this note was the single
+ * line whose runs came out in the wrong order. So default-on would rewrite the
+ * markup of every note on every sheet, issued ones included, to fix one - and
+ * the flag is set where a note has been MEASURED to need it instead.
+ *
+ * That measurement is a snapshot of today's fixtures, not a property of the
+ * kit: a note that starts quoting a figure tomorrow is naked again and nothing
+ * here will say so. The detector, not this comment, is what re-answers it.
  */
-export function note(text: string): string {
-  return `<p class="note">${esc(text)}</p>`;
+export function note(text: string, opts?: { iso?: boolean }): string {
+  return `<p class="note">${opts?.iso ? iso(text) : esc(text)}</p>`;
 }
 
 export function defList(items: readonly { term: string; value: string }[]): string {

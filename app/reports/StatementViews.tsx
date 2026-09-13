@@ -15,15 +15,16 @@
 // HOW A STATEMENT PRINTS IS NOW TWO ANSWERS, and which one a statement gives is
 // visible from its first line of JSX.
 //
-//   * MIGRATED — Revenue, Receivables, the Narrative and Custom. They register a
-//     document builder through ./printSource and the shared button hands the
-//     result to printHtml(). They carry NO print id, NO PrintBand and nothing in
-//     globals.css: the sheet is assembled from lib/docvm/* and lib/docs/*, and
-//     the DOM below is only what the reader looks at. `ScreenHead` is the tell.
+//   * MIGRATED — Revenue, Receivables, Costs, Operations, the Narrative and
+//     Custom. They register a document builder through ./printSource and the
+//     shared button hands the result to printHtml(). They carry NO print id, NO
+//     PrintBand and nothing in globals.css: the sheet is assembled from
+//     lib/docvm/* and lib/docs/*, and the DOM below is only what the reader
+//     looks at. `ScreenHead` is the tell.
 //
-//   * NOT YET — Costs, Operations and Payslips. They still print the SCREEN:
-//     each owns a print id whitelisted in globals.css, and `Head` puts a
-//     PrintBand on the paper because that markup has no masthead of its own.
+//   * NOT YET — Payslips. It still prints the SCREEN: it owns a print id
+//     whitelisted in globals.css, and `Head` puts a PrintBand on the paper
+//     because that markup has no masthead of its own.
 //
 // Nothing is shared between the two paths on purpose. A statement is on one side
 // or the other, never half-way.
@@ -76,17 +77,21 @@ import type { CsvValue } from "@/lib/csv";
 // lib/csv and lib/i18n and nothing else — in particular it does not import
 // StatementsTab, so the one-way edge this file depends on still holds.
 import { useCsvSource, withSar, withPct, type RegisterCsv } from "./exportSource";
-// THE FOUR MIGRATED SHEETS. Each pair is a view-model (what the sheet SAYS) and
+// THE SIX MIGRATED SHEETS. Each pair is a view-model (what the sheet SAYS) and
 // a renderer (what it LOOKS like), and neither imports from this directory —
 // the leaf rule at the top of this file holds in both directions. The components
 // below hand each `build*Vm` figures they have ALREADY computed for the screen,
 // which is what makes the two surfaces incapable of disagreeing.
+import { buildCostVm } from "@/lib/docvm/cost";
 import { buildCustomVm } from "@/lib/docvm/custom";
 import { buildNarrativeVm } from "@/lib/docvm/narrative";
+import { buildOpsVm } from "@/lib/docvm/operations";
 import { buildReceivablesVm } from "@/lib/docvm/receivables";
 import { buildRevenueVm } from "@/lib/docvm/revenue";
+import { buildCostHtml } from "@/lib/docs/cost";
 import { buildCustomHtml } from "@/lib/docs/custom";
 import { buildNarrativeHtml } from "@/lib/docs/narrative";
+import { buildOpsHtml } from "@/lib/docs/operations";
 import { buildReceivablesHtml } from "@/lib/docs/receivables";
 import { buildRevenueHtml } from "@/lib/docs/revenue";
 import { usePrintSource, type RegisterPrint } from "./printSource";
@@ -582,8 +587,8 @@ export function ReceivablesStatement({
 // ---------------------------------------------------------------------------
 export function CostStatement({
   maintPerTruck, purchasing, payroll, commissions, commissionsPaid,
-  filling, fillingByStation,
-  periodStart, periodEnd, label, registerCsv,
+  filling, fillingByStation, pnl,
+  periodStart, periodEnd, label, registerCsv, registerPrint,
 }: {
   maintPerTruck: MaintenancePerTruckRow[];
   purchasing: PurchasingRow[];
@@ -592,8 +597,15 @@ export function CostStatement({
   commissionsPaid: CommissionsPaidRow[];
   filling: FillingMonthRow[];
   fillingByStation: FillingByStationRow[];
+  // THE P&L ROW FOR THE PERIOD, and it is used by the PRINTED sheet only. The
+  // screen states no single total for this statement — Turki's ruling is that
+  // the sheet gets `operating_cost_sar` as its masthead figure and that row's
+  // own five-bucket decomposition of it as the chart. Both come off THIS row,
+  // so the chart is exactly the headline taken apart.
+  pnl: PnlPeriodRow;
   periodStart: string; periodEnd: string; label: string;
   registerCsv?: RegisterCsv;
+  registerPrint?: RegisterPrint;
 }) {
   const { lang } = useApp();
   // Per truck: sum the three named measures across the period's months. All
@@ -769,9 +781,59 @@ export function CostStatement({
 
   useCsvSource(registerCsv, buildCsv);
 
+  // THE PRINTED SHEET. Every figure handed over is a const this component has
+  // ALREADY named for the screen — `trucks`, `byType`, `byStation`, the twelve
+  // hoisted scalars — so the two surfaces read one expression each and cannot
+  // disagree. Nothing is re-derived here, and the view-model re-derives nothing
+  // either; it only words and formats.
+  const buildDoc = useCallback(
+    () =>
+      buildCostHtml(
+        buildCostVm({
+          lang,
+          generatedAt: new Date(),
+          label,
+          pnl: {
+            operatingCost: pnl.operating_cost_sar,
+            parts: pnl.parts_cost_sar,
+            os: pnl.os_cost_sar,
+            payroll: pnl.payroll_sar,
+            commissions: pnl.commissions_sar,
+            filling: pnl.filling_cost_sar,
+          },
+          fills: { total: fillTotal, costed: fillCosted, uncosted: fillUncosted },
+          // The two groupings go over in the SHAPE the memos hold them in, only
+          // unpacked from the Map's entry tuple — the sort order is theirs.
+          byType: byType.map(([waterType, v]) => ({
+            waterType, sar: v.sar, costed: v.costed, uncosted: v.uncosted,
+          })),
+          byStation,
+          maintenance: { trucks, parts: partsTotal, os: osTotal },
+          payroll: {
+            staff: staffSalary, driver: driverSalary,
+            total: totalPayroll, missingSalary,
+          },
+          commissions: {
+            trip: tripCommission, specials, adjustments, bonuses,
+            earned, payoutCount, paid,
+          },
+          purchasing: { stockReceived, receipts: receiptCount },
+        }),
+      ),
+    [
+      lang, label, pnl, fillTotal, fillCosted, fillUncosted, byType, byStation,
+      trucks, partsTotal, osTotal,
+      staffSalary, driverSalary, totalPayroll, missingSalary,
+      tripCommission, specials, adjustments, bonuses, earned, payoutCount, paid,
+      stockReceived, receiptCount,
+    ],
+  );
+
+  usePrintSource(registerPrint, buildDoc);
+
   return (
-    <div id="cost-print" className="card p-6">
-      <Head title={t("reports.costs.title", lang)} period={label} />
+    <div className="card p-6">
+      <ScreenHead title={t("reports.costs.title", lang)} period={label} />
 
       {/* --- Station fill cost (0112) ------------------------------------
           THE UNCOSTED COUNT IS NOT OPTIONAL DECORATION. sum() skips NULLs,
@@ -1105,13 +1167,15 @@ type DriverCol = {
 };
 
 export function OperationsStatement({
-  operations, byDriver, periodStart, periodEnd, label, multiMonth, registerCsv,
+  operations, byDriver, periodStart, periodEnd, label, multiMonth,
+  registerCsv, registerPrint,
 }: {
   operations: OperationsRow[];
   byDriver: OperationsByDriverRow[];
   periodStart: string; periodEnd: string; label: string;
   multiMonth: boolean;
   registerCsv?: RegisterCsv;
+  registerPrint?: RegisterPrint;
 }) {
   const { lang } = useApp();
   const rows = monthsIn(operations, periodStart, periodEnd);
@@ -1251,9 +1315,61 @@ export function OperationsStatement({
 
   useCsvSource(registerCsv, buildCsv);
 
+  // THE PRINTED SHEET. Same handover as the cost statement: every figure is a
+  // const this component already named for the screen, the driver rollup
+  // included, so neither surface can hold a second expression of it.
+  //
+  // `unassigned` is the KEY test, not a name test — `__unassigned__` is what
+  // the memo bucketed a null driver_id under, which is the same branch the
+  // screen's footnote turns on. The view-model never sees the key itself: it
+  // gets the boolean and supplies the label.
+  const buildDoc = useCallback(
+    () =>
+      buildOpsHtml(
+        buildOpsVm({
+          lang,
+          generatedAt: new Date(),
+          label,
+          multiMonth,
+          totals: {
+            trips, delivered, workOrders, osJobs, maintenanceEvents, permits,
+            peakTrucks, completion,
+          },
+          months: rows.map((r) => ({
+            month: r.month,
+            trips: r.trips_total,
+            delivered: r.trips_delivered,
+            trucks: r.trucks_active,
+            workOrders: r.work_orders,
+            osJobs: r.outsourced_jobs,
+            permits: r.exit_permits,
+          })),
+          drivers: drivers.map((d) => ({
+            name: d.name,
+            unassigned: d.key === "__unassigned__",
+            plate: d.plate,
+            trucksUsed: d.trucksUsed,
+            scheduled: d.scheduled,
+            delivered: d.delivered,
+            notDelivered: d.notDelivered,
+            completion: d.completion,
+          })),
+          driverScheduled,
+          driverDelivered,
+        }),
+      ),
+    [
+      lang, label, multiMonth, rows, drivers, driverScheduled, driverDelivered,
+      trips, delivered, workOrders, osJobs, maintenanceEvents, permits,
+      peakTrucks, completion,
+    ],
+  );
+
+  usePrintSource(registerPrint, buildDoc);
+
   return (
-    <div id="ops-print" className="card p-6">
-      <Head title={t("reports.ops.title", lang)} period={label} />
+    <div className="card p-6">
+      <ScreenHead title={t("reports.ops.title", lang)} period={label} />
 
       {drivers.length === 0 ? (
         <Note>{t("reports.ops.noTrips", lang)}</Note>

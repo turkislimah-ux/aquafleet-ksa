@@ -116,24 +116,25 @@ type Statement =
 /**
  * THE STATEMENTS THAT PRINT A DOCUMENT RATHER THAN THE SCREEN.
  *
- * Each of these four registers a builder through ./printSource while it is
- * mounted, and each has had its print id REMOVED from app/globals.css in the
- * same commit that added it here. The two halves are one change: an id left in
- * the whitelist would print the screen as well as the document on a stray
+ * Each of these registers a builder through ./printSource while it is mounted,
+ * and each has had its print id REMOVED from app/globals.css in the same commit
+ * that added it here. The two halves are one change: an id left in the
+ * whitelist would print the screen as well as the document on a stray
  * window.print(), and a name left out of this set would print NOTHING.
  *
  * THAT SECOND FAILURE IS WHY THE SET EXISTS AT ALL rather than the button just
  * falling through to window.print() when no source is registered. globals.css
  * hides the whole page and un-hides by whitelist; with the entry gone,
- * window.print() on one of these four emits a BLANK SHEET — a failure that
- * looks like a printer problem, not a code one. So a migrated statement with no
+ * window.print() on one of these emits a BLANK SHEET — a failure that looks
+ * like a printer problem, not a code one. So a migrated statement with no
  * registered source prints nothing at all, which is visibly nothing happening.
  *
  * It shrinks as batches land and disappears with the last un-migrated statement,
- * taking the fallback with it.
+ * taking the fallback with it. What is left: `daily` (its own button, its own
+ * id) and `payslips`.
  */
 const MIGRATED: ReadonlySet<Statement> = new Set<Statement>([
-  "revenue", "receivables", "narrative", "custom",
+  "revenue", "receivables", "cost", "operations", "narrative", "custom",
 ]);
 
 // `revenue` points at reports.metric.revenue rather than minting a ninth tab
@@ -1021,9 +1022,14 @@ export default function StatementsTab({
           maintPerTruck={maintPerTruck} purchasing={purchasing} payroll={payroll}
           commissions={commissions} commissionsPaid={commissionsPaid}
           filling={filling} fillingByStation={fillingByStation}
+          // `current` is the P&L row this tab already renders above — the same
+          // row, not a second selection of it. The printed cost sheet takes its
+          // masthead figure and its chart off it; the screen below states no
+          // total and draws nothing, which is unchanged.
+          pnl={current}
           periodStart={current.period_start} periodEnd={current.period_end}
           label={periodLabel(current, lang)}
-          registerCsv={registerCsv}
+          registerCsv={registerCsv} registerPrint={registerPrint}
         />
       )}
 
@@ -1033,7 +1039,7 @@ export default function StatementsTab({
           byDriver={opsByDriver}
           periodStart={current.period_start} periodEnd={current.period_end}
           label={periodLabel(current, lang)} multiMonth={multiMonth}
-          registerCsv={registerCsv}
+          registerCsv={registerCsv} registerPrint={registerPrint}
         />
       )}
 

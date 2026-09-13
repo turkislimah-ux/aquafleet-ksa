@@ -202,7 +202,10 @@ export function buildCustomHtml(vm: CustomDocVm): string {
     // The builder's own notes, then the statement's, in the order the screen
     // prints them. Each is its own paragraph: they are separate claims about
     // separate columns, and run together they read as one qualified sentence.
-    block(vm.notes.map(note).join("")),
+    //
+    // `(n) => note(n)` rather than a bare `note`: the function takes an options
+    // argument now, and point-free `map` would hand it the INDEX as options.
+    block(vm.notes.map((n) => note(n)).join("")),
 
     sheetFooter(vm.footer),
   ].join("\n");

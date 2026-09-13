@@ -393,15 +393,54 @@ export function trendChart(
   // its own point, and takes a second row only when the primary label is
   // already occupying the first. The proof's series both end high, so neither
   // branch fires on the approved rasters.
+  //
+  // THE PRIMARY LABEL SITS ABOVE ITS POINT, AND ABOVE IS EXACTLY WHERE THE LINE
+  // COMES FROM WHEN THE SERIES IS FALLING. It is set at `x(last) - 10` with the
+  // text anchored at its end, so it occupies the wedge up-and-left of the final
+  // point — which is the wedge the final SEGMENT occupies too when the series
+  // descends into that point. On a rising series the segment arrives from
+  // below-left and the wedge is empty, which is why this went unseen: the
+  // approved breakdown raster rises into its last month, and so does every
+  // fixture drawn before now.
+  //
+  // A FALLING SERIES IS NOT AN EDGE CASE. Operations' Q3 2026 falls from 658
+  // trips to 124, and the label printed with the line struck clean through it —
+  // the word was there and could not be read. Any period whose last month is
+  // quiet does this, and a quiet last month is the normal shape of a period that
+  // is still in progress.
+  //
+  // So when the series falls, the label flips BELOW its own point, where the
+  // departing wedge is empty. `below` has the same floor the secondary label
+  // has and for the same reason — past it lies the row of month names — and when
+  // that floor is hit the label stays above, because a struck-through word is
+  // still legible more often than one printed over a date.
   const last = data.length - 1;
   const py = yPri(data[last].primary);
   const sy = ySec(data[last].secondary);
-  g += txt(f, x(last) - 10, py - 9, opt.primaryLabel,
+  const floor = T + ph + 2;
+  const priFalls = data.length > 1 && data[last - 1].primary > data[last].primary;
+  const priY = priFalls && py + 15 <= floor ? py + 15 : py - 9;
+  const priBelow = priY > py;
+  g += txt(f, x(last) - 10, priY, opt.primaryLabel,
     { anchor: "end", fill: s.ink, weight: 600, size: s.labelSize * 0.95 });
   const below = sy + 15;
-  const secY = below > T + ph + 2
+  let secY = below > floor
     ? sy - 9 - (Math.abs(sy - py) < s.labelSize * 1.8 ? s.labelSize * 1.4 : 0)
     : below;
+  // MOVING THE PRIMARY DOWN PUTS IT IN THE SECONDARY'S LANE. Both labels sit
+  // below their own points now, and two points at the same RELATIVE height on
+  // their own axes — 400 of 800 trips beside 50 of 100 per cent — put both words
+  // on one row. The primary keeps its place, being the heavier of the two; the
+  // secondary steps a row clear, upward, since downward is the month names.
+  //
+  // GATED ON THE FLIP HAVING HAPPENED, not on the two labels being close. The
+  // approved breakdown raster ends with its labels 9.9px apart against a
+  // threshold of 11.2, so an ungated version of this test would fire there and
+  // move a raster that has already been signed off for a collision it does not
+  // have.
+  if (priBelow && Math.abs(secY - priY) < s.labelSize * 1.4) {
+    secY = priY - s.labelSize * 1.4;
+  }
   g += txt(f, x(last) - 10, secY, opt.secondaryLabel,
     { anchor: "end", fill: s.mid, size: s.labelSize * 0.95 });
 
@@ -726,6 +765,28 @@ export type RankedBar = { label: string; value: number; display: string; hatch?:
  * (a cost bucket, a part, a truck) and names read along a line. Vertical bars
  * with names underneath means either rotated type or truncation, and both are
  * ways of hiding what the chart is about.
+ *
+ * ZERO DRAWS NOTHING, AND THAT IS NOT THE SAME RULE AS THE 0.5 FLOOR.
+ * The floor exists for a value that is REAL but tiny: 0.01 SAR against a
+ * 25,000.00 maximum is 0.0002px of bar, so without a minimum the row would
+ * claim the bucket is empty when it is not. That is a rounding rescue and it
+ * stays.
+ *
+ * An EXACTLY zero value is the opposite problem. The floor gave it a 0.5px
+ * rect with a 0.7 stroke around it — a ~1.2px mark, visibly the same object as
+ * the small-but-real bars two rows above, sitting beside a number reading
+ * "0.00 SAR". Caught on Jun 2026, whose Parts and Outsourced buckets are both
+ * genuinely zero while Station fill (210.00) is not: three marks of nearly the
+ * same size, one of which meant something different from the other two. The
+ * graphic contradicted the figure printed next to it, and the figure was right.
+ *
+ * So the rect is gated on a positive value. Nothing else about the row changes
+ * — the label and the amount still print, and the row still occupies its slot,
+ * so the ranking stays legible and the bucket is not hidden. An all-zero period
+ * now prints five labelled rows against the baseline with no bars at all, which
+ * is a truer picture of a period that cost nothing than five equal hairlines
+ * were. `lib/docs/cost.ts` used to cite those hairlines as its reason for not
+ * gating the chart; the reason is now the division guard alone.
  */
 export function rankedBars(
   s: ChartStyle,
@@ -745,8 +806,10 @@ export function rankedBars(
     const bw = Math.max((w * b.value) / max, 0.5);
     g += txt(f, 0, yTop + 8, b.label, { fill: s.ink, size: s.labelSize * 0.98, weight: 500 });
     g += txt(f, w, yTop + 8, b.display, { anchor: "end", fill: s.ink, mono: true, size: s.labelSize });
-    g += `<rect x="${num(f.rx(0, bw))}" y="${num(yTop + 13)}" width="${num(bw)}" height="${barH}"` +
-      ` fill="${b.hatch ? `url(#${hatchId("rank")})` : s.tint}" stroke="${s.ink}" stroke-width="0.7"/>`;
+    if (b.value > 0) {
+      g += `<rect x="${num(f.rx(0, bw))}" y="${num(yTop + 13)}" width="${num(bw)}" height="${barH}"` +
+        ` fill="${b.hatch ? `url(#${hatchId("rank")})` : s.tint}" stroke="${s.ink}" stroke-width="0.7"/>`;
+    }
   }
   // One baseline under the whole stack, so the bars are read against a common
   // origin rather than each floating on its own.
