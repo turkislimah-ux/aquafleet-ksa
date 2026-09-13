@@ -502,6 +502,22 @@ export type Col = {
   /** A grouping cell that spans its rows, ruled on its trailing edge. */
   group?: boolean;
   width?: string;
+  /**
+   * A quieter second line under the column head — the counterpart of `Cell.sub`
+   * one row up, and added for the same reason.
+   *
+   * For the fact that QUALIFIES the whole column rather than heading a column of
+   * its own: the custom report's BASIS (accrual / cash / operational) under the
+   * metric it measures. That pairing is two lines in one cell on screen, and the
+   * two alternatives on paper are both wrong — spliced into the head it makes an
+   * unreadable heading, and split into its own column it claims the basis ranks
+   * beside the metric and needs a head nobody wrote.
+   *
+   * ESCAPED, never isolated: a sub-head is WORDING (a translated enum label),
+   * not a figure, so `num`/`iso` do not reach it. The head itself is not
+   * isolated either, for the same reason.
+   */
+  sub?: string;
 };
 
 export type Cell =
@@ -608,9 +624,10 @@ export function table(opts: {
       opts.cols
         .map((c) => {
           const cls = [c.num ? "num" : "", c.gap ? "col-gap" : ""].filter(Boolean).join(" ");
+          const sub = c.sub ? `<span class="sub-line">${esc(c.sub)}</span>` : "";
           return `<th${cls ? ` class="${cls}"` : ""}${c.width ? ` style="width:${c.width}"` : ""}>${esc(
             c.head,
-          )}</th>`;
+          )}${sub}</th>`;
         })
         .join("") +
       `</tr></thead>`;

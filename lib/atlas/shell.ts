@@ -295,6 +295,16 @@ export const ATLAS_CSS = `
      never flipped. */
   .row { display: grid; grid-template-columns: var(--gutter) 1fr; column-gap: var(--gutter-gap); }
   .full { grid-column: 1 / -1; }
+  /* A GRID ITEM STRETCHES TO ITS ROW BY DEFAULT, and a stretched head is a box
+     the height of the whole section wearing a two-line label. That is invisible
+     in Latin, where the head carries no rule — and wrong in Arabic, where it
+     carries one: the rule that is supposed to sit UNDER THE LABEL gets painted
+     at the bottom edge of the stretched box instead. On the Arabic receivables
+     sheet the open-invoices head measured 84px tall for ~33px of text, so its
+     rule landed level with the LAST ROW of the table, detached from the words it
+     underlines and reading as a stray hairline in white space. Hugging the
+     content fixes both languages at once and changes nothing in Latin. */
+  .row > .sec-head { align-self: start; }
 
   /* ---------- MASTHEAD ----------
      Deliberately NOT on the .row gutter grid. The title is the widest thing on
@@ -564,6 +574,12 @@ export const ATLAS_CSS = `
   tr.rule-above td { border-top: var(--rule-mid) solid var(--ink); padding-top: 10px; }
   tr.strong td { font-size: 12px; }
   .sub-line { display: block; font-size: 8px; color: var(--mid); line-height: 1.5; margin-top: 2px; }
+  /* The same device one row up, in a COLUMN HEAD. A head is tracked caps and a
+     sub-head is not: "accrual" set in 0.14em caps beside the metric it
+     qualifies reads as a second heading of equal rank, which is the one thing
+     it must not. Weight and case are what rank the two lines here, exactly as
+     they rank .sec-head against its .sub. */
+  th .sub-line { text-transform: none; letter-spacing: 0.03em; font-weight: 400; }
 
   /* Seven short rows of two figures do not need seven rules. Ruling every one
      is the default-spreadsheet look and it puts twenty-eight hairlines on a
@@ -609,9 +625,20 @@ export const ATLAS_CSS = `
                   border-top: var(--rule-mid) solid var(--ink); }
   /* The severity column itself: no head, minimum width, and it only exists on a
      table that actually has a flagged row. An always-present empty column is a
-     column of nothing. */
-  th.gwcol, td.gwcol { padding-inline-end: 12px; width: 1%; white-space: nowrap; }
-  td.gwcol { padding-top: 9px; }
+     column of nothing.
+
+     SPECIFICITY DECIDES THIS, NOT SOURCE ORDER, and both selectors below name
+     the element "table" for that reason alone. "table.compact td" above sets
+     the SHORTHAND "padding: 6.5px 0", which scores (0,1,2); a bare "td.gwcol"
+     scores (0,1,1) and loses, wherever it is written. The trailing gap went
+     to zero and the severity word welded itself to the sentence it qualifies —
+     WATCH28,960 on the English narrative, and the same in Arabic. Naming
+     it here ties the score, and a tie is settled by position, which these
+     rules win. A compact table was the ONLY variant that lost, which is why it
+     went unseen: the flagged tables shipped so far are all full-height. */
+  table th.gwcol, table td.gwcol {
+    padding-inline-end: 12px; width: 1%; white-space: nowrap; }
+  table td.gwcol { padding-top: 9px; }
 
   /* ---------- PROSE, NOTES, PAIRS ---------- */
   .note { font-size: 8px; color: var(--mid); line-height: 1.7; margin-top: 9px; max-width: 72ch; }

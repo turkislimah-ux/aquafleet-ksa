@@ -12,8 +12,21 @@
 // The two measures that are not additive (trucks_active, people_missing_salary)
 // are handled explicitly and labelled; see the rule in lib/reports.ts.
 //
-// Each statement carries its own print id so "print" means "print this
-// statement", not the whole tab. The ids are whitelisted in globals.css.
+// HOW A STATEMENT PRINTS IS NOW TWO ANSWERS, and which one a statement gives is
+// visible from its first line of JSX.
+//
+//   * MIGRATED — Revenue, Receivables, the Narrative and Custom. They register a
+//     document builder through ./printSource and the shared button hands the
+//     result to printHtml(). They carry NO print id, NO PrintBand and nothing in
+//     globals.css: the sheet is assembled from lib/docvm/* and lib/docs/*, and
+//     the DOM below is only what the reader looks at. `ScreenHead` is the tell.
+//
+//   * NOT YET — Costs, Operations and Payslips. They still print the SCREEN:
+//     each owns a print id whitelisted in globals.css, and `Head` puts a
+//     PrintBand on the paper because that markup has no masthead of its own.
+//
+// Nothing is shared between the two paths on purpose. A statement is on one side
+// or the other, never half-way.
 
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -63,6 +76,20 @@ import type { CsvValue } from "@/lib/csv";
 // lib/csv and lib/i18n and nothing else — in particular it does not import
 // StatementsTab, so the one-way edge this file depends on still holds.
 import { useCsvSource, withSar, withPct, type RegisterCsv } from "./exportSource";
+// THE FOUR MIGRATED SHEETS. Each pair is a view-model (what the sheet SAYS) and
+// a renderer (what it LOOKS like), and neither imports from this directory —
+// the leaf rule at the top of this file holds in both directions. The components
+// below hand each `build*Vm` figures they have ALREADY computed for the screen,
+// which is what makes the two surfaces incapable of disagreeing.
+import { buildCustomVm } from "@/lib/docvm/custom";
+import { buildNarrativeVm } from "@/lib/docvm/narrative";
+import { buildReceivablesVm } from "@/lib/docvm/receivables";
+import { buildRevenueVm } from "@/lib/docvm/revenue";
+import { buildCustomHtml } from "@/lib/docs/custom";
+import { buildNarrativeHtml } from "@/lib/docs/narrative";
+import { buildReceivablesHtml } from "@/lib/docs/receivables";
+import { buildRevenueHtml } from "@/lib/docs/revenue";
+import { usePrintSource, type RegisterPrint } from "./printSource";
 
 // MODULE-PRIVATE. Used by 17 call sites in this file and imported by none —
 // StatementsTab takes only the statement components. It was exported from the
@@ -122,6 +149,27 @@ function Head({ title, period }: { title: React.ReactNode; period: string }) {
   );
 }
 
+/**
+ * The same heading WITHOUT the band, for the statements that print a document.
+ *
+ * Not `Head` with a flag: the difference is not a variation of one heading, it
+ * is whether this markup is ever going to be printed at all. These four hand
+ * printHtml() a standalone sheet that carries its own masthead — company,
+ * title, period and the generated stamp, set properly — so a PrintBand here
+ * would be a second title on a page that no longer prints.
+ *
+ * AND NO `no-print` EITHER. That class means "this part of the printable subtree
+ * is screen-only", and there is no printable subtree here to be part of.
+ */
+function ScreenHead({ title, period }: { title: React.ReactNode; period: string }) {
+  return (
+    <header className="mb-4">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      <p className="text-sm muted">{period}</p>
+    </header>
+  );
+}
+
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="py-8 text-center text-sm muted">{children}</div>;
 }
@@ -132,12 +180,14 @@ function Empty({ children }: { children: React.ReactNode }) {
 // every figure summed here came out of v_revenue_invoices.
 // ---------------------------------------------------------------------------
 export function RevenueStatement({
-  invoices, returns, outstandingLive, periodStart, periodEnd, label, registerCsv,
+  invoices, returns, outstandingLive, periodStart, periodEnd, label,
+  registerCsv, registerPrint,
 }: {
   invoices: RevenueInvoiceRow[]; returns: SalesReturnRow[];
   outstandingLive: InvoiceOutstandingLiveRow[];
   periodStart: string; periodEnd: string; label: string;
   registerCsv?: RegisterCsv;
+  registerPrint?: RegisterPrint;
 }) {
   const { lang } = useApp();
   const rows = useMemo(() => {
@@ -183,6 +233,10 @@ export function RevenueStatement({
     outstanding: sumOver(rows, (r) => r.outstanding),
   };
   const returned = sumOver(periodReturns, (r) => r.reversed_revenue_sar);
+  // A SUM OF THE COUNTS ABOVE, not a re-count of the source invoices — named
+  // once because three readers want the same figure: the totals row, the CSV and
+  // the printed sheet. It was written out at each of them.
+  const invoiceCount = sumOver(rows, (r) => r.count);
 
   // ONE ROW PER CUSTOMER, plus the total line the table already shows.
   // The sales-returns sub-table below is NOT exported: it is a different grain
@@ -208,18 +262,54 @@ export function RevenueStatement({
         // same figure the footer renders — not a re-count of the source rows.
         [
           t("reports.th.total", lang),
-          sumOver(rows, (r) => r.count),
+          invoiceCount,
           totals.revenue, totals.paid, totals.outstanding,
         ],
       ],
     };
-  }, [lang, label, rows, totals.revenue, totals.paid, totals.outstanding]);
+  }, [lang, label, rows, invoiceCount, totals.revenue, totals.paid, totals.outstanding]);
 
   useCsvSource(registerCsv, buildCsv);
 
+  // THE PRINTED SHEET IS A DOCUMENT — assembled from the memos above and pushed
+  // through the ATLAS kit into a hidden same-origin iframe. It is not this DOM
+  // with the chrome hidden, and the CSS that used to do that is gone.
+  //
+  // EVERY FIGURE IS PASSED, NOT RECOMPUTED. The by-customer grouping, the period
+  // filter and the totals are the memos in this component, and no file under
+  // lib/ imports from app/ — so a view-model that grouped its own invoices would
+  // be a SECOND expression of a rule that already has one.
+  const buildDoc = useCallback(
+    () => buildRevenueHtml(buildRevenueVm({
+      lang,
+      // Stamped when the sheet is PRODUCED, which for a printout is now.
+      generatedAt: new Date(),
+      label,
+      rows,
+      totals: {
+        revenue: totals.revenue,
+        paid: totals.paid,
+        outstanding: totals.outstanding,
+      },
+      invoiceCount,
+      returns: periodReturns.map((r) => ({
+        invoiceNumber: r.invoice_number,
+        reason: r.void_reason,
+        reversed: r.reversed_revenue_sar,
+      })),
+      returnedTotal: returned,
+    })),
+    [
+      lang, label, rows, invoiceCount, periodReturns, returned,
+      totals.revenue, totals.paid, totals.outstanding,
+    ],
+  );
+
+  usePrintSource(registerPrint, buildDoc);
+
   return (
-    <div id="revenue-print" className="card p-6">
-      <Head title={t("reports.revenue.title", lang)} period={label} />
+    <div className="card p-6">
+      <ScreenHead title={t("reports.revenue.title", lang)} period={label} />
 
       {rows.length === 0 ? (
         <Empty>{t("reports.revenue.empty", lang)}</Empty>
@@ -250,7 +340,7 @@ export function RevenueStatement({
             ))}
             <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
               <TD>{t("reports.th.total", lang)}</TD>
-              <TD className="text-end tabular-nums">{formatNum(sumOver(rows, (r) => r.count))}</TD>
+              <TD className="text-end tabular-nums">{formatNum(invoiceCount)}</TD>
               <TD className="text-end tabular-nums">{formatSar(totals.revenue)}</TD>
               <TD className="text-end tabular-nums">{formatSar(totals.paid)}</TD>
               <TD className="text-end tabular-nums">{formatSar(totals.outstanding)}</TD>
@@ -302,13 +392,22 @@ export function RevenueStatement({
 // RECEIVABLES STATEMENT — a position as of today, not a period measure.
 // ---------------------------------------------------------------------------
 export function ReceivablesStatement({
-  receivables, aging, registerCsv,
-}: { receivables: ReceivableRow[]; aging: AgingRow[]; registerCsv?: RegisterCsv }) {
+  receivables, aging, registerCsv, registerPrint,
+}: {
+  receivables: ReceivableRow[]; aging: AgingRow[];
+  registerCsv?: RegisterCsv; registerPrint?: RegisterPrint;
+}) {
   const { lang } = useApp();
-  const bands = AGING_ORDER.map((b) => {
-    const row = aging.find((a) => a.aging_bucket === b);
-    return { bucket: b, value: row?.outstanding_sar ?? 0, count: row?.invoice_count ?? 0 };
-  });
+  // MEMOIZED for identity, for the same reason `ordered` below is: the document
+  // builder closes over this array, and `AGING_ORDER.map()` returns a new one
+  // every render. Same four bands, same order; only the reference is now stable.
+  const bands = useMemo(
+    () => AGING_ORDER.map((b) => {
+      const row = aging.find((a) => a.aging_bucket === b);
+      return { bucket: b, value: row?.outstanding_sar ?? 0, count: row?.invoice_count ?? 0 };
+    }),
+    [aging],
+  );
   const total = sumOver(bands, (b) => b.value);
   // MEMOIZED for identity, not for cost. `[...x].sort()` returns a new array
   // every render, and the export callback below closes over it — an unstable
@@ -360,9 +459,39 @@ export function ReceivablesStatement({
 
   useCsvSource(registerCsv, buildCsv);
 
+  // THE PRINTED SHEET IS A DOCUMENT. The bands, the total and the days-descending
+  // order are all computed above and passed down whole — see the view-model's own
+  // header for why it takes rows rather than raw invoices.
+  //
+  // THE SEVERITY WORDS ARE THE VIEW-MODEL'S, not this component's. It applies the
+  // same 90 / 60 day thresholds the `<span>` below colours rose and amber, off
+  // the same `days` field, and turns them into the words a monochrome sheet can
+  // actually carry.
+  const buildDoc = useCallback(
+    () => buildReceivablesHtml(buildReceivablesVm({
+      lang,
+      // Stamped when the sheet is PRODUCED, which for a printout is now.
+      generatedAt: new Date(),
+      bands: bands.map((b) => ({ bucket: b.bucket, outstanding: b.value, count: b.count })),
+      total,
+      rows: ordered.map((r) => ({
+        invoiceNumber: r.invoice_number,
+        customer: r.customer_name,
+        // The date only, as rendered — confirmed_at is a full timestamp and the
+        // time of day is not what this column reports.
+        confirmed: r.confirmed_at.slice(0, 10),
+        days: r.days_outstanding,
+        outstanding: r.outstanding_sar,
+      })),
+    })),
+    [lang, bands, total, ordered],
+  );
+
+  usePrintSource(registerPrint, buildDoc);
+
   return (
-    <div id="receivables-print" className="card p-6">
-      <Head title={t("reports.receivables.title", lang)}
+    <div className="card p-6">
+      <ScreenHead title={t("reports.receivables.title", lang)}
         period={t("reports.receivables.asOfToday", lang)} />
 
       {total === 0 ? (
@@ -1324,8 +1453,11 @@ export function OperationsStatement({
 // THE NARRATIVE
 // ---------------------------------------------------------------------------
 export function NarrativeStatement({
-  bullets, label, pnl,
-}: { bullets: NarrativeBullet[]; label: string; pnl: PnlPeriodRow }) {
+  bullets, label, pnl, registerPrint,
+}: {
+  bullets: NarrativeBullet[]; label: string; pnl: PnlPeriodRow;
+  registerPrint?: RegisterPrint;
+}) {
   const { lang } = useApp();
   // Keyed off the TONE enum, never off the sentence — buildNarrative sets the
   // tone alongside the text, so the dot stays the right colour in Arabic.
@@ -1335,12 +1467,41 @@ export function NarrativeStatement({
     tone === "warn" ? "bg-amber-500" :
     tone === "flat" ? "bg-slate-400" : "bg-brand-500";
 
+  // THE PRINTED SHEET IS A DOCUMENT. The bullets go across UNTOUCHED — they
+  // arrive written, from buildNarrative, and the view-model reads their `tone`
+  // exactly as `dot()` above does: off the enum, never off the sentence.
+  //
+  // ON PAPER THE TONE IS A WORD. A 1.5px hue is the one thing a printed sheet
+  // cannot carry, so the dot becomes a gutter word beside its sentence — see
+  // lib/docvm/narrative.ts for the five of them and why they name a DIRECTION
+  // rather than pass a judgement.
+  const buildDoc = useCallback(
+    () => buildNarrativeHtml(buildNarrativeVm({
+      lang,
+      // Stamped when the sheet is PRODUCED, which for a printout is now.
+      generatedAt: new Date(),
+      label,
+      bullets,
+      // The same four leaves the grid below renders, from the same P&L row —
+      // not a second derivation of any of them.
+      pnl: {
+        revenue: pnl.revenue_sar,
+        operatingCost: pnl.operating_cost_sar,
+        operatingProfit: pnl.operating_profit_sar,
+        operatingMarginPct: pnl.operating_margin_pct,
+      },
+    })),
+    [lang, label, bullets, pnl],
+  );
+
+  usePrintSource(registerPrint, buildDoc);
+
   return (
-    <div id="narrative-print" className="card p-6">
+    <div className="card p-6">
       {/* The bullets themselves arrive already translated — buildNarrative
           takes `lang` and composes them from reports.narrative.*. Only the
           furniture around them is keyed here. */}
-      <Head title={fill(t("reports.narrative.stmt.title", lang), { p: label })}
+      <ScreenHead title={fill(t("reports.narrative.stmt.title", lang), { p: label })}
         period={t("reports.narrative.stmt.period", lang)} />
 
       <ul className="space-y-2.5">
@@ -1402,10 +1563,10 @@ export function NarrativeStatement({
 // there is exactly one place those rules can be got wrong.
 // ---------------------------------------------------------------------------
 export function CustomStatement({
-  report, title, onEdit, registerCsv, groupingLabel,
+  report, title, onEdit, registerCsv, registerPrint, groupingLabel,
 }: {
   report: BuiltReport; title: string; onEdit: () => void;
-  registerCsv?: RegisterCsv; groupingLabel: string;
+  registerCsv?: RegisterCsv; registerPrint?: RegisterPrint; groupingLabel: string;
 }) {
   const { lang } = useApp();
 
@@ -1445,11 +1606,32 @@ export function CustomStatement({
 
   useCsvSource(registerCsv, buildCsv);
 
+  // THE PRINTED SHEET IS A DOCUMENT, and this is the one statement whose
+  // view-model takes the WHOLE source object: `BuiltReport` is already a
+  // view-model, so there is nothing here to flatten or pass field by field.
+  //
+  // NO `groupingLabel`. The CSV names the grouping because a file has no title
+  // beside its header row; a sheet has one printed two lines up, so naming it
+  // again in the blank head would put a word on the paper the screen never
+  // wrote. The blank stays blank.
+  const buildDoc = useCallback(
+    () => buildCustomHtml(buildCustomVm({
+      lang,
+      // Stamped when the sheet is PRODUCED, which for a printout is now.
+      generatedAt: new Date(),
+      title,
+      report,
+    })),
+    [lang, title, report],
+  );
+
+  usePrintSource(registerPrint, buildDoc);
+
   return (
-    <div id="custom-print" className="card p-6">
+    <div className="card p-6">
       {/* `title` arrives already composed by the builder and is passed through
           untouched — it is the PERIOD line, not chrome this component writes. */}
-      <Head title={t("reports.custom.title", lang)} period={title} />
+      <ScreenHead title={t("reports.custom.title", lang)} period={title} />
 
       {report.columns.length === 0 ? (
         <Empty>{t("reports.custom.noColumns", lang)}</Empty>
@@ -1504,7 +1686,11 @@ export function CustomStatement({
       {report.notes.map((n, i) => <Note key={i}>{n}</Note>)}
       <Note>{t("reports.custom.note", lang)}</Note>
 
-      <div className="mt-4 no-print">
+      {/* A CONTROL, NOT CONTENT — and no longer wearing `no-print` to say so.
+          The class marked it as the one part of a printable subtree to leave
+          off the paper; there is no printable subtree here any more, and the
+          document simply has no such button in it. */}
+      <div className="mt-4">
         <button onClick={onEdit}
           className="text-sm font-medium text-brand-600 dark:text-brand-300 hover:underline">
           {t("reports.custom.changeSelection", lang)}

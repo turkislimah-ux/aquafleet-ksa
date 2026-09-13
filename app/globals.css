@@ -401,16 +401,20 @@ html[dir="rtl"] { --dock-dir: -1; }
   #history-print, #history-print *,
   /* Reports tab 2 — one id per statement, so "print" means "print THIS
      statement". Only one statement is mounted at a time, so exactly one of
-     these subtrees exists in the DOM on any given print. */
+     these subtrees exists in the DOM on any given print.
+
+     FOUR STATEMENTS ARE NO LONGER ON THIS LIST, and the gap is the design.
+     Revenue, Receivables, the Narrative and Custom build a standalone document
+     through lib/docvm/* + lib/docs/* and hand it to printHtml(), so they have
+     no print id to whitelist — their markup is screen-only now. Leaving a stale
+     id here would be worse than useless: it would un-hide a card that the
+     document already says better, and nothing in the DOM would signal it.
+     app/reports/StatementsTab.tsx's MIGRATED set is the other half. */
   #pnl-print, #pnl-print *,
-  #revenue-print, #revenue-print *,
-  #receivables-print, #receivables-print *,
   #cost-print, #cost-print *,
   #ops-print, #ops-print *,
-  #narrative-print, #narrative-print *,
   #payslips-print, #payslips-print *,
   #commission-review-print, #commission-review-print *,
-  #custom-print, #custom-print *,
   /* Daily Trips — a statement in the same pack (?statement=daily), printed the
      same way. Its own Print button is inside the report because it carries its
      own date and period controls; the isolation rule here is unchanged. */
@@ -468,9 +472,8 @@ html[dir="rtl"] { --dock-dir: -1; }
   header.h-14 { display: none !important; }
   main { padding: 0 !important; margin: 0 !important; }
 
-  #pnl-print, #revenue-print, #receivables-print,
-  #cost-print, #ops-print, #narrative-print, #payslips-print,
-  #commission-review-print, #custom-print, #daily-trips-print {
+  #pnl-print, #cost-print, #ops-print, #payslips-print,
+  #commission-review-print, #daily-trips-print {
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
@@ -504,30 +507,26 @@ html[dir="rtl"] { --dock-dir: -1; }
   /* Tables: full width, header row repeated on every page, and no row or
      section split across a page break. Without table-header-group a
      multi-page table loses its column headings after page one. */
-  #pnl-print table, #revenue-print table, #receivables-print table,
-  #cost-print table, #ops-print table, #narrative-print table,
-  #payslips-print table, #commission-review-print table, #custom-print table,
+  #pnl-print table, #cost-print table, #ops-print table,
+  #payslips-print table, #commission-review-print table,
   #daily-trips-print table {
     width: 100% !important;
     border-collapse: collapse;
   }
-  #pnl-print thead, #revenue-print thead, #receivables-print thead,
-  #cost-print thead, #ops-print thead, #narrative-print thead,
-  #payslips-print thead, #commission-review-print thead, #custom-print thead,
+  #pnl-print thead, #cost-print thead, #ops-print thead,
+  #payslips-print thead, #commission-review-print thead,
   #daily-trips-print thead {
     display: table-header-group;
   }
-  #pnl-print tr, #revenue-print tr, #receivables-print tr,
-  #cost-print tr, #ops-print tr, #narrative-print tr,
-  #payslips-print tr, #commission-review-print tr, #custom-print tr,
+  #pnl-print tr, #cost-print tr, #ops-print tr,
+  #payslips-print tr, #commission-review-print tr,
   #daily-trips-print tr {
     break-inside: avoid;
     page-break-inside: avoid;
   }
   /* A section heading must never be the last thing on a page. */
-  #pnl-print h3, #revenue-print h3, #receivables-print h3,
-  #cost-print h3, #ops-print h3, #narrative-print h3,
-  #payslips-print h3, #commission-review-print h3, #custom-print h3,
+  #pnl-print h3, #cost-print h3, #ops-print h3,
+  #payslips-print h3, #commission-review-print h3,
   #daily-trips-print h3 {
     break-after: avoid;
     page-break-after: avoid;
@@ -549,7 +548,7 @@ html[dir="rtl"] { --dock-dir: -1; }
      be added up. That box is the reason this rule is worth the risk of an early
      break: half a VAT list with no heading is the one fragment here that could
      be mistaken for part of the statement. */
-  #cost-print section, #revenue-print section, #pnl-print section {
+  #cost-print section, #pnl-print section {
     break-inside: avoid;
     page-break-inside: avoid;
   }

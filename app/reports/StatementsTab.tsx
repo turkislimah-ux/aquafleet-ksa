@@ -8,8 +8,13 @@
 // Eight statements plus a ninth that appears once the builder has generated
 // one: P&L, Revenue, Receivables, Costs, Operations, Daily Trips, Payslips, the
 // computed Narrative, and Custom. One is visible at a time, which is what makes
-// "Print" mean "print THIS statement" — each owns a print id, and only the
-// mounted one exists in the DOM when the print stylesheet runs.
+// "Print" mean "print THIS statement".
+//
+// AND IT NOW MEANS TWO DIFFERENT THINGS. The statements migrated onto the ATLAS
+// kit build a standalone document and hand it to printHtml(); the rest still
+// print the screen through globals.css, which hides the page and un-hides the
+// mounted statement's print id. MIGRATED below is the list, and the one Print
+// button branches on it — see handlePrint().
 //
 // This file owns the P&L and the period controls; the rest live in
 // StatementViews.tsx, a leaf module it imports one-way, except Daily Trips —
@@ -57,7 +62,7 @@
 // figures the views produced, which is what lib/reports.ts delta() does
 // everywhere else on this page.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTabParam } from "@/lib/useTabParam";
 import { Printer, Pencil, Info, Sparkles } from "lucide-react";
@@ -98,6 +103,8 @@ import { useApp } from "@/components/AppShell";
 import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
 import type { CsvValue } from "@/lib/csv";
 import { useCsvSource, type RegisterCsv } from "./exportSource";
+import type { PrintSource, RegisterPrint } from "./printSource";
+import { printHtml } from "@/lib/printHtml";
 
 // One statement at a time. That keeps each print id the ONLY print subtree in
 // the DOM, so "Print" prints the statement you are looking at rather than the
@@ -105,6 +112,29 @@ import { useCsvSource, type RegisterCsv } from "./exportSource";
 type Statement =
   | "pnl" | "revenue" | "receivables" | "cost" | "operations"
   | "daily" | "payslips" | "narrative" | "custom";
+
+/**
+ * THE STATEMENTS THAT PRINT A DOCUMENT RATHER THAN THE SCREEN.
+ *
+ * Each of these four registers a builder through ./printSource while it is
+ * mounted, and each has had its print id REMOVED from app/globals.css in the
+ * same commit that added it here. The two halves are one change: an id left in
+ * the whitelist would print the screen as well as the document on a stray
+ * window.print(), and a name left out of this set would print NOTHING.
+ *
+ * THAT SECOND FAILURE IS WHY THE SET EXISTS AT ALL rather than the button just
+ * falling through to window.print() when no source is registered. globals.css
+ * hides the whole page and un-hides by whitelist; with the entry gone,
+ * window.print() on one of these four emits a BLANK SHEET — a failure that
+ * looks like a printer problem, not a code one. So a migrated statement with no
+ * registered source prints nothing at all, which is visibly nothing happening.
+ *
+ * It shrinks as batches land and disappears with the last un-migrated statement,
+ * taking the fallback with it.
+ */
+const MIGRATED: ReadonlySet<Statement> = new Set<Statement>([
+  "revenue", "receivables", "narrative", "custom",
+]);
 
 // `revenue` points at reports.metric.revenue rather than minting a ninth tab
 // leaf: the statement is named after the metric it reports, so a second copy of
@@ -440,6 +470,62 @@ export default function StatementsTab({
   // child statement is mounted instead.
   useCsvSource(statement === "pnl" ? registerCsv : undefined, buildPnl);
 
+  // ---- The print source -----------------------------------------------------
+  // A REF, NOT STATE, and that is the one place this differs from the CSV source
+  // one level up (ReportsClient holds that one in useState). The difference is
+  // what the value is FOR: the export button is DISABLED when nothing is
+  // registered, so its registration has to cause a render. Nothing renders off
+  // this one — the Print button looks the same either way — so state here would
+  // buy a render per mount and per language change and pay for nothing.
+  //
+  // A ref also removes the updater-form trap that comment warns about: storing a
+  // function in state calls it if you pass it bare.
+  const printSource = useRef<PrintSource | null>(null);
+  // Stable identity. The children register from an effect keyed on this, so a
+  // new function every render would re-register on every render.
+  const registerPrint = useCallback<RegisterPrint>((src) => {
+    printSource.current = src;
+  }, []);
+
+  // THE ONE BUTTON, TWO MEANINGS. See MIGRATED above for why a migrated
+  // statement with no source prints nothing rather than falling through.
+  const handlePrint = useCallback(() => {
+    const build = printSource.current;
+    if (build) {
+      printHtml(build());
+      return;
+    }
+    if (MIGRATED.has(statement)) return;
+    window.print();
+  }, [statement]);
+
+  // CTRL/CMD+P PRINTS THE DOCUMENT TOO — the same intercept BreakdownReport,
+  // StatementModal and InvoiceDetailModal carry, for the same reason: without it
+  // the shortcut prints a BLANK SHEET on a migrated statement, because
+  // globals.css un-hides by whitelist and the whitelist entry went with the
+  // print CSS.
+  //
+  // ONLY WHILE A MIGRATED STATEMENT IS MOUNTED. The other five still print
+  // through that stylesheet, and intercepting their shortcut to call
+  // window.print() ourselves would be an elaborate way of doing what the browser
+  // was already going to do.
+  //
+  // Capture phase, so it runs before anything else can swallow the key. No data
+  // in the deps: `handlePrint` reads the ref at FIRE time, so the sheet is built
+  // from whatever is registered when the key is pressed, never from a snapshot.
+  useEffect(() => {
+    if (!MIGRATED.has(statement)) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      handlePrint();
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [statement, handlePrint]);
+
   if (statement === "daily") {
     return (
       <div className="space-y-4">
@@ -607,7 +693,7 @@ export default function StatementsTab({
           <Btn variant="outline" onClick={onManageExpenses}>
             <Pencil className="h-4 w-4" />{t("reports.statements.manageExpenses", lang)}
           </Btn>
-          <Btn variant="outline" onClick={() => window.print()}>
+          <Btn variant="outline" onClick={handlePrint}>
             <Printer className="h-4 w-4" />{t("reports.statements.print", lang)}
           </Btn>
         </div>
@@ -919,11 +1005,15 @@ export default function StatementsTab({
           periodStart={current.period_start} periodEnd={current.period_end}
           label={periodLabel(current, lang)}
           registerCsv={registerCsv}
+          registerPrint={registerPrint}
         />
       )}
 
       {statement === "receivables" && (
-        <ReceivablesStatement receivables={receivables} aging={aging} registerCsv={registerCsv} />
+        <ReceivablesStatement
+          receivables={receivables} aging={aging}
+          registerCsv={registerCsv} registerPrint={registerPrint}
+        />
       )}
 
       {statement === "cost" && (
@@ -976,7 +1066,10 @@ export default function StatementsTab({
       )}
 
       {statement === "narrative" && (
-        <NarrativeStatement bullets={narrative} label={periodLabel(current, lang)} pnl={current} />
+        <NarrativeStatement
+          bullets={narrative} label={periodLabel(current, lang)} pnl={current}
+          registerPrint={registerPrint}
+        />
       )}
 
       {statement === "custom" && customSpec && customReport && (
@@ -985,6 +1078,7 @@ export default function StatementsTab({
           title={customTitle(customSpec, pnlPeriods, lang)}
           onEdit={() => setCustomOpen(true)}
           registerCsv={registerCsv}
+          registerPrint={registerPrint}
           // The heading over the row-label column. Resolved HERE because
           // GROUPING_TKEY is already imported for the title, and CustomStatement
           // otherwise has no reason to know what a BuilderSelection is.

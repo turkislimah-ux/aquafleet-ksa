@@ -144,6 +144,64 @@ function txt(
   );
 }
 
+type Run = {
+  text: string;
+  size?: number; fill?: string; weight?: number; mono?: boolean; caps?: boolean; track?: number;
+};
+
+/**
+ * ONE <text> holding SEVERAL differently-styled runs, laid out by the BROWSER.
+ *
+ * This exists because the alternative is measuring type in Node, and we cannot.
+ * Two <text> elements set side by side require the caller to know how wide the
+ * first one renders, and the only way to "know" that without a font engine is to
+ * guess a glyph width — which is the exact mistake `trendLegend` below records
+ * having already been burned by once. It was made a second time in `splitBar`:
+ * the value was drawn at x+9 and its label at a hard-coded x+9+30, which holds
+ * for a three-digit trip count and fails outright for a money string. A
+ * nine-character figure at 12.5px measures about 44px, so "70,650.00" printed
+ * straight through "PAID 100.0%" — in BOTH languages, since the offset mirrors.
+ *
+ * A <tspan> with no x of its own continues from wherever the previous run ENDED.
+ * The browser does the measuring, so the answer is right for Latin figures,
+ * Arabic labels, tracked capitals and any face the sheet is set in.
+ *
+ * The gap between runs is an EN SPACE (U+2002), not a coordinate. CSS
+ * white-space collapsing only eats U+0020/U+0009/U+000A, so it survives, and
+ * being part of the text it lands on the correct side under either direction.
+ *
+ * BIDI: the outer element keeps the file header's `direction:ltr` +
+ * `unicode-bidi:plaintext` pair, so text-anchor stays GEOMETRIC while the runs
+ * order themselves from the first strong character in the whole string. On an
+ * Arabic sheet that character is in the LABEL, so the paragraph goes RTL and the
+ * figure sits to the RIGHT of its label — which is the order an Arabic reader
+ * wants, and the order the two-element version was hand-mirroring to produce.
+ */
+function txtRuns(
+  f: Frame, x: number, y: number, runs: readonly Run[], opt: { anchor?: Anchor } = {},
+): string {
+  const s = f.s;
+  const body = runs
+    .map((r) => {
+      const size = r.size ?? s.labelSize;
+      const caps = r.caps ?? false;
+      const track = r.track ?? (caps ? 0.09 : 0);
+      return (
+        `<tspan font-family="${r.mono ? s.figFont : s.font}" font-size="${num(size)}"` +
+        ` fill="${r.fill ?? s.mid}" font-weight="${r.weight ?? 400}"` +
+        (track ? ` letter-spacing="${num(track * size)}"` : "") +
+        `>${esc(caps ? r.text.toUpperCase() : r.text)}</tspan>`
+      );
+    })
+    .join("");
+  return (
+    `<text x="${num(f.x(x))}" y="${num(y)}" text-anchor="${f.a(opt.anchor ?? "start")}"` +
+    ` style="direction:ltr;unicode-bidi:plaintext;` +
+    `font-variant-numeric:tabular-nums;font-feature-settings:'tnum' 1"` +
+    `>${body}</text>`
+  );
+}
+
 /** A straight line in chart coordinates, mirrored as a pair of points. */
 function line(f: Frame, x1: number, y1: number, x2: number, y2: number, attrs: string): string {
   return `<line x1="${num(f.x(x1))}" y1="${num(y1)}" x2="${num(f.x(x2))}" y2="${num(y2)}" ${attrs}/>`;
@@ -418,6 +476,53 @@ export type SplitPart = {
   hatch?: boolean;
 };
 
+/** How far inside its own block a knocked-out run starts. */
+const SPLIT_INSET = 9;
+
+/**
+ * WHAT A BLOCK MUST HOLD BEFORE ANYTHING IS KNOCKED OUT OF IT: the figure and
+ * the share. Not the band name — that one is allowed to go to the clip.
+ *
+ * These two ems are the ONLY guessed glyph widths in this file, and `txtRuns`
+ * above records why guessing is normally forbidden. They are affordable here
+ * for one reason: both runs are LATIN DIGITS AND PUNCTUATION IN EITHER
+ * LANGUAGE, because `lib/utils.ts` pins every figure in the app to en-US Latin
+ * digits. There is no Arabic arm to keep in step and no dictionary word whose
+ * length is the reader's to choose.
+ *
+ * MEASURED 2026-09-13 off the live sheets with getComputedTextLength, and
+ * ROUNDED UP: the failure direction is not symmetric. Over-estimating sets a
+ * label above the bar that would just have fitted inside it; under-estimating
+ * clips a digit off a number, which is the defect these exist to stop.
+ *
+ *   figure  0.486 - 0.500 em (bold tabular, Helvetica Neue and Cairo alike)
+ *   share   0.536 em in Cairo, 0.629 in Helvetica Neue - the LATIN, wider
+ *           figure is used for both, so Arabic errs toward the safe side too.
+ */
+const SPLIT_FIG_EM = 0.5;
+const SPLIT_PCT_EM = 0.64;
+
+/**
+ * The block width at which a label stops fitting INSIDE its own block. Pulled
+ * out of the drawing loop because the answer is needed for every block before
+ * the first one is drawn — see `floats` in `splitBar`.
+ */
+function splitNeeds(display: string, pct: number, labelSize: number): number {
+  // The share as it will be set: the EN SPACE and the % are two of its
+  // characters, so the estimate counts the string it actually prints.
+  const share = splitShare(pct);
+  return (
+    SPLIT_INSET +
+    [...display].length * SPLIT_FIG_EM * labelSize * 1.25 +
+    [...share].length * SPLIT_PCT_EM * labelSize * 0.95
+  );
+}
+
+/** The share, set as one run. U+2002 EN SPACE, never U+0020 - see `txtRuns`. */
+function splitShare(pct: number): string {
+  return `\u2002${pct.toFixed(1)}%`;
+}
+
 /**
  * A proportional bar, deliberately NOT a donut.
  *
@@ -426,9 +531,33 @@ export type SplitPart = {
  * is a RATIO. A single bar answers it by length, labels in place, and costs a
  * fifth of the height.
  *
- * Works for any number of parts, but the labelling only reads for two or three:
- * beyond that the thin blocks have no room for a knocked-out figure and it
- * becomes a ranked table wearing a chart's clothes.
+ * TWO PARTS. THREE AT A PUSH. FOUR IS OUT OF RANGE — and that is a limit of the
+ * device, not of this implementation, so do not send a fourth part here
+ * expecting a smaller version of the same chart.
+ *
+ * MEASURED at SHEET_W, 2026-09-13, on a four-band aging profile before the
+ * caller was withdrawn. Two live-shaped runs:
+ *
+ *   14.4 / 27.3 / 17.8 / 40.5%  ->  94 / 179 / 117 / 266px. All four hold
+ *     their figure and share; bands 1 and 3 lose the tail of their band NAME.
+ *   5.0 / 11.8 / 18.6 / 64.7%   ->  33 / 78 / 122 / 425px. Bands 1 and 2
+ *     cannot hold figure-plus-share, and cannot float above the bar either
+ *     without printing over each other, so they go UNLABELLED; band 3 loses
+ *     its name tail.
+ *
+ * Every one of those is a DEGRADED bar rather than a wrong figure — the clip
+ * ordering and the float rule below see to that. But the bar carries ONE ink, so
+ * four blocks have no boundary between them and a clipped name butts straight
+ * into the next block's figure; and the labels that survive are the large bands,
+ * which are the ones a reader could already see.
+ *
+ * TURKI'S RULING, 2026-09-13: receivables drops its bar rather than keep a
+ * degraded one beside an aging table that states all four bands exactly. Four
+ * blocks in one ink would need four distinguishable FILLS before their labels
+ * were worth anything, and that is a different chart, not a label fix.
+ *
+ * The two remaining callers are both two-part and both read: revenue's
+ * paid/outstanding, and the breakdown's delivered/scheduled.
  */
 export function splitBar(
   s: ChartStyle,
@@ -442,24 +571,139 @@ export function splitBar(
   const barH = 26;
   const top = h - barH - 20;
   let g = `<defs>${hatchDef("split", s)}</defs>`;
+  // HOW MANY BLOCKS WANT THE STRIP OF PAPER ABOVE THE BAR — settled for every
+  // block BEFORE the first one is drawn, because whether a floating label can be
+  // placed at all depends on what else is up there, and the loop finds that out
+  // one block too late.
+  //
+  // A float is anchored on a block edge and runs OUTWARD, across its neighbours'
+  // ground. One of them is fine: breakdown's hatched tail has the whole trailing
+  // margin to itself. Two ADJACENT ones are not. A four-band aging profile put
+  // two 33px and 77px blocks side by side, so both floated, both anchored within
+  // 33px of each other, and their runs printed straight through one another —
+  // the 2026-09-13 proof reads "30,675.07(2)51(7)5%00-30.B%YS1-60 DAYS". That is
+  // TWO figures destroyed where the clip would have cost one band name.
+  //
+  // THAT FOUR-BAND CALLER IS GONE — receivables draws no bar now (see
+  // lib/docvm/receivables.ts) and the two remaining callers are both two-part.
+  // The rule STAYS, because it is what makes this function safe to hand a third
+  // part to, and the measurement above is why it is the rule it is.
+  //
+  // No glyph estimate can settle it. A float's width is dominated by its
+  // category NAME, a dictionary word in two languages, and measuring those is
+  // what `txtRuns` above forbids. So the rule is the one needing no measurement:
+  // A SOLID BLOCK FLOATS ONLY WHEN IT IS THE LONE FLOAT ON THE BAR. Otherwise it
+  // prints no label. Absent type is recoverable from the table the chart sits
+  // under; overlapped type is recoverable from nothing, and it takes its
+  // neighbour down with it.
+  //
+  // A HATCHED block floats REGARDLESS, collision or not. It cannot knock its
+  // label out — reversed type breaks up against the 45 degree strokes — so the
+  // float is the only place its category is named, and suppressing it would drop
+  // the category from the chart rather than merely from its labels.
+  //
+  // A ZERO part is not counted: it draws nothing and labels nothing, so letting
+  // it occupy the one float would silence a block that has something to say.
+  const floats = parts.filter(
+    (p) =>
+      p.value > 0 &&
+      (p.hatch ||
+        (w * p.value) / total < splitNeeds(p.display, (p.value / total) * 100, s.labelSize)),
+  ).length;
+
   let x = 0;
   for (const p of parts) {
+    // A ZERO PART IS NOT DRAWN AND NOT LABELLED. Turki's ruling 2026-09-13, on
+    // the revenue sheet: a period with nothing outstanding printed
+    // "0.00  0.0%  OUTSTANDING" floating over the trailing edge of a bar that is
+    // 100% paid — a caption for a block with no width, which reads as a missing
+    // segment rather than an absent one. The 100.0% on the block beside it
+    // already says everything the zero part could.
+    //
+    // The RECT goes with the label, not just the text. A zero-width rect still
+    // carries a 0.8px stroke, so leaving it drawn would print a stray vertical
+    // hairline at the bar's end — a tick mark meaning nothing.
+    //
+    // Skipping costs no geometry: the part contributes 0 to `total`, so every
+    // other block sits exactly where it did.
+    if (p.value <= 0) continue;
+
     const pwid = (w * p.value) / total;
     const pct = (p.value / total) * 100;
+    const share = splitShare(pct);
     g += `<rect x="${num(f.rx(x, pwid))}" y="${num(top)}" width="${num(pwid)}" height="${barH}"` +
       ` fill="${p.hatch ? `url(#${hatchId("split")})` : s.ink}" stroke="${s.ink}" stroke-width="0.8"/>`;
+
     // Knock the label out of the solid block; set it BENEATH the hatched one,
     // where reversed type would break up against the 45 degree strokes.
-    if (!p.hatch && pwid > 74) {
-      g += txt(f, x + 9, top + barH / 2 + s.labelSize * 0.36, p.display,
-        { fill: "#ffffff", weight: 700, size: s.labelSize * 1.25, mono: true });
-      g += txt(f, x + 9 + 30, top + barH / 2 + s.labelSize * 0.36,
-        `${p.label}  ${pct.toFixed(1)}%`,
-        { fill: "#ffffff", size: s.labelSize * 0.95, caps: s.caps });
-    } else {
-      g += txt(f, x + pwid, top - 7, `${p.display}  ${p.label}  ${pct.toFixed(1)}%`,
-        { anchor: "end", fill: s.ink, size: s.labelSize * 0.95, caps: s.caps });
+    if (!p.hatch && pwid >= splitNeeds(p.display, pct, s.labelSize)) {
+      // CLIPPED TO ITS OWN BLOCK. Loose, the reversed type walks off the ink
+      // onto white paper and vanishes MID-FIGURE, which is a silently wrong
+      // number. Clipped, it stops at the block edge — so what the clip takes is
+      // whatever is LAST in the run, and the run is ordered to make that a word
+      // rather than a number.
+      //
+      // The `splitNeeds` test above is what keeps that ordering worth anything.
+      // It was a bare `pwid > 74` until 2026-09-13 — a threshold by its own
+      // admission, not a measurement — and an 11.8% band arrives at 77.5px, wide
+      // enough to pass it and too narrow to hold the figure and the share, so
+      // the share was clipped to "11.8" with the % gone. A number may lose
+      // nothing. The block either holds both or holds neither.
+      //
+      // The id is derived from the geometry it clips, so two charts that collide
+      // on it are two charts whose clip rects are identical anyway.
+      const clip = `atlas-split-${num(w)}x${num(h)}-${num(x)}-${num(pwid)}`;
+      g += `<clipPath id="${clip}"><rect x="${num(f.rx(x, pwid))}" y="${num(top)}"` +
+        ` width="${num(pwid)}" height="${barH}"/></clipPath>`;
+      g += `<g clip-path="url(#${clip})">` +
+        txtRuns(f, x + SPLIT_INSET, top + barH / 2 + s.labelSize * 0.36, [
+          { text: p.display, fill: "#ffffff", weight: 700, size: s.labelSize * 1.25, mono: true },
+          // THE SHARE RIDES WITH THE FIGURE, NOT WITH THE LABEL. Both are
+          // quantities and the clip above can only ever eat the run that ends
+          // last, so the two of them go first and the NAME goes last. Set the
+          // other way round — which is how this read until 2026-09-13 — the
+          // share sits behind the label and is the first thing the clip
+          // reaches: a 17.8% band printed "17.8", a number silently wrong by a
+          // factor of a hundred, and its neighbour lost its share outright. A
+          // truncated category name is recoverable from the table a chart sits
+          // under; a truncated share is not recoverable from anything, because
+          // nothing on the sheet says it was cut.
+          //
+          // Each gap opens with an EN SPACE (U+2002), not a plain one. CSS
+          // white-space collapsing eats U+0020 at a run boundary, which would
+          // weld the runs together; U+2002 is not collapsible. These are also
+          // the only gaps in this run that are NOT coordinates.
+          { text: share, fill: "#ffffff", size: s.labelSize * 0.95, caps: s.caps },
+          { text: `\u2002${p.label}`, fill: "#ffffff",
+            size: s.labelSize * 0.95, caps: s.caps },
+        ]) +
+        `</g>`;
+    } else if (p.hatch || floats === 1) {
+      // ABOVE THE BAR, ON WHICHEVER EDGE OF THE BLOCK HAS THE ROOM.
+      //
+      // The trailing edge is the natural one — it is where the block ENDS, and
+      // for the hatched tail of a two-part bar, which is what this branch was
+      // written for, it sets the label just outside the block's own ink. But a
+      // block near the LEADING edge has nothing outside it to use: a 5.0% band
+      // is 33px wide at x=0, and a 110px run anchored on its trailing edge
+      // starts at -77, so the figure and most of the share printed off the paper
+      // entirely. That is worse than any clip — a clip at least leaves the
+      // number's own start on the page.
+      //
+      // WHICH EDGE HAS THE ROOM IS THE WHOLE TEST, and it needs no glyph width
+      // to answer: compare what lies outside the trailing edge against what
+      // lies outside the leading one, and anchor into the larger. The hatched
+      // tail keeps the trailing edge it always had (nothing is beyond it), the
+      // leading band takes the leading one (everything is beyond it), and both
+      // mirror through the frame rather than through a second case here.
+      const lead = w - x > x + pwid;
+      g += txt(f, lead ? x : x + pwid, top - 7, `${p.display}  ${share.trim()}  ${p.label}`,
+        { anchor: lead ? "start" : "end", fill: s.ink,
+          size: s.labelSize * 0.95, caps: s.caps });
     }
+    // No third branch: a solid block that neither holds its label nor owns the
+    // paper above it prints none. See `floats` above for why that is the least
+    // lossy of the three things that could happen to it.
     x += pwid;
   }
   g += line(f, 0, top + barH + 7, w, top + barH + 7, `stroke="${s.hair}" stroke-width="0.6"`);

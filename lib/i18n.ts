@@ -4756,6 +4756,128 @@ export const dict = {
       generated: { en: "Generated {d}", ar: "صدر في {d}" },
     },
 
+    // --- THE PRINTED STATEMENTS (lib/docvm/*.ts, lib/docs/*.ts) --------------
+    //
+    // Everything a statement says ON PAPER AND NOWHERE ELSE. The rule for what
+    // may live here is narrow and worth stating, because the printable law
+    // (0% deviation in DATA, GROUPING and WORDING) reads as if this block should
+    // not exist at all:
+    //
+    //   A leaf earns a place here ONLY when it is the WORDS FOR SOMETHING THE
+    //   SCREEN ALREADY SAYS IN A MEDIUM PAPER DOES NOT HAVE.
+    //
+    // That is three things and no others:
+    //
+    //   1. THE SEVERITY WORDS. Five reports currently carry a finding in HUE
+    //      alone — the aging bands in rose/amber, the narrative's five coloured
+    //      dots. Printed, and above all photocopied, every one of those collapses
+    //      to the same grey and the reader loses the finding the report was
+    //      written to surface. lib/atlas/shell.ts names both of these reports by
+    //      name where it documents the gutter (grep THE SEVERITY GUTTER). The
+    //      word is not a new claim; it is the SAME claim the colour makes, in the
+    //      one encoding a monochrome sheet can carry.
+    //
+    //      This is NOT the same as lib/docvm/purchaseOrder.ts's flag, which
+    //      reuses an EXISTING screen word (the rejected status). Here no word
+    //      exists to reuse, because the screen never needed one — which is
+    //      exactly why the sheet does.
+    //
+    //   2. A CHART'S OWN FURNITURE — a split bar's total line, its footnote and
+    //      its aria label. The screen has no chart on these statements, so there
+    //      is no wording to mirror; and a chart with no total line is a shape
+    //      with no scale.
+    //
+    //   3. THE <title> OF THE DOCUMENT. Never printed on the sheet — it is what
+    //      the print dialog and a saved PDF are named.
+    //
+    // WHAT IS NOT HERE, DELIBERATELY: every heading, every column head, every
+    // note and every figure caption. Those are all screen wording and are read
+    // from the SAME KEY the component passes, so a reword lands on both surfaces
+    // or on neither. If a leaf below ever acquires a screen reader, it belongs
+    // above this block, not in it.
+    //
+    // NO sarUnit KEY. See the epitaph at trips.breakdown.doc — the unit set
+    // BESIDE A FIGURE is the literal "SAR" in both languages, because that is
+    // what formatSar writes on the screen these sheets mirror. `figureUnit`
+    // below is the SPELLED-OUT caption under the masthead figure, and English
+    // spells it out too.
+    doc: {
+      figureUnit: { en: "Saudi Riyals", ar: "ريال سعودي" },
+      // The masthead's own footing pair. The screen's print band composes the
+      // same fact as one sentence (`print.generated` above); a masthead states
+      // it as a label over a value, so the label is keyed on its own. Same
+      // words, same date, one grammar apart.
+      generatedLabel: { en: "Generated", ar: "صدر في" },
+
+      revenue: {
+        docTitle: { en: "Revenue statement — {p}", ar: "قائمة الإيرادات — {p}" },
+        // THE BAR'S WHOLE IS PAID + OUTSTANDING, AND IT IS NOT REVENUE. The
+        // screen says why in its own note: an invoice can be partly covered by a
+        // prepaid balance, so a prepaid invoice can be unpaid AND owe nothing.
+        // splitBar normalises by the SUM OF ITS PARTS, so naming that sum
+        // "revenue" would make the chart assert a whole that does not exist —
+        // the one thing a proportional bar must never do. It names its own sum
+        // instead, and the footnote says so in as many words.
+        barTotal: { en: "Paid and outstanding — {n}", ar: "المسدَّد والمستحق — {n}" },
+        barFootnote: {
+          en: "Not two halves of the revenue above",
+          ar: "ليسا نصفَي الإيراد أعلاه",
+        },
+        barAria: {
+          en: "Paid against outstanding, as a proportion of the two together.",
+          ar: "المسدَّد مقابل المستحق، كنسبة من مجموعهما.",
+        },
+        // Printed INSTEAD of the bar when both figures are zero. A proportional
+        // bar over a total of zero is not an empty chart, it is a division by
+        // zero — and every part would print "0.0%" above a block of no width.
+        barEmpty: {
+          en: "Nothing paid and nothing outstanding on this period's invoices.",
+          ar: "لا مسدَّد ولا مستحق على فواتير هذه الفترة.",
+        },
+      },
+
+      receivables: {
+        docTitle: { en: "Receivables statement", ar: "قائمة الذمم المدينة" },
+        // NO barTotal / barAria KEYS HERE, AND DO NOT ADD THEM BACK. They
+        // captioned a four-band split bar under the aging table, dropped on
+        // Turki's ruling 2026-09-13 — the reasoning is in lib/docvm/receivables.ts.
+        // The revenue keys of the same name above are a DIFFERENT, two-part bar
+        // and are live; these two described a chart this sheet no longer draws.
+        //
+        // THE TWO SEVERITY WORDS, on the same 90 / 60 day thresholds the screen
+        // colours rose and amber. Not "late" and "very late": the bands are
+        // already named in days beside them, so the word has to say what the
+        // colour said — that this one needs chasing — and not restate the
+        // number.
+        overdue: { en: "Overdue", ar: "متأخر" },
+        ageing: { en: "Ageing", ar: "يتقادم" },
+      },
+
+      narrative: {
+        docTitle: { en: "{p} in review", ar: "{p} في مراجعة" },
+        // THE FIVE TONE WORDS, one per NarrativeBullet tone (lib/reports.ts).
+        // Keyed off the enum exactly as the screen's dot colour is, never off
+        // the sentence — so the word stays right in Arabic, where the sentence
+        // is a different sentence.
+        //
+        // Each names the DIRECTION OF THE FINDING, which is what the dot's hue
+        // meant: emerald rose, rose fell, slate did neither, brand is context,
+        // amber wants attention. A word like "GOOD" would be a judgement the dot
+        // never made.
+        tone: {
+          up: { en: "Rise", ar: "ارتفاع" },
+          down: { en: "Fall", ar: "انخفاض" },
+          flat: { en: "Flat", ar: "ثبات" },
+          info: { en: "Note", ar: "ملاحظة" },
+          warn: { en: "Watch", ar: "انتباه" },
+        },
+      },
+
+      custom: {
+        docTitle: { en: "Custom report — {p}", ar: "تقرير مخصص — {p}" },
+      },
+    },
+
     // --- the REVENUE statement ----------------------------------------------
     revenue: {
       title: { en: "Revenue statement", ar: "قائمة الإيرادات" },
