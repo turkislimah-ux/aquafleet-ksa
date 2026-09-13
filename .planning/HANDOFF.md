@@ -1441,12 +1441,13 @@ instruction.
    server-side, the other 17 pass the server's own English through. Do not
    "reconcile" them, and do not re-open this from a fresh grep.
 
-### (b) Doable FIX — TWO entries, both opened 2026-09-10, BOTH NOW CLOSED
+### (b) Doable FIX — THREE entries. 1 and 2 CLOSED; **entry 3 is OPEN**
 
 **This section read "EMPTY again" from 2026-09-09 until entry 1 opened it, and
-it is effectively EMPTY again as of 2026-09-11.** Entry 1 closed 2026-09-10 on
-the pristine replay; entry 2 closed 2026-09-11 as `0fa3969`. Both are kept below
-for their mechanism and their lesson, **not as work** — do not reopen either.
+was effectively EMPTY again from 2026-09-11 until entry 3 opened it on
+2026-09-13.** Entry 1 closed 2026-09-10 on the pristine replay; entry 2 closed
+2026-09-11 as `0fa3969`. Both are kept below for their mechanism and their
+lesson, **not as work** — do not reopen either. **Entry 3 is live work.**
 
 1. **CLOSED 2026-09-10 — POST-DEPLOY: THE MIGRATION SET WAS NOT SELF-REBUILDABLE.
    SIX instances, every one measured 2026-09-10, ALL SIX NOW RESOLVED.** Four
@@ -1926,6 +1927,42 @@ For the record, what they were and what measurement showed:
 - **`lib/actions/search.ts:12` pointed at "HANDOFF.md §6", which does not exist**
   and never will — this file has no numbered sections. It now states the fact it
   meant: no role gate exists, so RLS alone scopes the result set.
+
+3. **OPEN, opened 2026-09-13 — THE NARRATIVE'S FALL BULLET DOUBLE-NEGATES ITS
+   OWN PERCENTAGE. A CONTENT bug in the composer, NOT a print bug.** Surfaced by
+   batch 3's print work and flagged rather than fixed there, on Turki's ruling
+   the same day. Measured on the live Sep 2026 narrative, **both languages**:
+
+   - EN — `Revenue was 20,290 SAR, down -60.0% on Aug 2026.`
+   - AR — `بلغت الإيرادات 20,290 SAR، بانخفاض -60.0% عن أغسطس 2026.`
+
+   **The direction is stated twice: once as a word, once as a sign.** The
+   template carries the word — `reports.narrative.revenueDown`, `lib/i18n.ts:5737`,
+   `"Revenue was {v}, down {d} on {p}."` — and `lib/reports.ts:967` fills `{d}`
+   with `formatPct(d.pct)`, which is **SIGNED**. `d.dir` is derived at
+   `lib/reports.ts:818` from the sign of that very number, so the word and the
+   minus are two expressions of ONE fact and the sentence says it twice.
+
+   **Only the DOWN branch reads wrong.** `revenueUp` (`lib/i18n.ts:5736`) gets a
+   positive pct and renders `up 60.0%`, which is correct — which is exactly why
+   this survived: half the cases look fine.
+
+   **ONE call site.** `formatPct(` appears twice in `lib/reports.ts` — its
+   definition at `:862` and this call at `:967`. Nothing else in the file feeds a
+   signed percentage into a worded direction, so the blast radius is one
+   argument. Verify with `npx tsx scripts/code-grep.ts formatPct lib/reports.ts`
+   before assuming that is still true.
+
+   **DO NOT FIX THIS IN `lib/docvm/narrative.ts` OR `lib/docs/narrative.ts`.**
+   The printable law is that every sheet mirrors its on-screen source exactly —
+   0% deviation in DATA, GROUPING and WORDING. The renderer takes the composed
+   bullet as WORDING and must not improve it; a renderer-side `Math.abs` would
+   make the sheet disagree with the screen it prints, which is the one failure
+   the whole kit is built to prevent. **Fix at the composer and both surfaces
+   move together** — that is the point of there being one composer.
+
+   Scope note: this is `buildNarrative`'s output, so it is screen copy first. It
+   is not blocked on anything and it is not part of the print batches.
 
 ### (c) FORWARD-ONLY — nothing to do, no owner, not defects
 
