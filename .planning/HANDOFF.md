@@ -1,9 +1,10 @@
 # SESSION HANDOFF
 
-**Updated 2026-09-11 (migration-set convergence close-out — `0195`, the pristine
-rebuild proof, and `CLAUDE.md` compression pass 6; Batch K, Batch H and the three
-2026-09-09 sessions are the sections below it), every figure re-measured this
-turn.** Rewritten fresh at
+**Updated 2026-09-14 (ATLAS print batch 6 — payslips, payslip register and
+commission review onto documents; `PrintBand` deleted; the `globals.css`
+whitelist down to ONE id — `56870a7`). The 2026-09-11 migration-set convergence
+close-out, Batch K, Batch H and the three 2026-09-09 sessions are the sections
+below it.** Every figure re-measured this turn. Rewritten fresh at
 `2318055` on 2026-09-08 from a 1301-line predecessor; **nothing was lost, it is
 `e93baec:.planning/HANDOFF.md`, and every unit's reasoning lives in its own commit
 message**, which is where `CLAUDE.md` §5 says detail belongs. This file is
@@ -712,35 +713,80 @@ before running any build while dev is up.
 ### Printing — THREE models now, and which surfaces are on which
 
 - **The ATLAS DOCUMENT model** — `lib/docvm/*` decides what the sheet SAYS,
-  `lib/docs/*` decides only where it sits, `printHtml()` prints it. Eleven
-  surfaces as of `d1629dc`: revenue, receivables, cost, operations, narrative,
-  custom, **P&L**, **daily trips**, breakdown, purchase orders, exit permits.
-  These carry **no print id, no PrintBand and nothing in `globals.css`** — the
-  DOM below them is screen-only.
+  `lib/docs/*` decides only where it sits, `printHtml()` prints it. **Fourteen
+  surfaces as of `56870a7`**: revenue, receivables, cost, operations, narrative,
+  custom, P&L, daily trips, breakdown, purchase orders, exit permits, and — new
+  in batch 6 — **payslip register, single payslip, commission review**. These
+  carry **no print id and nothing in `globals.css`** — the DOM below them is
+  screen-only. (`lib/docs/` and `lib/docvm/` hold 15 files each; `reportSheet.ts`
+  and `reportDoc.ts` are shared helpers, not surfaces.)
 - **The older DOCUMENT model** (own stylesheet, hidden same-origin iframe, no app
   CSS reaches inside): **invoice** (`lib/invoicePrintTemplate.ts`) and
   **statement** (`lib/statementPdfTemplate.ts`), both off
   `lib/plainDocStyles.ts`'s `plainDocShell`, both sharing their download path's
   view-model. Not migrated to ATLAS and not scheduled to be.
 - **The SCREEN-DOM model** (`app/globals.css`, `body * { visibility: hidden }`
-  plus an un-hide whitelist): what is left. **Re-measured 2026-09-13 after batch
-  5 (`d1629dc`) the whitelist carries 3 ids**, down from 13 before the batches:
-  `history`, `payslips`, `commission-review`. On the Reports tab it is **2** —
-  `history` belongs to the driver history surface, not to that tab. `#pnl-print`
-  and `#daily-trips-print` left with this batch; `#permit-print` is gone
-  entirely; `#po-print` and `#breakdown-print` still exist as ids but print
-  through ATLAS, so neither is on the whitelist. **Do not read that count off
-  this line next time — grep `-print` in `app/globals.css`, and strip comments
-  before trusting it: the epitaph naming the departed rules is still in the
-  file** (CLAUDE.md §5; `npx tsx scripts/code-grep.ts pnl-print` exits 0).
+  plus an un-hide whitelist): **one id left. Re-measured 2026-09-14 after batch
+  6 (`56870a7`): `#history-print`, and nothing else**, down from 13 before the
+  batches and 3 before this one. **On the Reports tab it is now ZERO** —
+  `history` belongs to the driver history surface. `#payslips-print` and
+  `#commission-review-print` left with batch 6; `#permit-print` is gone entirely;
+  `#po-print` and `#breakdown-print` still exist as ids but print through ATLAS,
+  so neither is on the whitelist. **Do not read that count off this line next
+  time — grep `-print` in `app/globals.css`, and strip comments before trusting
+  it: a raw grep of the staged file returns ten ids and nine of them are
+  epitaphs** (CLAUDE.md §5; `npx tsx scripts/code-grep.ts payslips-print`
+  exits 0).
+- **`PrintBand` and its `Head` wrapper are GONE** (batch 6), and so is
+  `.print-only`, which existed only to clothe the band. The band hand-set a
+  title/period/company strip onto sheets that had no masthead; all fourteen
+  ATLAS surfaces carry a real one. **`body.printing-review` went with them** —
+  it was the last body-class print switch, needed only because payslips and
+  commission review were the one place two printable subtrees shared a DOM and a
+  global whitelist can name only one winner. Two builder closures say it
+  locally instead. The `MIGRATED` fallback in `StatementsTab.tsx` is gone too:
+  a missing print source is now a bug in the statement, and the response is to
+  print nothing rather than the hidden page underneath.
 - **A subtree that leaves the whitelist without an intercept prints a BLANK
   SHEET**, which reads like the printer's fault. That is why `StatementModal`
-  intercepts Ctrl/Cmd+P. Do not delete a whitelist entry without checking what
-  its owner does with the shortcut.
+  intercepts Ctrl/Cmd+P — and why `StatementsTab`'s intercept is now
+  **unconditional** (`StatementsTab.tsx:634`, capture phase, reads the builder
+  ref at fire time). Do not delete a whitelist entry without checking what its
+  owner does with the shortcut.
 
 ---
 
-## Completed this session (2026-09-13, ATLAS print batch 5 — P&L + daily trips, `d1629dc`)
+## Completed this session (2026-09-14, ATLAS print batch 6 — payslips + commission review, `56870a7`)
+
+**The last three screen-DOM statements are documents, and the mechanism they
+were the last users of is deleted.** Turki verified in-browser and accepted the
+sheets as-is. `tsc --noEmit` green; pushed, 0/0.
+
+- **Three docvm/docs pairs added**: `payslip-register`, `payslip` (a single
+  driver's month) and `commission-review`. The register's Print button branches
+  — a selected driver prints that driver's PAYSLIP, otherwise the register.
+- **`PrintBand` and its `Head` wrapper deleted**, with `.print-only`
+  (which clothed only the band) and `body.printing-review` (the last body-class
+  print switch, and the only way a GLOBAL whitelist could pick between two
+  printable subtrees in one DOM). `ScreenHead` is what survives in
+  `StatementViews.tsx` and it carries **no `no-print`** — there is no printable
+  subtree in that file to be part of.
+- **The `MIGRATED` fallback is gone.** A statement with no registered print
+  source now prints NOTHING rather than the hidden page underneath, and the
+  Cmd/Ctrl+P intercept is unconditional.
+- **`globals.css`'s `@media print` whitelist is down to `#history-print`.** Nine
+  departed ids remain in the file as comment epitaphs — **strip comments before
+  counting** (CLAUDE.md §5). `code-grep` confirms `PrintBand`, `payslips-print`,
+  `commission-review-print`, `printing-review` and `MIGRATED` all exit 0.
+- **The status mark ships as the `.mark` rule in `lib/atlas/shell.ts`** (tracked
+  caps + a rule; `.on` solid, `.off` dashed). Three alternative treatments were
+  drawn and compared at true A4 in both languages before Turki closed the
+  question — **no further iteration, do not reopen it.** The throwaway renderer
+  `scripts/tmp-status-options.ts` was never committed.
+
+---
+
+## Completed the session before (2026-09-13, ATLAS print batch 5 — P&L + daily trips, `d1629dc`)
 
 **Both statements print as ATLAS documents, and both old print paths left in the
 same commit.** Turki verified in-browser first — both languages, the Print button
@@ -2299,29 +2345,27 @@ Changing either rule means changing `scripts/amount-payable-check.ts` first.
 
 **Invoices and statements are DONE** — both print as their own documents through
 `lib/plainDocStyles.ts`, off the same view-model their download path uses.
-**Everything else still prints the live React DOM through
-`app/globals.css`'s visibility whitelist**, which inherits screen styling and is
-where the clipped-column and blank-sheet failures came from.
+**As of batch 6 exactly ONE surface still prints the live React DOM through
+`app/globals.css`'s visibility whitelist** — the model that inherits screen
+styling and produced the clipped-column and blank-sheet failures.
 
-**RE-MEASURED 2026-09-13, after batch 5 (`d1629dc`), off the whitelist itself
-rather than off this list.** Eight statements now build a document through
+**RE-MEASURED 2026-09-14, after batch 6 (`56870a7`), off the whitelist itself
+rather than off this list.** **Eleven statements** now build a document through
 `lib/docvm/*` + `lib/docs/*` and hand it to `printHtml()`: revenue, receivables,
-cost, operations, narrative, custom, **P&L** and **daily trips**. Purchase
-Orders, Exit Permits and the Breakdown report migrated in the earlier batches
+cost, operations, narrative, custom, P&L, daily trips, and — new in batch 6 —
+**payslip register, single payslip and commission review**. Purchase Orders,
+Exit Permits and the Breakdown report migrated in the earlier batches
 (`a05eab9`, `0ca3389`), and `#permit-print` no longer exists at all.
 
 What is genuinely LEFT on the visibility whitelist — grep `-print` in
 `app/globals.css`, not these addresses:
 
-- **`#payslips-print` and `#commission-review-print`** (`StatementViews.tsx`) —
-  the last two Reports-page statements on the old model, and the reason
-  `PrintBand` and the `MIGRATED` fallback in `StatementsTab.tsx` still exist.
-  **Both are live and neither was deleted in batch 5** — that surface is the one
-  place two print subtrees coexist in one DOM, which is what the whole
-  one-id-per-statement isolation rule is written against.
-- **`#history-print`** (`app/drivers/HistoryTab.tsx`) — carries the single-page
-  PIN, which CLIPS rather than paginating. Its removal is its own job; see the
-  standing note at `globals.css:443`.
+- **`#history-print`** (`app/drivers/HistoryTab.tsx`) — **the only entry left,
+  and the whole reason the `@media print` block still exists.** It carries the
+  single-page PIN, which CLIPS rather than paginating. When it goes, the block
+  goes with it, along with the shell-out-of-flow rules that keep the sidebar's
+  indent off the sheet. Its removal is its own job; the standing note is in
+  `globals.css` (grep `still carries the same pin`, not a line number).
 - **Part details — a NEW clean print, mirroring its view.** Still no print
   surface at all: `app/inventory/` contains no `*-print` id outside
   `PurchaseOrders.tsx`, which is already migrated. A build, not a migration.
