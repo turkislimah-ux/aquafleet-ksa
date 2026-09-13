@@ -10,15 +10,15 @@
 // computed Narrative, and Custom. One is visible at a time, which is what makes
 // "Print" mean "print THIS statement".
 //
-// AND IT NOW MEANS ONE THING ON EIGHT OF THE NINE. Those eight build a
-// standalone document through lib/docvm/* + lib/docs/* and hand it to
-// printHtml(); only Payslips still prints the screen through globals.css, which
-// hides the page and un-hides the mounted statement's print id. MIGRATED below
-// is the list, and the one Print button branches on it — see handlePrint().
+// AND IT NOW MEANS ONE THING ON ALL NINE. Every statement builds a standalone
+// document through lib/docvm/* + lib/docs/* and hands it to printHtml(). None
+// of them prints the screen, so there is no longer a list of the ones that do:
+// `MIGRATED` and the `window.print()` fallback both left with Payslips, the
+// last holdout, and handlePrint() below is now a single unbranched path.
 //
-// Daily Trips is on that list while keeping its OWN button, which is not a
-// contradiction — the entry is what arms the Cmd/Ctrl+P intercept. The set's
-// own comment says why leaving it off would print a blank sheet.
+// Daily Trips keeps its OWN Print button and still registers a source here,
+// which is not a contradiction — the registration is what arms the Cmd/Ctrl+P
+// intercept, a window listener that cannot see which button is on screen.
 //
 // This file owns the P&L and the period controls; the rest live in
 // StatementViews.tsx, a leaf module it imports one-way, except Daily Trips —
@@ -123,39 +123,35 @@ type Statement =
   | "pnl" | "revenue" | "receivables" | "cost" | "operations"
   | "daily" | "payslips" | "narrative" | "custom";
 
-/**
- * THE STATEMENTS THAT PRINT A DOCUMENT RATHER THAN THE SCREEN.
+/*
+ * THERE USED TO BE A `MIGRATED` SET HERE, and it is worth saying what it was
+ * for, because the shape it guarded is still a live hazard elsewhere.
  *
- * Each of these registers a builder through ./printSource while it is mounted,
- * and each has had its print id REMOVED from app/globals.css in the same commit
- * that added it here. The two halves are one change: an id left in the
- * whitelist would print the screen as well as the document on a stray
- * window.print(), and a name left out of this set would print NOTHING.
+ * It named the statements that print a DOCUMENT rather than the screen, and
+ * the one Print button branched on it. The branch existed for a failure mode,
+ * not for tidiness: globals.css hides the whole page under @media print and
+ * un-hides by whitelist, so once a statement's print id leaves that whitelist,
+ * a stray window.print() on it emits a BLANK SHEET — a failure that reads like
+ * a printer problem rather than a code one. The set made that case print
+ * nothing at all instead, which is visibly nothing happening.
  *
- * THAT SECOND FAILURE IS WHY THE SET EXISTS AT ALL rather than the button just
- * falling through to window.print() when no source is registered. globals.css
- * hides the whole page and un-hides by whitelist; with the entry gone,
- * window.print() on one of these emits a BLANK SHEET — a failure that looks
- * like a printer problem, not a code one. So a migrated statement with no
- * registered source prints nothing at all, which is visibly nothing happening.
+ * It shrank with every batch and is now empty, because every statement
+ * registers a builder. The set, the branch and the window.print() fallback all
+ * went together — a set that contains everything decides nothing.
  *
- * It shrinks as batches land and disappears with the last un-migrated statement,
- * taking the fallback with it. What is left: `payslips`, and only because its
- * surface is the one place two print subtrees coexist (see globals.css).
+ * THE HAZARD IT GUARDED IS STILL REAL, just no longer here: any surface that
+ * removes a print id from globals.css must register a source, or intercept
+ * Cmd/Ctrl+P, IN THE SAME COMMIT. That is why the intercept below no longer
+ * gates on anything.
  *
- * `daily` IS IN THE SET THOUGH IT DOES NOT USE THE SHARED BUTTON. Daily Trips
- * carries its own Print button inside the report — its own date and period
- * controls are there, and the controls at the top of this tab cannot express a
- * single day — and that button calls printHtml() directly. The set entry is for
- * the OTHER path: the Cmd/Ctrl+P intercept below, which is a window listener and
- * has no idea which button is on screen. Leave `daily` out and the keyboard
- * shortcut prints the blank sheet this comment exists to prevent, on the one
- * statement whose whole purpose is to be printed.
+ * `no-print` WENT WITH IT, here and in StatementViews.tsx. The class is
+ * `display: none` under @media print and nothing at all on screen, so with no
+ * whitelist entry to un-hide this page it decides nothing — and a class that
+ * decides nothing still CLAIMS something: that the element wearing it is part of
+ * a printable subtree. There is none. The period controls and the statement
+ * selector are screen-only because no view-model was ever handed them, which is
+ * a stronger guarantee than a stylesheet rule and cannot silently stop matching.
  */
-const MIGRATED: ReadonlySet<Statement> = new Set<Statement>([
-  "revenue", "receivables", "cost", "operations", "narrative", "custom",
-  "pnl", "daily",
-]);
 
 /**
  * VAT for the period — FOUR INDEPENDENT PASSES, one per source, and deliberately
@@ -370,13 +366,13 @@ export default function StatementsTab({
      invoices, outstandingLive, perTruck, maintPerTruck, metrics, lang],
   );
 
-  // ---- Which statement. Excluded from print. ------------------------------
+  // ---- Which statement. Screen-only, and no longer says so with a class. ---
   // Hoisted out of the return because it renders in TWO of them — the normal
   // pack below, and the Daily Trips branch that has to come before the
   // `!current` guard. Held as a value rather than a component so it does not
   // remount, and so its state stays in this scope.
   const selector = (
-    <div className="flex items-center gap-1 flex-wrap no-print">
+    <div className="flex items-center gap-1 flex-wrap">
       {[...STATEMENTS, ...(customSpec
         ? [{ key: "custom" as Statement, labelKey: "reports.statements.tab.custom" as TKey }]
         : [])].map((st) => (
@@ -607,28 +603,25 @@ export default function StatementsTab({
   // leaving a builder registered would print a sheet for a period that has none.
   usePrintSource(statement === "pnl" && current ? registerPrint : undefined, buildPnlDoc);
 
-  // THE ONE BUTTON, TWO MEANINGS. See MIGRATED above for why a migrated
-  // statement with no source prints nothing rather than falling through.
+  // THE ONE BUTTON, ONE MEANING: build the mounted statement's document and
+  // print that. No fallback — see the note where MIGRATED used to be. A missing
+  // source is now a bug in the statement, and the right response to it is to do
+  // nothing rather than to print the hidden page underneath.
   const handlePrint = useCallback(() => {
     const build = printSource.current;
-    if (build) {
-      printHtml(build());
-      return;
-    }
-    if (MIGRATED.has(statement)) return;
-    window.print();
-  }, [statement]);
+    if (build) printHtml(build());
+  }, []);
 
   // CTRL/CMD+P PRINTS THE DOCUMENT TOO — the same intercept BreakdownReport,
   // StatementModal and InvoiceDetailModal carry, for the same reason: without it
-  // the shortcut prints a BLANK SHEET on a migrated statement, because
-  // globals.css un-hides by whitelist and the whitelist entry went with the
-  // print CSS.
+  // the shortcut prints a BLANK SHEET, because globals.css un-hides by whitelist
+  // and every statement's whitelist entry went with its print CSS.
   //
-  // ONLY WHILE A MIGRATED STATEMENT IS MOUNTED. Payslips still prints through
-  // that stylesheet, and intercepting its shortcut to call window.print()
-  // ourselves would be an elaborate way of doing what the browser was already
-  // going to do.
+  // UNCONDITIONAL NOW. It used to arm only while a migrated statement was
+  // mounted, because Payslips still printed through the stylesheet and there was
+  // nothing to improve on what the browser would do anyway. Payslips has moved,
+  // so there is no statement left for which the browser's own behaviour is the
+  // right one.
   //
   // THIS IS DAILY TRIPS' ONLY ROUTE THROUGH HERE. Its Print button is inside the
   // report and never touches handlePrint(); the shortcut has no button, so
@@ -639,7 +632,6 @@ export default function StatementsTab({
   // in the deps: `handlePrint` reads the ref at FIRE time, so the sheet is built
   // from whatever is registered when the key is pressed, never from a snapshot.
   useEffect(() => {
-    if (!MIGRATED.has(statement)) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "p" && e.key !== "P") return;
       if (!e.metaKey && !e.ctrlKey) return;
@@ -649,7 +641,7 @@ export default function StatementsTab({
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [statement, handlePrint]);
+  }, [handlePrint]);
 
   if (statement === "daily") {
     return (
@@ -751,8 +743,8 @@ export default function StatementsTab({
 
   return (
     <div className="space-y-4">
-      {/* ---- Controls. Excluded from print. ---------------------------- */}
-      <div className="flex flex-wrap items-center gap-3 no-print">
+      {/* ---- Controls. Screen-only by construction, not by class. ------- */}
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1 rounded-lg border p-1"
           style={{ borderColor: "rgb(var(--border))" }}>
           {/* `pt`, not `t` — the translator is imported into this scope and a
@@ -1145,10 +1137,19 @@ export default function StatementsTab({
             rather than inside it because a failed issue must be visible from
             wherever in the list the click happened. */}
         {payslipError && (
-          <div className="mb-4 rounded-lg border border-rose-500/25 bg-rose-500/5 px-3 py-2 text-sm text-rose-700 dark:text-rose-300 no-print">
+          <div className="mb-4 rounded-lg border border-rose-500/25 bg-rose-500/5 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">
             {payslipError}
           </div>
         )}
+        {/* ONE REGISTRATION, TWO DOCUMENTS. `registerPrint` goes down once and
+            the builder behind it branches the way this component's JSX does: a
+            selected driver prints THAT DRIVER'S PAYSLIP, otherwise the register.
+            Unlike `registerCsv` — which bails on a selected driver, because a
+            one-row file is a trap — it never returns nothing: a single payslip
+            IS a document, and the header button is the only way to ask for one.
+            This is also what preserves the old behaviour without the old
+            mechanism; `body:not(.printing-review)` used to mean "the shared
+            button prints the register", and now the closure says so. */}
         <PayslipsStatement
           basis={payslipBasis}
           issued={issuedPayslips}
@@ -1163,6 +1164,7 @@ export default function StatementsTab({
           violationsByDriver={violationsByDriver}
           violationTypes={violationTypes}
           registerCsv={registerCsv}
+          registerPrint={registerPrint}
         />
         </>
       )}
@@ -1189,7 +1191,7 @@ export default function StatementsTab({
       )}
 
       {statement === "pnl" && (
-      <div className="flex gap-2 text-[11px] muted no-print">
+      <div className="flex gap-2 text-[11px] muted">
         <Info className="h-3.5 w-3.5 shrink-0 mt-px" />
         {/* RAW-ENUM TRAP, FIXED IN PLACE. English spliced `periodType` straight
             into the sentence, so it read "the immediately preceding month" only

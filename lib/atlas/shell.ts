@@ -763,15 +763,68 @@ export const ATLAS_CSS = `
   .chip { border: var(--rule-hair) solid var(--hair); padding: 2px 8px 3px;
           font-size: 8.5px; line-height: 1.4; color: var(--ink); }
 
+  /* ---------- RUNS ----------
+     A named set where every member carries its own COUNT, inside a table cell:
+     the projects one driver served, with the trips on each. Chips are wrong for
+     it twice over - a box drawn around each of five names in one cell outweighs
+     the names it holds, and a count has nowhere to sit inside a chip.
+
+     STACKED, ONE RUN PER LINE, not flowed as a cloud. Flowed, the line break
+     falls wherever the cell width puts it, so a count lands beside the NEXT
+     name as often as beside its own and the cell stops being readable as pairs
+     at all. Stacked, a long name still wraps, but it wraps inside its own run
+     and keeps its figure with it.
+
+     The NAME takes the label system, which is what makes the set greyscale and
+     unmistakable for the plain values in the columns beside it - tracked caps
+     in Latin, weight and size in Arabic, both inherited from .lbl. Tracked
+     LESS than a real label, because a project name is several times longer than
+     one.
+
+     BOTH HALVES RUN IN FULL INK. The count was set in --mid to mark it as the
+     quiet half, and that was a misreading of what the cell holds: the count IS
+     the measurement - the trips this driver ran on this project, the figure the
+     Trips column beside it totals - and a number the reader has to lean in to
+     make out is a number the sheet failed to state. The two are ranked by CASE
+     and TRACKING instead, which costs no contrast to spend: the name is tracked
+     caps, the count is plain tabular figures, and nothing else in the cell looks
+     like either one. */
+  .runs { margin-top: 1px; }
+  .run { display: block; line-height: 1.5; }
+  .run + .run { margin-top: 2px; }
+  .run-label { font-size: 8px; letter-spacing: 0.1em; color: var(--ink); }
+  .run-count { font-size: 9px; font-weight: 500; color: var(--ink);
+               font-variant-numeric: tabular-nums; margin-inline-start: 7px; }
+
   /* ---------- STATUS MARK ----------
-     The one categorical device that is not a word: a SOLID mark means the thing
-     happened, a DASHED outline means it did not. Both survive greyscale because
-     neither depends on hue, and it is the same grammar the invoice already
-     uses, so a reader who has seen one document can read the other. */
-  .mark { display: inline-block; font-size: 7.2px; font-weight: 700; letter-spacing: 0.1em;
-          text-transform: uppercase; padding: 2px 8px; white-space: nowrap; line-height: 1.4; }
-  .mark.on { background: var(--ink); color: #ffffff; }
-  .mark.off { border: var(--rule-hair) dashed var(--mid); color: var(--soft); }
+     SOLID means it happened, DASHED means it did not. The grammar is unchanged
+     and the invoice still reads the same way. What changed is WHERE the two
+     states are drawn: on a rule UNDER the word, never as a box around it.
+
+     The box was wrong on paper. A filled panel of ink and a four-sided outline
+     are both heavier objects than the 7.2px word they hold, so the loudest thing
+     on a register row was a container, and the eye went to the darkest rectangle
+     on the sheet instead of to the money the sheet is about. Ruled, the mark
+     ranks with the micro-labels it belongs to and the figures stay on top.
+
+     It also gives the cell its horizontal space back. The box paid 8px of
+     padding on each side, which is what shoved a status hard against the figure
+     in the column before it — and padding inside the MARK cannot fix that,
+     because the head and the totals row carry no mark and would not move with
+     it. Separation between two columns is a COLUMN's job; it is paid once, by
+     .col-gap, where all three row-groups answer it the same way.
+
+     RULE-MID RATHER THAN RULE-HAIR, and only because of the dashes: at 0.6px a
+     dash pattern renders as an intermittent smudge rather than as a dashed line,
+     so the single distinction this device rests on stops being legible at
+     exactly the size it is needed. Both states take the SAME weight — solid
+     versus dashed is the whole signal, and thickening one would rank the two as
+     well as tell them apart. */
+  .mark { display: inline-block; font-size: 7.2px; font-weight: 700; letter-spacing: 0.14em;
+          text-transform: uppercase; white-space: nowrap; line-height: 1.4;
+          padding-bottom: 2px; color: var(--ink); }
+  .mark.on { border-bottom: var(--rule-mid) solid var(--ink); }
+  .mark.off { border-bottom: var(--rule-mid) dashed var(--mid); color: var(--soft); }
 
   /* ---------- SIGNATURE BLOCK ----------
      A rule to sign ON, with the label BENEATH it. Above the rule the label

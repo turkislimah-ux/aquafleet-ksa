@@ -4948,6 +4948,42 @@ export const dict = {
           ar: "لا يوجد رقم يجمع هذه الورقة. فكل مشروع يُجمع على حدة، والسجل اليدوي أدناه يُجمع منفصلًا ولا يُضاف إليها.",
         },
       },
+
+      // THE REGISTER AND THE ONE-DRIVER PAYSLIP ARE TWO DOCUMENTS. On screen
+      // they shared a print id because opening a driver REPLACES the register,
+      // so the two were never both on the page — an artefact of printing the
+      // screen, not a statement that they are one sheet. A register is a LIST
+      // and a payslip is a DOCUMENT, and the print dialog names them apart.
+      payslipRegister: {
+        docTitle: { en: "Payslip register — {p}", ar: "سجل قسائم الرواتب — {p}" },
+      },
+
+      payslip: {
+        // `{d}` is the driver's name, `{m}` his month. NOT the payslip number:
+        // an unissued slip has none, and a dialog title that reads "Payslip —"
+        // with nothing after it is worse than one that never promised a number.
+        // The number is on the sheet itself, where it is an identifier.
+        docTitle: { en: "Payslip — {d}, {m}", ar: "قسيمة راتب — {d}، {m}" },
+        // THE SEVERITY WORD FOR THE UNABSORBED CAVEAT. On screen that paragraph
+        // is an amber-bordered panel, and amber IS the finding — in grayscale it
+        // is a box with a hairline. The panel's own sentence still prints, with
+        // all three of its figures; the word carries the judgement the colour
+        // carried, and says WHICH finding it is.
+        //
+        // Taken from the sentence's own verb — it says the money "was not
+        // recovered" — rather than minting a term the paragraph beside it never
+        // uses. Not "Deduction": the deductions line is two rows up under that
+        // exact name, and a gutter word repeating the label beside it says
+        // nothing the eye has not already read.
+        unrecovered: { en: "Unrecovered", ar: "غير مسترد" },
+      },
+
+      commissionReview: {
+        docTitle: {
+          en: "Commission earned by driver — {p}",
+          ar: "العمولة المكتسبة حسب السائق — {p}",
+        },
+      },
     },
 
     // --- the REVENUE statement ----------------------------------------------

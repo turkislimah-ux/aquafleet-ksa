@@ -385,121 +385,61 @@ html[dir="rtl"] { --dock-dir: -1; }
 
 .tabular-nums { font-variant-numeric: tabular-nums; }
 
-/* Screen default for the print-only statement band; @media print flips it. */
-.print-only { display: none; }
+/* `.print-only` USED TO LIVE HERE, hidden on screen and flipped to block under
+   @media print. It clothed ONE component — PrintBand, the title/period band
+   app/reports/StatementViews.tsx stamped on top of a statement so the printed
+   sheet would say what it was and for which month. Every statement that band
+   served now builds its own document, and a document's masthead is part of the
+   document. The class went with the band; see the epitaph at the end of the
+   @media block. */
 
 /* A4 with real margins. Without this the browser applies its own default
    margin box and adds URL/date furniture, which looks wrong on a statement
    that is meant to be signed and filed. */
 @page { size: A4; margin: 14mm; }
 
-/* Print isolation — show only the report subtree (#history-print payout, or one
-   of the statements below). Everything else is hidden so the printout is just
+/* Print isolation — show only the report subtree (#history-print, and as of
+   this commit NOTHING ELSE). Everything else is hidden so the printout is just
    the record, edge-to-edge. */
 @media print {
   body * { visibility: hidden !important; }
-  #history-print, #history-print *,
-  /* Reports tab 2 — ONE STATEMENT LEFT, and the gap is the design.
-
-     The P&L, Revenue, Receivables, Costs, Operations, Daily Trips, the
-     Narrative and Custom all build a standalone document through lib/docvm/* +
-     lib/docs/* and hand it to printHtml(), so none of them has a print id to
-     whitelist — their markup is screen-only now. Leaving a stale id here would
-     be worse than useless: it would un-hide a card that the document already
-     says better, and nothing in the DOM would signal it.
-     app/reports/StatementsTab.tsx's MIGRATED set is the other half.
-
-     What remains is the payslips surface, and only because of the rule directly
-     below: it is the one place two print subtrees coexist in one DOM. */
-  #payslips-print, #payslips-print *,
-  #commission-review-print, #commission-review-print * { visibility: visible !important; }
-  /* THE PAYSLIPS SURFACE IS THE ONE PLACE TWO PRINT SUBTREES COEXIST.
-     Every other statement is mounted alone, so "one id visible" is enough.
-     Here the register and the commission review render together, so a body
-     class set by the review table's own Print button decides which survives.
-     Without this, printing either one would emit both.
-
-     This used to say "same mechanism as body.printing-po below". There is no
-     body.printing-po below any more — the purchase order left this stylesheet
-     (see the epitaph). The mechanism is now unique to this surface, and it is
-     the LAST body-class print switch in the file. */
-  body.printing-review #payslips-print { display: none !important; }
-  body:not(.printing-review) #commission-review-print { display: none !important; }
+  /* ONE ID LEFT IN THE WHITELIST, and the emptiness around it is the design.
+     Every statement and every modal that used to be named here now builds a
+     standalone document through lib/docvm/* + lib/docs/* and hands it to
+     printHtml(), which prints it out of a hidden same-origin iframe this
+     stylesheet cannot reach into. A stale id would be worse than useless: it
+     would un-hide a card the document already says better, and nothing in the
+     DOM would signal it. See both epitaphs below. */
+  #history-print, #history-print * { visibility: visible !important; }
   .no-print { display: none !important; }
 
-  /* Shown ONLY on paper — the statement's own title/period band. */
-  .print-only { display: block !important; }
-
   /* ===================================================================
-     REPORTS tab 2 — printable statements.
+     THE SHELL HAS TO LEAVE THE FLOW, NOT MERELY TURN INVISIBLE.
      ===================================================================
-     These PAGINATE (a revenue statement can run several pages), so they
-     must stay in NORMAL STATIC FLOW. The absolute + inset:0 trick still used
-     by #history-print pins a subtree to a single page and clips everything
-     after it.
+     `visibility: hidden` hides the sidebar and topbar but KEEPS THEIR LAYOUT,
+     so a printable subtree stays indented by the sidebar's width and overflows
+     the right edge of the sheet. This was the actual cause of a clipped PAID
+     column on the old revenue statement.
 
-     This used to name #permit-print alongside it and call the trick "right
-     for a one-page gate pass". BOTH halves of that were wrong, which is why
-     the permit is no longer in this file: a gate pass is one page UNTIL
-     someone loads twelve parts onto a truck, and the pin gave no sign that
-     the last three had been dropped. Nothing is "right" about a rule whose
-     failure mode is a document that looks complete. #history-print carries
-     the same pin and the same assumption, and is next in line.
-
-     What that leaves is a HORIZONTAL problem, and it is the actual cause of
-     the clipped PAID column on the revenue statement: `visibility: hidden`
-     hides the sidebar and topbar but KEEPS THEIR LAYOUT, so the statement
-     stayed indented by the 256px sidebar and overflowed the right edge of
-     the sheet. They have to leave the flow entirely, not just turn
-     invisible. Selectors are pinned to something UNIQUE TO THE SHELL —
-     `header.h-14` rather than `header`, because every statement renders its
-     own <header>, and a blanket rule would delete each statement's title.
+     Selectors are pinned to something UNIQUE TO THE SHELL — `header.h-14`
+     rather than `header`, because a printable subtree may render its own
+     <header>, and a blanket rule would delete its title.
 
      The sidebar hook is a data attribute, not `aside.w-64`. It was that class
      until the sidebar became a hover-expanding rail — at which point `w-64`
      stopped existing, this rule silently stopped matching, and printing lost
-     its only guard with nothing in git to signal it. An attribute cannot
-     drift with the design, which is the point of using one. (256px above is
-     what the sidebar measured when the clipping bug was found; the footprint
-     is 56px now. That number is history, not a value to keep in sync.) */
+     its only guard with nothing in git to signal it. An attribute cannot drift
+     with the design, which is the point of using one.
+
+     THIS BLOCK OUTLIVES THE STATEMENTS IT WAS WRITTEN FOR, because
+     #history-print is still in the flow of the same shell. It is not dead with
+     them; it is the last thing standing between that one subtree and the
+     sidebar's indent. */
   aside[data-app-chrome="sidebar"] { display: none !important; }
   header.h-14 { display: none !important; }
   main { padding: 0 !important; margin: 0 !important; }
 
-  #payslips-print, #commission-review-print {
-    width: 100% !important;
-    max-width: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    border: 0 !important;
-    box-shadow: none !important;
-    background: #fff !important;
-    color: #000 !important;
-    font-size: 10pt;
-  }
-
-  /* Tables: full width, header row repeated on every page, and no row or
-     section split across a page break. Without table-header-group a
-     multi-page table loses its column headings after page one. */
-  #payslips-print table, #commission-review-print table {
-    width: 100% !important;
-    border-collapse: collapse;
-  }
-  #payslips-print thead, #commission-review-print thead {
-    display: table-header-group;
-  }
-  #payslips-print tr, #commission-review-print tr {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-  /* A section heading must never be the last thing on a page. */
-  #payslips-print h3, #commission-review-print h3 {
-    break-after: avoid;
-    page-break-after: avoid;
-    margin-top: 14pt;
-  }
-
-  /* TWO BLOCKS OF PAGINATION RULES HAVE LEFT THIS FILE WITH THEIR DOCUMENTS,
+  /* THREE BLOCKS OF PAGINATION RULES HAVE LEFT THIS FILE WITH THEIR DOCUMENTS,
      and naming them is cheaper than rediscovering why they are absent.
 
      `#pnl-print > .card` and `#pnl-print > .card + .card` stripped the chrome
@@ -515,7 +455,18 @@ html[dir="rtl"] { --dock-dir: -1; }
      kit's now, per block, and made better: see `.stack > .sec-head` and `tfoot`
      in lib/atlas/shell.ts, which hold a heading to its own sub-line and pull the
      last body row over with the totals. A blanket section rule could only ever
-     avoid the break, never decide what travels with what. */
+     avoid the break, never decide what travels with what.
+
+     `#payslips-print` / `#commission-review-print` carried the third and
+     largest: a full-width, border-less, 10pt reset of the card, plus
+     `table { border-collapse }`, `thead { display: table-header-group }`,
+     `tr { break-inside: avoid }` and `h3 { break-after: avoid }`. EVERY ONE OF
+     THOSE IS NOW THE KIT'S, and one of them is deliberately DIFFERENT there:
+     the kit sets `tfoot { display: table-row-group }`, NOT table-footer-group,
+     because Chromium repeats a footer group on every page and a totals row
+     printed three times is three claims about the same money. A stylesheet that
+     styles someone else's markup can only guess at that distinction; a renderer
+     that owns the markup does not have to. */
 
   /* History payout — a single record. Absolute + inset:0 pins it edge-to-edge
      for a clean one-page printout (it fits a page). */
@@ -565,13 +516,31 @@ html[dir="rtl"] { --dock-dir: -1; }
      settlement rows to make a long statement scannable. The document has no
      tint to strip — it is B&W by construction.
 
+     AND WITH THEM, THE LAST BODY-CLASS PRINT SWITCH IN THIS FILE:
+     `body.printing-review #payslips-print { display: none }` and its
+     `body:not(.printing-review)` twin. The payslips surface was the one place
+     TWO printable subtrees coexisted in a single DOM — the register and the
+     commission review render together — so "one id visible" was not enough and
+     a class toggled on <body> by the review's own Print button had to decide
+     which survived. The document path has no such problem, and the reason is
+     worth keeping: a whitelist is GLOBAL and can only ever name one winner,
+     while a builder closure is LOCAL and each button simply names the document
+     it means. Two printables on one screen is now two functions, and the
+     register's own button branches a third way — a selected driver prints that
+     driver's payslip. A stylesheet could not have expressed that at all.
+
      THIS IS WHY EVERY ONE OF THOSE SURFACES INTERCEPTS CTRL/CMD+P. This @media
      block opens with `body * { visibility: hidden }` and un-hides by whitelist,
      so a subtree that leaves the whitelist without an intercept prints a BLANK
      SHEET — a failure that reads like the printer's fault. Each intercept was
      ADDED in the same commit that deleted its whitelist entry, because deleting
      the entry is what arms the trap. Do not delete a whitelist entry here
-     without checking what its owner does with the shortcut. */
+     without checking what its owner does with the shortcut.
+
+     ONE ENTRY IS LEFT, AND THE RULE NOW READS FORWARD RATHER THAN BACK. There
+     is no longer a list of surfaces to check against — there is `#history-print`
+     and nothing else. Adding a new id here is adding the tenth exception to a
+     pattern nine surfaces have already left; build a document instead. */
 }
 
 /* ===============================================================

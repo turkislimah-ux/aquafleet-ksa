@@ -1,7 +1,7 @@
 "use client";
 
-// HOW THE ONE PRINT BUTTON REACHES NINE STATEMENTS WHILE FOUR OF THEM PRINT A
-// DOCUMENT AND FIVE STILL PRINT THE SCREEN.
+// HOW THE ONE PRINT BUTTON REACHES NINE STATEMENTS, ALL OF WHICH NOW PRINT A
+// DOCUMENT AND NONE OF WHICH PRINTS THE SCREEN.
 //
 // The sibling of ./exportSource.ts, and deliberately the same mechanism: the
 // statement that is mounted hands the header a CLOSURE, and the closure
@@ -10,11 +10,17 @@
 // exactly one statement is mounted at a time.
 //
 // WHY IT IS NEEDED AT ALL. The Print button in StatementsTab is shared by every
-// statement in the pack, and until now it meant one thing: window.print(), with
+// statement in the pack, and it used to mean one thing: window.print(), with
 // app/globals.css hiding the whole page and un-hiding the mounted statement's
-// print id. The statements migrated onto the ATLAS kit no longer have a print
-// id — they render their own standalone document and hand it to printHtml() —
-// so for those four the shared button has to mean something else entirely.
+// print id. No statement has a print id any more — each renders its own
+// standalone document and hands it to printHtml() — so the shared button had to
+// mean something else entirely, and this is that something.
+//
+// IT OUTGREW "ONE STATEMENT, ONE DOCUMENT" ON THE WAY. The payslips surface
+// registers ONE source that returns EITHER the register OR a single driver's
+// payslip, deciding at print time from the same `selected` the JSX branches on.
+// A closure can do that; a CSS whitelist never could, which is why the last
+// body-class print switch left globals.css in the same commit as the last id.
 //
 // THE ALTERNATIVE WAS A SWITCH IN THE BUTTON, and it is worse in the exact way
 // this file is better. A `statement === "revenue" ? buildRevenueDoc(...) : ...`

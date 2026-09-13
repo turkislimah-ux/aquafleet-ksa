@@ -861,6 +861,20 @@ export type LedgerRow =
       label: string;
       /** One cell per column AFTER the label column, in column order. */
       values: readonly Cell[];
+      /**
+       * A BINARY about the line, set beside its label.
+       *
+       * For the fact that qualifies the FIGURE without being one: a payslip's
+       * commission line is the same amount whether it was already paid out or
+       * only earned this month, and the difference decides what the driver can
+       * expect. On screen that is a chip beside the word; here it is the kit's
+       * one categorical device (see `mark`).
+       *
+       * Beside the LABEL, never in a column of its own: a column needs a head
+       * nobody wrote, and this qualifies one line out of seven — six empty cells
+       * under a heading is a column of nothing.
+       */
+      mark?: { word: string; on: boolean };
       /** A component of the line it sits under, not a step of its own. */
       indent?: boolean;
       /** A sub-label under the main one. */
@@ -879,6 +893,16 @@ export function ledgerTable(opts: {
   rows: readonly LedgerRow[];
   compact?: boolean;
   foot?: readonly Cell[];
+  /**
+   * The same option `table()` takes, forwarded for the same case `ledger()`
+   * hard-codes: a two-column ledger whose left side is prose and whose right
+   * side is the figure that prose names has nothing to head.
+   *
+   * It is an OPTION here rather than the default because the P&L ledger heads
+   * four measure columns and could not be read without them, while a payslip's
+   * earnings ledger heads none on screen either.
+   */
+  headless?: boolean;
 }): string {
   const rows: Row[] = opts.rows.map((r) =>
     // Both spanning forms cover every column INCLUDING the label's, and NOT the
@@ -894,8 +918,19 @@ export function ledgerTable(opts: {
             flag: r.flag,
             cells: [
               {
-                v: r.label,
-                ...(r.sub ? { sub: r.sub } : {}),
+                // COMPOSED HERE rather than handed to cellHtml as `v` + `sub`,
+                // because a mark is markup and `sub` is inert under `raw`. The
+                // two halves are escaped exactly as cellHtml would escape them
+                // on a label column — which carries neither `num` nor `iso`, so
+                // its own `text()` is `esc` — and the composition is the same
+                // one ledger() makes two hundred lines up. A label column
+                // declared `iso` would isolate nothing it should: a ledger label
+                // is prose.
+                v:
+                  esc(r.label) +
+                  (r.mark ? " " + mark(r.mark.word, r.mark.on) : "") +
+                  (r.sub ? `<span class="sub-line">${esc(r.sub)}</span>` : ""),
+                raw: true,
                 cls:
                   [r.indent ? "indent" : "", r.strong ? "name" : ""]
                     .filter(Boolean)
@@ -913,6 +948,7 @@ export function ledgerTable(opts: {
     cols: opts.cols,
     rows,
     compact: opts.compact,
+    headless: opts.headless,
     ...(opts.foot ? { foot: opts.foot } : {}),
   });
 }
@@ -1053,6 +1089,41 @@ export function chips(items: readonly string[]): string {
   return (
     `<div class="chips">` +
     items.map((c) => `<span class="chip">${esc(c)}</span>`).join("") +
+    `</div>`
+  );
+}
+
+export type RunItem = { label: string; count: string };
+
+/**
+ * A NAMED SET WITH A COUNT ON EACH MEMBER, inside a table cell.
+ *
+ * Not chips(): a chip draws a box, and a cell holding five boxed names reads as
+ * five controls in a column of plain values - the boxes outweigh the names they
+ * hold, and the count has nowhere to sit inside one. Not a joined sentence
+ * either: "Riyadh Camp 12 Jeddah Yard 8" cannot be parsed back into pairs by any
+ * reader who does not already know the data.
+ *
+ * So: the label system the kit already ranks by language - tracked caps in
+ * Latin, weight and size in Arabic - with the count set quietly beside it. ONE
+ * RUN PER LINE, not a flowed cloud: flowed, the break falls wherever the cell
+ * width puts it and a count lands beside the NEXT name as often as beside its
+ * own. Stacked, a long name still wraps, but inside its own run.
+ *
+ * THE COUNT IS ISOLATED, THE NAME IS NOT. A project name is user text of unknown
+ * direction and isolating it as LTR is the bug in the opposite direction; the
+ * count is a Latin digit run inside it and reorders without the isolate.
+ */
+export function runs(items: readonly RunItem[]): string {
+  return (
+    `<div class="runs">` +
+    items
+      .map(
+        (r) =>
+          `<span class="run"><span class="lbl run-label">${esc(r.label)}</span>` +
+          `<span class="run-count">${iso(r.count)}</span></span>`,
+      )
+      .join("") +
     `</div>`
   );
 }

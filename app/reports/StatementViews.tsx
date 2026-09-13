@@ -12,28 +12,37 @@
 // The two measures that are not additive (trucks_active, people_missing_salary)
 // are handled explicitly and labelled; see the rule in lib/reports.ts.
 //
-// HOW A STATEMENT PRINTS IS NOW TWO ANSWERS, and which one a statement gives is
-// visible from its first line of JSX.
+// HOW A STATEMENT PRINTS IS ONE ANSWER NOW, and it is the same one everywhere in
+// this file: NOTHING BELOW EVER REACHES PAPER.
 //
-//   * MIGRATED — Revenue, Receivables, Costs, Operations, the Narrative and
-//     Custom. They register a document builder through ./printSource and the
-//     shared button hands the result to printHtml(). They carry NO print id, NO
-//     PrintBand and nothing in globals.css: the sheet is assembled from
-//     lib/docvm/* and lib/docs/*, and the DOM below is only what the reader
-//     looks at. `ScreenHead` is the tell.
+// Every statement here builds a standalone document from lib/docvm/* +
+// lib/docs/* and hands it to printHtml(), which prints it out of a hidden
+// same-origin iframe. The markup in this file is what the reader LOOKS AT, and
+// only that. No statement carries a print id, none is whitelisted in
+// globals.css, and there is no band, no `.print-only` and no `no-print` anywhere
+// in it — that class means "this part of the printable subtree is screen-only",
+// and there is no printable subtree here to be part of.
 //
-//   * NOT YET — Payslips. It still prints the SCREEN: it owns a print id
-//     whitelisted in globals.css, and `Head` puts a PrintBand on the paper
-//     because that markup has no masthead of its own.
+// THE PAYSLIPS SURFACE WAS THE LAST HOLDOUT, and it was the awkward one: it is
+// the only place in the app where two printable subtrees coexisted in one DOM —
+// the register and the commission review, with a body class deciding which of
+// them a window.print() kept. Both are documents now, so the question the body
+// class answered no longer exists: each surface's own button builds its own
+// sheet, and the shared button builds whichever ONE the reader has open.
 //
-// Nothing is shared between the two paths on purpose. A statement is on one side
-// or the other, never half-way.
+// `ScreenHead` is what a statement heads itself with. There is no second
+// heading component, because there is no second answer.
 
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Ban, ImageIcon, Info, Pencil, Printer, X } from "lucide-react";
 import { Table, TH, TD, Btn } from "@/components/ui";
-import { cn, formatSar, formatSarExact, formatNum, todayKey, monthLabel } from "@/lib/utils";
+// NO `todayKey` ANY MORE. It dated the PrintBand — the band stamped the day it
+// was printed onto the sheet, and the band is gone. A document's date now comes
+// from `generatedAt`, passed into the view-model by the caller, because a
+// view-model that reaches for the clock itself is not a pure function of its
+// input and cannot be tested against fixed data.
+import { cn, formatSar, formatSarExact, formatNum, monthLabel } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 // WATER_TYPE_LABELS stays ENGLISH this batch, deliberately. It lives in
@@ -77,23 +86,30 @@ import type { CsvValue } from "@/lib/csv";
 // lib/csv and lib/i18n and nothing else — in particular it does not import
 // StatementsTab, so the one-way edge this file depends on still holds.
 import { useCsvSource, withSar, withPct, type RegisterCsv } from "./exportSource";
-// THE SIX MIGRATED SHEETS. Each pair is a view-model (what the sheet SAYS) and
-// a renderer (what it LOOKS like), and neither imports from this directory —
-// the leaf rule at the top of this file holds in both directions. The components
-// below hand each `build*Vm` figures they have ALREADY computed for the screen,
-// which is what makes the two surfaces incapable of disagreeing.
+// THE NINE SHEETS THIS FILE PRINTS. Each pair is a view-model (what the sheet
+// SAYS) and a renderer (what it LOOKS like), and neither imports from this
+// directory — the leaf rule at the top of this file holds in both directions.
+// The components below hand each `build*Vm` figures they have ALREADY computed
+// for the screen, which is what makes the two surfaces incapable of disagreeing.
+import { buildCommissionReviewVm } from "@/lib/docvm/commission-review";
 import { buildCostVm } from "@/lib/docvm/cost";
 import { buildCustomVm } from "@/lib/docvm/custom";
 import { buildNarrativeVm } from "@/lib/docvm/narrative";
 import { buildOpsVm } from "@/lib/docvm/operations";
+import { buildPayslipVm } from "@/lib/docvm/payslip";
+import { buildPayslipRegisterVm } from "@/lib/docvm/payslip-register";
 import { buildReceivablesVm } from "@/lib/docvm/receivables";
 import { buildRevenueVm } from "@/lib/docvm/revenue";
+import { buildCommissionReviewHtml } from "@/lib/docs/commission-review";
 import { buildCostHtml } from "@/lib/docs/cost";
 import { buildCustomHtml } from "@/lib/docs/custom";
 import { buildNarrativeHtml } from "@/lib/docs/narrative";
 import { buildOpsHtml } from "@/lib/docs/operations";
+import { buildPayslipHtml } from "@/lib/docs/payslip";
+import { buildPayslipRegisterHtml } from "@/lib/docs/payslip-register";
 import { buildReceivablesHtml } from "@/lib/docs/receivables";
 import { buildRevenueHtml } from "@/lib/docs/revenue";
+import { printHtml } from "@/lib/printHtml";
 import { usePrintSource, type RegisterPrint } from "./printSource";
 
 // MODULE-PRIVATE. Used by 17 call sites in this file and imported by none —
@@ -109,62 +125,22 @@ function Note({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * The band that only exists on paper.
+ * A STATEMENT'S HEADING, and the only one this file has.
  *
- * On screen the page already says which company and which statement you are
- * looking at — the sidebar, the tab and the period picker all do that work. A
- * printed sheet has none of that context and gets filed on its own, so it has
- * to carry its own identification or it becomes an anonymous table of numbers.
- */
-function PrintBand({ title, period }: { title: React.ReactNode; period: string }) {
-  const { lang } = useApp();
-  return (
-    <div className="print-only" style={{ marginBottom: "10pt", borderBottom: "1px solid #000", paddingBottom: "6pt" }}>
-      {/* translate="no" — this line is the whole point of the band: it is the
-          identification a filed sheet carries when nothing else on the paper
-          says whose statement it is. A translated company name defeats that.
-          The title and period below are content and translate normally. */}
-      <div translate="no" style={{ fontSize: "8pt", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-        Bin Slimah Group
-      </div>
-      <div style={{ fontSize: "14pt", fontWeight: 600, marginTop: "2pt" }}>{title}</div>
-      <div style={{ fontSize: "9pt", display: "flex", justifyContent: "space-between", marginTop: "2pt" }}>
-        <span>{period}</span>
-        {/* todayKey(), NOT toISOString().slice(0,10). This date is PRINTED on a
-            document that leaves the building, and a UTC slice reads a day
-            behind local for the first three hours after Riyadh midnight — so a
-            statement generated at 01:30 went out stamped yesterday. Of the
-            three UTC-slice sites this was the only one whose wrong answer
-            ends up on paper in someone else's hands. */}
-        <span>{fill(t("reports.print.generated", lang), { d: todayKey() })}</span>
-      </div>
-    </div>
-  );
-}
-
-function Head({ title, period }: { title: React.ReactNode; period: string }) {
-  return (
-    <>
-      <PrintBand title={title} period={period} />
-      <header className="mb-4 no-print">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="text-sm muted">{period}</p>
-      </header>
-    </>
-  );
-}
-
-/**
- * The same heading WITHOUT the band, for the statements that print a document.
+ * It used to be one of two. The other, `Head`, wrapped this in a `PrintBand` — a
+ * hand-set title/period/company strip that existed ONLY on paper, because the
+ * markup beneath it had no masthead and a filed sheet with no identification is
+ * an anonymous table of numbers. Every statement that printed the screen needed
+ * one; none of them prints the screen any more, so the band went with the last
+ * of them and this is what is left.
  *
- * Not `Head` with a flag: the difference is not a variation of one heading, it
- * is whether this markup is ever going to be printed at all. These four hand
- * printHtml() a standalone sheet that carries its own masthead — company,
- * title, period and the generated stamp, set properly — so a PrintBand here
- * would be a second title on a page that no longer prints.
+ * The identification it used to hand-set is the kit's masthead now
+ * (lib/atlas/blocks.ts), which says the same four things properly — company,
+ * title, period and the generated stamp — in a document that was designed for
+ * paper rather than reset onto it.
  *
- * AND NO `no-print` EITHER. That class means "this part of the printable subtree
- * is screen-only", and there is no printable subtree here to be part of.
+ * NO `no-print` ON IT. That class means "this part of the printable subtree is
+ * screen-only", and there is no printable subtree in this file to be part of.
  */
 function ScreenHead({ title, period }: { title: React.ReactNode; period: string }) {
   return (
@@ -1881,7 +1857,7 @@ function monthLabelOf(iso: string, lang: Lang) {
 export function PayslipsStatement({
   basis, issued, commission, violationsByDriver, violationTypes,
   periodStart, periodEnd, label, today,
-  selectedDriverId, onSelectDriver, onIssue, issuingId, registerCsv,
+  selectedDriverId, onSelectDriver, onIssue, issuingId, registerCsv, registerPrint,
 }: {
   basis: PayslipBasisRow[];
   issued: IssuedPayslipRow[];
@@ -1904,6 +1880,7 @@ export function PayslipsStatement({
   onIssue: (driverId: string, periodStart: string) => void;
   issuingId: string | null;
   registerCsv?: RegisterCsv;
+  registerPrint?: RegisterPrint;
 }) {
   const { lang } = useApp();
   const rows = useMemo(
@@ -1988,14 +1965,49 @@ export function PayslipsStatement({
 
   useCsvSource(registerCsv, buildCsv);
 
+  // ONE REGISTRATION, TWO DOCUMENTS — and unlike the CSV above it NEVER returns
+  // nothing. The export builder bails on a selected driver because a one-row
+  // file that reads like the register is a trap; printing has the opposite
+  // answer, because the single payslip IS a document and the header button is
+  // the only way to print one. So the closure branches where the JSX branches:
+  // a driver open prints that driver's slip, the register prints the register.
+  //
+  // MUST SIT ABOVE the `if (selected)` return below — a hook cannot follow one.
+  // That is also why `doc` is looked up here rather than reused from the branch.
+  const buildDoc = useCallback(() => {
+    if (selected) {
+      return buildPayslipHtml(buildPayslipVm({
+        lang,
+        // Stamped when the sheet is PRODUCED, which for a printout is now.
+        generatedAt: new Date(),
+        row: selected,
+        doc: issued.find(
+          (i) => i.driver_id === selected.driver_id && i.period_start === selected.period_start,
+        ) ?? null,
+        violations: violationsByDriver[selected.driver_id] ?? [],
+        violationTypes,
+        running: isRunning(selected.period_start),
+      }));
+    }
+    return buildPayslipRegisterHtml(buildPayslipRegisterVm({
+      lang, generatedAt: new Date(), label, today,
+      // The SAME `rows` memo the table below renders, already filtered and
+      // sorted. Re-deriving it inside the view-model would be a second
+      // definition of which months the register covers.
+      rows, issued,
+    }));
+    // `currentMonthStart` is what `isRunning` closes over, and it is derived
+    // from `today` — so `today` is the dep, not the function.
+  }, [lang, label, today, rows, issued, selected, violationsByDriver, violationTypes]);
+
+  usePrintSource(registerPrint, buildDoc);
+
   if (selected) {
     const doc = issued.find(
       (i) => i.driver_id === selected.driver_id && i.period_start === selected.period_start,
     ) ?? null;
     return (
-      // SAME print id as the register, because they are never both mounted —
-      // that is what keeps "Print" meaning "print what I am looking at".
-      <div id="payslips-print" className="card p-6">
+      <div className="card p-6">
         <PayslipDocument
           row={selected}
           doc={doc}
@@ -2024,10 +2036,10 @@ export function PayslipsStatement({
 
   return (
     <>
-      <div id="payslips-print" className="card p-6">
+      <div className="card p-6">
       {/* The statement's own name is the TAB's name — one statement, one
           spelling. `label` is the period line and arrives already formatted. */}
-      <Head title={t("reports.statements.tab.payslips", lang)} period={label} />
+      <ScreenHead title={t("reports.statements.tab.payslips", lang)} period={label} />
 
       {rows.length === 0 ? (
         <Empty>{t("reports.payslips.empty", lang)}</Empty>
@@ -2151,9 +2163,10 @@ export function PayslipsStatement({
       )}
       </div>
 
-      {/* THE SECOND TABLE. Outside the payslips print id on purpose: it is a
-          different document with its own print button, and nesting it inside
-          would make "print the register" also print this. */}
+      {/* THE SECOND TABLE. A SIBLING, not a child, and the reason survived the
+          print ids that used to enforce it: it is a different DOCUMENT with a
+          print button of its own, and the shared button above prints the
+          register. Nesting it would put one sheet's rows inside another's. */}
       <CommissionReviewTable
         rows={commission}
         periodStart={periodStart} periodEnd={periodEnd} label={label}
@@ -2614,7 +2627,14 @@ function PayslipDocument({
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 no-print">
+      {/* NO `no-print` ON THIS ROW ANY MORE, and nothing was lost. The class
+          only ever meant "hide me inside the printable subtree"; this markup is
+          not printed at all now, so the controls are screen-only by
+          construction rather than by a class that says so. The printed sheet
+          drops the issue button and the issuedBy line the same way it drops
+          every other control: it is built from lib/docvm/payslip.ts, which was
+          never handed either. */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <button
           type="button"
           onClick={onBack}
@@ -2653,7 +2673,7 @@ function PayslipDocument({
         )}
       </div>
 
-      <Head
+      <ScreenHead
         title={doc
           // The space before <b> is JSX on the same line; the payslip NUMBER
           // beside it is monospace data and is never translated.
@@ -2689,7 +2709,7 @@ function PayslipDocument({
       )}
 
       {!doc && confirming && (
-        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 no-print">
+        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3">
           <div className="text-sm font-semibold">{t("reports.payslips.confirmTitle", lang)}</div>
           {/* FOUR FRAGMENTS AROUND THREE BOLD DATA SLOTS — name, month, net —
               in the same order in both languages. `confirmAfterName` is the
@@ -2842,8 +2862,11 @@ function PayslipDocument({
           a document that takes money off someone's pay that ambiguity is the
           expensive kind. One muted sentence settles it.
 
-          Deliberately NOT no-print. Its whole purpose is to survive onto the
-          paper the driver keeps. */}
+          IT IS ON THE PAPER TOO, which is now a statement about
+          lib/docvm/payslip.ts rather than about a missing `no-print`: the
+          view-model carries this section, its source line, its rows and its
+          empty sentence, and carries them unconditionally for the reason
+          above. */}
       <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
         {t("reports.payslips.violTitle", lang)}
       </h3>
@@ -2868,12 +2891,13 @@ function PayslipDocument({
                 <TH>{t("common.date", lang)}</TH>
                 <TH>{t("reports.payslips.violThPayment", lang)}</TH>
                 <TH>{t("reports.payslips.violThSettlement", lang)}</TH>
-                {/* A SCREEN COLUMN, NOT A DOCUMENT ONE. `no-print` is
-                    display:none on paper, so the sheet that gets handed over
-                    is the same six columns it has always been — evidence
-                    links and correction controls are for the person resolving
-                    the dispute, not for the driver's copy. */}
-                <TH className="no-print text-end">{t("common.actions", lang)}</TH>
+                {/* A SCREEN COLUMN, NOT A DOCUMENT ONE — and it is screen-only
+                    because the view-model was never handed it, not because a
+                    class hides it. lib/docvm/payslip.ts declares six columns
+                    and six is what the sheet has. Evidence links and correction
+                    controls are for the person resolving the dispute, not for
+                    the driver's copy, so they exist in one place only. */}
+                <TH className="text-end">{t("common.actions", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -2916,7 +2940,7 @@ function PayslipDocument({
                       )}
                     </FineChip>
                   </TD>
-                  <TD className="no-print text-end">
+                  <TD className="text-end">
                     <div className="inline-flex items-center gap-1">
                       {/* EVIDENCE FIRST, and on EVERY row that has any —
                           issued or not. Reading the notice photo is how a
@@ -2994,7 +3018,7 @@ function PayslipDocument({
                 <TD>{null}</TD>
                 <TD>{null}</TD>
                 <TD>{null}</TD>
-                <TD className="no-print">{null}</TD>
+                <TD>{null}</TD>
               </tr>
             </tbody>
           </Table>
@@ -3002,10 +3026,10 @@ function PayslipDocument({
           {/* THE PANELS LIVE UNDER THE TABLE, NOT INSIDE IT. An edit form
               expanded into a row would restructure the very table the reader
               is comparing figures in, and this one has a total that has to
-              keep adding up in front of them. Both are no-print for the same
-              reason the Actions column is. */}
+              keep adding up in front of them. They are screen-only the same way
+              the Actions column is: the view-model does not carry them. */}
           {photoError && (
-            <p className="mt-2 text-[12px] text-rose-600 dark:text-rose-400 no-print">
+            <p className="mt-2 text-[12px] text-rose-600 dark:text-rose-400">
               {photoError}
             </p>
           )}
@@ -3014,7 +3038,7 @@ function PayslipDocument({
               outlives the panel that produced it: nothing was lost and nothing
               needs redoing except the attachment. */}
           {photoNotice && (
-            <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] leading-relaxed text-amber-800 dark:text-amber-300 no-print">
+            <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] leading-relaxed text-amber-800 dark:text-amber-300">
               <span className="flex-1">{photoNotice}</span>
               <button
                 type="button"
@@ -3028,7 +3052,7 @@ function PayslipDocument({
           )}
 
           {editingId && draft && (
-            <div className="mt-3 no-print">
+            <div className="mt-3">
               <ViolationForm
                 draft={draft}
                 setDraft={setDraft}
@@ -3058,7 +3082,7 @@ function PayslipDocument({
               variant, and inventing one for a second caller would widen a
               shared primitive to match a copy. */}
           {voidingId && (
-            <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 space-y-2 no-print">
+            <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 space-y-2">
               <div className="text-sm font-medium text-rose-700 dark:text-rose-300">
                 {t("drivers.viol.voidTitle", lang)}
               </div>
@@ -3257,36 +3281,51 @@ function CommissionReviewTable({
     { trips: 0, commission: 0 },
   );
 
-  // Only this table prints, not the register above it. Both live in the DOM at
-  // once, so a body class picks which subtree the print stylesheet keeps —
-  // the same mechanism the breakdown report already uses.
+  // THE TABLE NO LONGER PRINTS — a DOCUMENT does, built from the same rows.
+  //
+  // This button used to add `printing-review` to <body> so the print
+  // stylesheet would keep this subtree and drop the register above it; both
+  // sheets live in the DOM at once and a whitelist can only name one. The
+  // document path has no such problem: the closure names its own view-model, so
+  // two printables on one screen is just two functions. The body class, the id
+  // and the whitelist entry all left with it.
+  //
+  // OWN BUTTON, NOT THE HEADER ONE. Commission review is a table INSIDE the
+  // payslips statement, not a statement of its own, and the shared Print button
+  // is already spoken for by the register (or by the selected driver's slip).
+  // A reader who wants this table asks for it here.
   function printReview() {
-    document.body.classList.add("printing-review");
-    window.print();
-    document.body.classList.remove("printing-review");
+    printHtml(
+      buildCommissionReviewHtml(
+        buildCommissionReviewVm({
+          lang,
+          generatedAt: new Date(),
+          label,
+          periodStart,
+          periodEnd,
+          rows,
+        }),
+      ),
+    );
   }
 
   return (
-    <div id="commission-review-print" className="card p-6 mt-6">
+    <div className="card p-6 mt-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          {/* ONE leaf for "work month", read by the print band, the subtitle
-              and the footnote — the phrase is the point of the table, and
-              three spellings of it is how the point gets blurred. */}
-          <PrintBand
-            title={t("reports.commissionReview.title", lang)}
-            period={`${label} · ${t("reports.commissionReview.workMonth", lang)}`}
-          />
-          <h2 className="text-lg font-semibold no-print">
+          {/* ONE leaf for "work month", read by the heading here, the document's
+              masthead and the footnote — the phrase is the point of the table,
+              and three spellings of it is how the point gets blurred. */}
+          <h2 className="text-lg font-semibold">
             {t("reports.commissionReview.title", lang)}
           </h2>
-          <p className="text-sm muted no-print">
+          <p className="text-sm muted">
             {label} · <b>{t("reports.commissionReview.workMonth", lang)}</b>{" "}
             {t("reports.commissionReview.subtitleAfterMonth", lang)}{" "}
             <b>{t("reports.commissionReview.subtitleStrong", lang)}</b>.
           </p>
         </div>
-        <Btn variant="outline" onClick={printReview} className="no-print">
+        <Btn variant="outline" onClick={printReview}>
           {/* The space after the icon is JSX on the same line, as before. */}
           <Printer className="h-4 w-4" /> {t("reports.commissionReview.printThisTable", lang)}
         </Btn>
