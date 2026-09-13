@@ -4899,6 +4899,55 @@ export const dict = {
           ar: "الرحلات ونسبة الإنجاز حسب الشهر",
         },
       },
+
+      pnl: {
+        // "&" and not "and": `reports.pnl.title` above is a literal ampersand —
+        // the `&amp;` in the JSX was escaping, not content — and the print
+        // dialog names the file after the statement it prints.
+        docTitle: { en: "Profit & Loss — {p}", ar: "الأرباح والخسائر — {p}" },
+        // THE SEVERITY WORD FOR THE TWO ZAKAT ROWS. The screen italicises them
+        // and drops their weight, which is a real distinction on a backlit
+        // screen and the first thing a photocopier loses — an estimate reading
+        // as a measured statement line is the one misreading this sheet cannot
+        // afford. The word says which KIND of figure it is, exactly as OVERDUE
+        // and UNPRICED say which kind of finding.
+        //
+        // Not "indicative": the two line labels already carry that word
+        // (`lineZakat`, `headZakat`), and a gutter word that repeats the label
+        // beside it says nothing the eye has not already read.
+        estimate: { en: "Estimate", ar: "تقدير" },
+        // The VAT list is a second top-title section on the same sheet, and on
+        // screen its heading is `reports.vat.title` with the period beside it.
+        // Nothing new is worded here — see lib/docs/pnl.ts for the rule that
+        // replaces the 10mm card gap between the two.
+      },
+
+      daily: {
+        docTitle: { en: "Daily trips — {p}", ar: "الرحلات اليومية — {p}" },
+        // THE UNPRICED SEVERITY WORD. The screen carries an amber chip whose
+        // own count and sentence are `reports.daily.unpricedChip` /
+        // `unpricedTitle`; the chip's COLOUR is the finding, and in grayscale
+        // it is a grey pill. The word replaces the hue, and the chip's count
+        // still prints beside the figure it qualifies.
+        unpriced: { en: "Unpriced", ar: "بلا سعر" },
+        // WHY THE MASTHEAD CARRIES NO FIGURE, said out loud.
+        //
+        // Every other sheet in the pack leads with one number, so a masthead
+        // without one reads as a figure that failed to render. This sheet has
+        // none BY DESIGN: each project totals on its own line, and the manual
+        // side-log (0166) is totalled separately and may never be added to
+        // them, so a single figure for the sheet would be exactly the addition
+        // that rule forbids.
+        //
+        // Doc-only, like the two severity words above and for the same reason:
+        // the screen makes the same statement structurally — there is simply no
+        // grand-total row anywhere on it — and a structure cannot be read off a
+        // sheet of paper the way a missing number can.
+        noTotal: {
+          en: "No figure totals this sheet. Each project totals on its own, and the manual log below is totalled separately and never added to them.",
+          ar: "لا يوجد رقم يجمع هذه الورقة. فكل مشروع يُجمع على حدة، والسجل اليدوي أدناه يُجمع منفصلًا ولا يُضاف إليها.",
+        },
+      },
     },
 
     // --- the REVENUE statement ----------------------------------------------

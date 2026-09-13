@@ -420,21 +420,35 @@ export function section(opts: {
    * that does not pass it. New reports state their mode explicitly.
    */
   layout?: SectionLayout;
+  /**
+   * A HARD RULE ABOVE: what follows is not the next STEP of this sheet, it is a
+   * DIFFERENT DOCUMENT that happens to share the paper.
+   *
+   * Reach for it only where adding the two blocks' figures together would be
+   * WRONG rather than merely unusual — the VAT list under the P&L, whose six
+   * rows carry no total by design; the manual side-log under the daily trips,
+   * totalled separately by 0166 and never joined to the project totals. Spent on
+   * an ordinary section it devalues itself, and then the one place it is
+   * load-bearing reads as decoration.
+   *
+   * It replaces a GAP, which is what the screens use and what paper cannot
+   * carry: a gap of any size is just a gap once the card edge is gone, and at a
+   * page boundary it vanishes altogether and the two blocks run together.
+   */
+  divider?: boolean;
 }): string {
   const head = `<div class="sec-head">${esc(opts.head)}${
     opts.sub ? `<span class="sub">${esc(opts.sub)}</span>` : ""
   }${opts.flag ? gutterWord(opts.flag) : ""}</div>`;
   const body = `<div${opts.bodyClass ? ` class="${opts.bodyClass}"` : ""}>${opts.body}</div>`;
+  // Appended, never substituted: the divider is orthogonal to the placement of
+  // the head, so it must not cost a caller its layout mode.
+  const cls = `${opts.layout === "top" ? "stack" : "row"}${opts.divider ? " sec-break" : ""}`;
 
   // Two wrappers, one child order. The head is written FIRST in both, so the
   // reading order and the DOM order agree in gutter mode too and the placement
   // stays a pure matter of the container's own layout.
-  return opts.layout === "top"
-    ? `<section class="stack">
-  ${head}
-  ${body}
-</section>`
-    : `<section class="row">
+  return `<section class="${cls}">
   ${head}
   ${body}
 </section>`;
@@ -619,12 +633,20 @@ export type Row = {
   colOffset?: number;
 };
 
-function cellHtml(c: Cell, col: Col | undefined): string {
+/**
+ * `afterGroup` is the column's POSITION, not a property of its spec: the cell
+ * takes the air on the far side of the preceding column's grouping rail. It is
+ * passed in rather than read off `col` because the column that needs it is not
+ * the column that declares `group`, and because the head and the foot - neither
+ * of which draws a rail - still have to line up with the body that does.
+ */
+function cellHtml(c: Cell, col: Col | undefined, afterGroup = false): string {
   const o = typeof c === "string" ? { v: c } : c;
   const classes: string[] = [];
   if (col?.num) classes.push("num");
   if (col?.gap) classes.push("col-gap");
   if (col?.group) classes.push("group");
+  if (afterGroup) classes.push("rail-gap");
   if ("cls" in o && o.cls) classes.push(o.cls);
   const attrs =
     (classes.length ? ` class="${classes.join(" ")}"` : "") +
@@ -665,13 +687,20 @@ export function table(opts: {
 }): string {
   const hasFlag = opts.rows.some((r) => r.flag);
 
+  // The column immediately after a grouping column, which takes the air on the
+  // far side of that column's rail. Read from the SPEC, so head, body and foot
+  // all answer it the same way and stay in one vertical line.
+  const afterGroup = (i: number): boolean => opts.cols[i - 1]?.group === true;
+
   const head = opts.headless
     ? ""
     : `<thead><tr>` +
       (hasFlag ? `<th class="gwcol"></th>` : "") +
       opts.cols
-        .map((c) => {
-          const cls = [c.num ? "num" : "", c.gap ? "col-gap" : ""].filter(Boolean).join(" ");
+        .map((c, i) => {
+          const cls = [c.num ? "num" : "", c.gap ? "col-gap" : "", afterGroup(i) ? "rail-gap" : ""]
+            .filter(Boolean)
+            .join(" ");
           const sub = c.sub ? `<span class="sub-line">${esc(c.sub)}</span>` : "";
           return `<th${cls ? ` class="${cls}"` : ""}${c.width ? ` style="width:${c.width}"` : ""}>${esc(
             c.head,
@@ -686,7 +715,12 @@ export function table(opts: {
           (r) =>
             `<tr${r.cls ? ` class="${r.cls}"` : ""}>` +
             (hasFlag ? `<td class="gwcol">${r.flag ? gutterWord(r.flag) : ""}</td>` : "") +
-            r.cells.map((c, i) => cellHtml(c, opts.cols[i + (r.colOffset ?? 0)])).join("") +
+            r.cells
+              .map((c, i) => {
+                const ci = i + (r.colOffset ?? 0);
+                return cellHtml(c, opts.cols[ci], afterGroup(ci));
+              })
+              .join("") +
             `</tr>`,
         )
         .join("")
@@ -712,7 +746,19 @@ export function table(opts: {
         (hasFlag ? `<td class="gwcol"></td>` : "") +
         opts.foot
           .map((c) => {
-            const html = cellHtml(c, opts.cols[footCol]);
+            // A FOOT CELL IS NOT A GROUPING CELL. `group` draws the rail that
+            // ties a spanned name to the rows beneath it; a totals row has no
+            // spanned name, and its label almost always covers MORE columns
+            // than the body's group cell does - so the rail would land at a
+            // different horizontal position and read as a second, misaligned
+            // vertical rule under the table. The column's other flags survive,
+            // because those describe the FIGURE and a total is one.
+            const spec = opts.cols[footCol];
+            const html = cellHtml(
+              c,
+              spec?.group ? { ...spec, group: false } : spec,
+              afterGroup(footCol),
+            );
             footCol += (typeof c === "object" && c.colSpan) || 1;
             return html;
           })
@@ -765,6 +811,110 @@ export function ledger(lines: readonly LedgerLine[]): string {
     cls: [l.rule ? "rule-above" : "", l.strong ? "strong" : ""].filter(Boolean).join(" ") || undefined,
   }));
   return table({ cols: [{ head: "" }, { head: "", num: true }], rows, compact: true, headless: true });
+}
+
+/**
+ * THE SAME LEDGER OVER MORE THAN TWO COLUMNS.
+ *
+ * `ledger()` is hard-wired to label + figure, which is every ledger in the pack
+ * but one. The P&L sets each line against the PRIOR period and the two movements
+ * between them, so a line is one label and four figures; four two-column ledgers
+ * side by side would print the same eighteen labels four times and break the one
+ * comparison the sheet exists to make.
+ *
+ * So what is lifted out of `ledger()` is its RULE GRAMMAR — rules are RARE and
+ * each one CLOSES a step — and applied over a declared column list. The row
+ * classes are literally the same two (`rule-above`, `strong`), not a second
+ * spelling of them: a change to what a subtotal looks like has to land on both
+ * ledgers or the pack has two ledgers.
+ *
+ * Two devices are added that two columns never needed. Both are described where
+ * they are set, in shell.ts:
+ *
+ *   `{ head }` — a heading inside the table body, naming the step the lines
+ *   beneath it compose.
+ *   `indent` — a line that is a COMPONENT of another line rather than a step of
+ *   its own.
+ *
+ * AND ONE THAT IS NOT ADDED: there is no `estimate` flag here. A row that is not
+ * a measured figure is marked with the severity gutter WORD, like every other
+ * finding in the pack — the screen italicises it, and italic is the first thing
+ * a photocopier loses.
+ */
+export type LedgerRow =
+  | { head: string }
+  /**
+   * A SENTENCE ON ITS OWN ROW, spanning every column.
+   *
+   * Not `note()` under the table, and the difference is grouping rather than
+   * styling: each of these belongs to the line it sits against — the empty
+   * state standing in for the expense lines, the caveat the Zakat figure may
+   * never print without, the count of fills whose cost is unknown. Moved to the
+   * foot of the sheet they would all still be true and none of them would still
+   * be attached, which is the deviation.
+   *
+   * It takes a `flag` for the same reason any row does: a sentence can be a
+   * finding.
+   */
+  | { note: string; flag?: string }
+  | {
+      label: string;
+      /** One cell per column AFTER the label column, in column order. */
+      values: readonly Cell[];
+      /** A component of the line it sits under, not a step of its own. */
+      indent?: boolean;
+      /** A sub-label under the main one. */
+      sub?: string;
+      /** Closes a step: rule above. */
+      rule?: boolean;
+      /** The figure the step exists to state. */
+      strong?: boolean;
+      /** The severity word, in the gutter. */
+      flag?: string;
+    };
+
+export function ledgerTable(opts: {
+  /** The label column FIRST, then one per measure. */
+  cols: readonly Col[];
+  rows: readonly LedgerRow[];
+  compact?: boolean;
+  foot?: readonly Cell[];
+}): string {
+  const rows: Row[] = opts.rows.map((r) =>
+    // Both spanning forms cover every column INCLUDING the label's, and NOT the
+    // gutter's: table() emits that cell itself when any row carries a flag.
+    "head" in r
+      ? { cells: [{ v: r.head, cls: "sechead", colSpan: opts.cols.length }] }
+      : "note" in r
+        ? {
+            ...(r.flag ? { flag: r.flag } : {}),
+            cells: [{ v: r.note, cls: "quiet wrap", colSpan: opts.cols.length }],
+          }
+        : {
+            flag: r.flag,
+            cells: [
+              {
+                v: r.label,
+                ...(r.sub ? { sub: r.sub } : {}),
+                cls:
+                  [r.indent ? "indent" : "", r.strong ? "name" : ""]
+                    .filter(Boolean)
+                    .join(" ") || undefined,
+              },
+              ...r.values,
+            ],
+            cls:
+              [r.rule ? "rule-above" : "", r.strong ? "strong" : ""]
+                .filter(Boolean)
+                .join(" ") || undefined,
+          },
+  );
+  return table({
+    cols: opts.cols,
+    rows,
+    compact: opts.compact,
+    ...(opts.foot ? { foot: opts.foot } : {}),
+  });
 }
 
 /* ------------------------------------------------------------------ */

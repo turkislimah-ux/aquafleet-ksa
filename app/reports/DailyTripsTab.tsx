@@ -20,10 +20,17 @@
 // NOTHING COLLAPSES, EVER
 // ==========================================================================
 // No accordions, no "show more", no virtualised rows. Every project, every
-// assigned driver and every truck row is in the DOM at all times. A collapsed
-// group is invisible on paper, and this page's whole purpose is to be printed
-// and filed. That is also why an assigned driver who drove nothing still gets a
-// row: on a printout, an absent name and an idle driver must not look the same.
+// assigned driver and every truck row is in the DOM at all times. That is also
+// why an assigned driver who drove nothing still gets a row: on a printout, an
+// absent name and an idle driver must not look the same.
+//
+// THE REASON SHARPENED WHEN THE PRINT PATH LEFT THIS DOM. It used to be "a
+// collapsed group is invisible on paper", which was a statement about
+// window.print() rendering this markup. The sheet is built from the rows now,
+// not from the screen — so collapsing would not hide anything from the paper,
+// it would put a row on the paper that the screen was not showing. The pack's
+// law is 0% deviation in DATA and GROUPING between the two, and a control that
+// hides rows on one side only is the most direct way to break it.
 //
 // ==========================================================================
 // ISOLATION
@@ -50,6 +57,10 @@ import {
 } from "@/lib/actions/daily-trips";
 import type { CsvValue } from "@/lib/csv";
 import { useCsvSource, withSar, type RegisterCsv } from "./exportSource";
+import { usePrintSource, type RegisterPrint } from "./printSource";
+import { buildDailyDocVm } from "@/lib/docvm/daily-trips";
+import { buildDailyTripsHtml } from "@/lib/docs/daily-trips";
+import { printHtml } from "@/lib/printHtml";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30";
@@ -67,10 +78,12 @@ const CARD_STYLE = { borderColor: "rgb(var(--border))" } as const;
  * `rgba(0,0,0,0.02)`, which is nearly invisible on screen and points the wrong
  * way in dark mode — this is the same idea, made to work.
  *
- * IT DOES NOT PRINT, deliberately. Browsers drop backgrounds unless
- * print-color-adjust forces them, and forcing it here would put a grey wash on
- * every page of a record that gets filed. On paper the separation is already
- * carried by the first body row's top border and the bold uppercase <th>.
+ * A SCREEN DEVICE ONLY, and it never reaches paper — not because it is
+ * suppressed, but because this card no longer prints at all. The sheet is built
+ * by lib/docs/daily-trips.ts, which carries the same separation in rules rather
+ * than in a wash. This used to read "it does not print, deliberately: browsers
+ * drop backgrounds unless print-color-adjust forces them"; that was a true
+ * statement about a mechanism this file has since left.
  */
 const BAND_STYLE = { background: "rgb(var(--muted) / 0.12)" } as const;
 /** The band on an element that also draws a border — the two style objects merged. */
@@ -122,7 +135,17 @@ function UnpricedFlag({ n, lang }: { n: number; lang: Lang }) {
 // otherwise read it, and threading it through would add a parameter to a
 // component that has no other use for it.
 export default function DailyTripsTab(
-  { today, registerCsv }: { today: string; registerCsv?: RegisterCsv },
+  { today, registerCsv, registerPrint }: {
+    today: string;
+    registerCsv?: RegisterCsv;
+    /**
+     * Optional because the Print button below does not need it — this component
+     * builds its own sheet and calls printHtml() directly. What the registration
+     * serves is StatementsTab's Cmd/Ctrl+P intercept, which is a window listener
+     * with no button to consult.
+     */
+    registerPrint?: RegisterPrint;
+  },
 ) {
   const { lang } = useApp();
 
@@ -260,6 +283,44 @@ export default function DailyTripsTab(
 
   useCsvSource(registerCsv, buildCsv);
 
+  // ==========================================================================
+  // THE PRINTED SHEET — BOTH HALVES, WHICH IS WHERE IT PARTS FROM THE CSV
+  // ==========================================================================
+  // The export above is the project record ONLY, and its own comment says why: a
+  // spreadsheet cannot hold the separation 0166 requires, because two tables in
+  // one file share a Revenue column that selects as a single range.
+  //
+  // A SHEET OF PAPER CAN, and this one does it three ways at once — a heading, a
+  // note, a closing sentence, and above all a rule at `--rule-heavy` that
+  // outranks every line inside either table. So the side-log PRINTS, exactly as
+  // it appears on screen, under a break nothing can be added across. Leaving it
+  // off paper would be the deviation: the screen shows it, so the sheet shows
+  // it. See lib/docs/daily-trips.ts for the rule, and lib/docvm/daily-trips.ts
+  // for why this sheet carries no grand total and says so in words.
+  //
+  // NOTHING IS RE-QUERIED AND NOTHING IS RE-GROUPED. `data` is the rows this
+  // component fetched; the view-model calls the same buildProjectTables() the
+  // screen renders from, so the document cannot group differently than the page
+  // it mirrors.
+  const buildDoc = useCallback(() => {
+    // An empty sheet is a legitimate printout — "nothing happened today" is a
+    // record worth filing — so this builds whether or not `data` arrived. Null
+    // is only the pre-load state, and the six empty arrays render the screen's
+    // own empty wording.
+    const empty = { projects: [], assignments: [], drivers: [], trucks: [], trips: [], deferred: [] };
+    return buildDailyTripsHtml(buildDailyDocVm({
+      lang,
+      // Stamped when the sheet is PRODUCED, which for a printout is now.
+      generatedAt: new Date(),
+      periodLabel,
+      // The screen's own test for whether a side-log row shows its own date.
+      widened: range.from !== range.to,
+      data: data ?? empty,
+    }));
+  }, [lang, data, periodLabel, range.from, range.to]);
+
+  usePrintSource(registerPrint, buildDoc);
+
   function openCreate() {
     setEditId(null);
     setForm({ ...EMPTY_FORM, deliveryDate: range.from });
@@ -328,20 +389,25 @@ export default function DailyTripsTab(
   }
 
   return (
-    <div id="daily-trips-print" className="card p-6">
-      {/* Print-only band. On screen the controls below carry the same
-          information; on paper there are no controls, so the record needs to
-          state what it is and which day it covers. */}
-      <div className="print-only mb-4">
-        <h1 className="text-lg font-bold">{t("reports.daily.printTitle", lang)}</h1>
-        <p className="text-sm">{periodLabel}</p>
-      </div>
+    <div className="card p-6">
+      {/* NO PRINT-ONLY BAND, AND NO PRINT ID. This card is screen-only now: the
+          Print button builds a standalone document through lib/docvm +
+          lib/docs and hands it to printHtml(). The band that used to sit here —
+          the report's name and its period, shown only on paper because paper
+          has no controls — is the document's MASTHEAD, in the same two words
+          (`reports.daily.printTitle`) and with the same period line beneath it.
 
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-3 no-print">
+          The `no-print` classes went with it, every one of them. They marked
+          the chrome that had to disappear on a window.print(); nothing in this
+          subtree prints any more, so a class saying "this will not print" would
+          be pointing at a mechanism that no longer reaches this card. */}
+      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           {/* The TAB's name, not a second spelling of it — one statement, one
               name, the same call every other statement in the pack makes. The
-              print band above says something different on purpose. */}
+              printed sheet is headed `reports.daily.printTitle` instead, which
+              says something different on purpose: this names a TAB, that names
+              a REPORT, and only one of them gets filed. */}
           <h2 className="text-lg font-semibold">{t("reports.statements.tab.daily", lang)}</h2>
           <p className="text-sm muted">{t("reports.daily.subtitle", lang)}</p>
         </div>
@@ -383,7 +449,11 @@ export default function DailyTripsTab(
             ))}
           </div>
 
-          <Btn variant="outline" onClick={() => window.print()}>
+          {/* ITS OWN BUTTON, still — the controls at the top of StatementsTab
+              cannot express a single day, which is why this report carries its
+              own date input and its own period segment. What changed is what
+              the button DOES: it prints a document, not this screen. */}
+          <Btn variant="outline" onClick={() => printHtml(buildDoc())}>
             <span className="inline-flex items-center gap-1.5">
               <Printer className="h-3.5 w-3.5" aria-hidden />
               {t("reports.statements.print", lang)}
@@ -392,7 +462,7 @@ export default function DailyTripsTab(
         </div>
       </header>
 
-      <p className="mb-4 text-sm muted no-print">
+      <p className="mb-4 text-sm muted">
         {/* The space after the colon is a JSX `{" "}`; the dictionary value
             carries no trailing space. The bullet before the loading word is
             punctuation and stays here — which is also why that word is
@@ -402,7 +472,7 @@ export default function DailyTripsTab(
       </p>
 
       {loadError && (
-        <div className="mb-4 rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-1 ring-inset ring-rose-500/20 no-print">
+        <div className="mb-4 rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-1 ring-inset ring-rose-500/20">
           {loadError}{" "}
           <button onClick={() => void load()} className="focus-ring underline underline-offset-2">
             {t("common.tryAgain", lang)}
@@ -537,7 +607,7 @@ export default function DailyTripsTab(
                 </h3>
                 <p className="text-[11px] muted">{t("reports.daily.deferredNote", lang)}</p>
               </div>
-              <Btn onClick={openCreate} className="no-print">
+              <Btn onClick={openCreate}>
                 <span className="inline-flex items-center gap-1.5">
                   <Plus className="h-3.5 w-3.5" aria-hidden />
                   {/* The OPENER says "Add entry"; the form's own submit button
@@ -551,7 +621,7 @@ export default function DailyTripsTab(
             {formOpen && (
               <form
                 onSubmit={onSubmit}
-                className="mb-3 rounded-xl border p-3 no-print"
+                className="mb-3 rounded-xl border p-3"
                 style={CARD_STYLE}
               >
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -665,7 +735,7 @@ export default function DailyTripsTab(
                     <Th align="end">{t("reports.th.trips", lang)}</Th>
                     <Th align="end">{t("reports.th.commission", lang)}</Th>
                     <Th align="end">{t("common.revenue", lang)}</Th>
-                    <th className="w-20 no-print" />
+                    <th className="w-20" />
                   </tr>
                 </thead>
                 <tbody>
@@ -695,7 +765,7 @@ export default function DailyTripsTab(
                         <td className="px-3 py-2 text-end tabular-nums">{r.trip_count}</td>
                         <td className="px-3 py-2 text-end tabular-nums">{money(Number(r.commission_sar))}</td>
                         <td className="px-3 py-2 text-end tabular-nums">{money(Number(r.revenue_sar))}</td>
-                        <td className="px-2 py-2 no-print">
+                        <td className="px-2 py-2">
                           {confirmDelete === r.id ? (
                             <span className="inline-flex items-center gap-1">
                               <button
@@ -750,7 +820,7 @@ export default function DailyTripsTab(
                       <td className="px-3 py-2 text-end tabular-nums">{defTotals.trips}</td>
                       <td className="px-3 py-2 text-end tabular-nums">{money(defTotals.commission)}</td>
                       <td className="px-3 py-2 text-end tabular-nums">{money(defTotals.revenue)}</td>
-                      <td className="no-print" />
+                      <td />
                     </tr>
                   </tfoot>
                 )}

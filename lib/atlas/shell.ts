@@ -478,16 +478,50 @@ export const ATLAS_CSS = `
      is bounded above by the 26px that separates one section from the next -
      bought by re-rendering, not by taste: every purchase-order fixture holds its
      page count at 13px, in both languages. */
+  /* BREAK-INSIDE IS A SECOND RULE, NOT A RESTATEMENT OF BREAK-AFTER. The sub
+     line is a child of this box, not a sibling of it, so break-after: avoid
+     says nothing about the boundary BETWEEN the name and the count - and that
+     is the boundary the daily sheet actually broke on, printing R TTT at the
+     foot of page one and 7 ASSIGNED DRIVERS at the head of page two above a
+     table nothing on that page named. A heading is one object; it does not
+     paginate. Two lines high, so nothing can be stranded by holding it whole. */
   .stack > .sec-head {
     width: max-content; max-width: 100%;
     padding-top: 0; margin-bottom: 13px;
     break-after: avoid;
+    break-inside: avoid;
   }
   /* The Arabic head closes with a hairline and 4px of padding under it, so its
      ink stops lower in the same box. Matching the Latin 13px would therefore
      read TIGHTER, not equal. Two more, so the gap under the RULE matches the gap
      under Latin TEXT. Keep this above the Latin value if that one moves. */
   html[lang="ar"] .stack > .sec-head { margin-bottom: 15px; }
+
+  /* ---------- A SECTION THAT IS A DIFFERENT DOCUMENT ----------
+     Ordinary sections are STEPS of one argument and are held apart by 26px of
+     space alone. This one is not a step: the P&L sheet carries a VAT list that
+     shares its period and its paper and NOTHING ELSE — no total, no net, no
+     column in common, and the P&L's figures must never be read as summing with
+     it. The screen states that with a 10mm gap between two cards. On paper a gap
+     of any size is just a gap, and the reader has no card edge to infer from; at
+     a page boundary the gap disappears entirely and the two run together.
+
+     A RULE SAYS IT AND SPACE CANNOT. --rule-heavy is the weight the sheet
+     already spends on a closing total, which is the right register: this is a
+     harder break than any rule INSIDE either table, so it must outweigh them.
+
+     ON THE SECTION, NOT ON THE HEAD, and the .stack comment above is why: a
+     border on the head would draw only to max-content width and read as
+     underlining the words. The claim is about the whole block beneath it.
+
+     The margin is what it replaces, so the padding restores the head's air
+     under the new ink rather than adding to it - 26px of margin sits ABOVE the
+     rule, 20px of padding below it. Logical properties are unnecessary: a
+     horizontal rule mirrors to nothing. */
+  section.sec-break {
+    border-top: var(--rule-heavy) solid var(--ink);
+    padding-top: 20px;
+  }
 
   /* ---------- STAT BAND ----------
      Figures on a shared baseline, no boxes. The cells are held apart by
@@ -541,7 +575,7 @@ export const ATLAS_CSS = `
   thead { display: table-header-group; }
   /* NOT table-footer-group. As a footer group Chromium repeats the totals row
      on every page, so a 3-page register prints three different grand totals. */
-  tfoot { display: table-row-group; }
+  tfoot { display: table-row-group; break-before: avoid; }
   tr { break-inside: avoid; }
   th {
     font-size: 7.5px; font-weight: 700; letter-spacing: 0.14em;
@@ -566,6 +600,22 @@ export const ATLAS_CSS = `
      whole run rather than sitting on any one baseline in it. */
   .group { vertical-align: top; font-weight: 500; padding-top: 8px;
            border-inline-end: var(--rule-hair) solid var(--row); padding-inline-end: 14px; }
+  /* The FAR side of that rail. The rule above pays its 14px INSIDE the grouping
+     cell, so it only opens air between the name and the hairline; the column
+     beside it has no horizontal padding of its own - td pays 8px top and bottom
+     and nothing either side - so its first glyph lands ON that hairline. Air on
+     one side only does not read as a gutter between two columns, it reads as a
+     rule shoved against the plate, and it reads that way in both directions
+     equally: the padding is logical, so RTL moves the crowding to the other
+     side rather than curing it.
+
+     Applied BY COLUMN, never by an adjacent-sibling selector. Under a rowSpan
+     the rows beneath the spanned name carry no grouping cell at all, so a
+     sibling rule would indent the first row of each group and none of the rest
+     - a plate column that steps sideways halfway down every group. The head and
+     the foot take it too: neither draws a rail, but both must line up with the
+     body that does. */
+  .rail-gap { padding-inline-start: 14px; }
 
   /* ---------- LEDGER ----------
      A ledger line is a step in an argument, not a row in a list, so the rule
@@ -588,6 +638,39 @@ export const ATLAS_CSS = `
   table.compact td { border-bottom: 0; padding: 6.5px 0; }
   table.compact th { padding-bottom: 8px; }
   table.compact tfoot td { padding-top: 9px; }
+
+  /* A HEADING INSIDE THE TABLE BODY, and the two devices under it.
+     Both are for the ledger that runs long enough to have STEPS — the P&L runs
+     eighteen lines from revenue to profit after Zakat — where the column head
+     cannot name them, because the head belongs to the columns and the columns
+     do not change down the page.
+
+     BOTH SELECTORS NAME "table", and that is the gwcol trap above, not a style:
+     "table.compact td" sets the SHORTHAND "padding: 6.5px 0" at (0,1,2), so a
+     bare "td.sechead" at (0,1,1) loses wherever it is written and the heading
+     would sit at row leading with no air above it. Naming the element ties the
+     score, and these rules are later, so they win. They are BELOW the compact
+     block for the same reason and must stay there.
+
+     No rule of its own: a line under a section head would read as CLOSING the
+     step above rather than opening the one below, and closing a step is the one
+     thing a rule means in this table (tr.rule-above). Case and tracking carry it
+     instead — the column head's device one rank down, in --mid rather than ink. */
+  table td.sechead {
+    text-transform: uppercase; letter-spacing: 0.12em; font-size: 7.5px;
+    font-weight: 700; color: var(--mid);
+    padding-top: 15px; padding-bottom: 1px;
+  }
+  /* Nothing above the first row to clear. */
+  table tbody tr:first-child td.sechead { padding-top: 2px; }
+
+  /* A line that is a COMPONENT of another line rather than a step of its own -
+     parts and outsourced under cost of operations. Indent is the only device
+     that says "these sum to the line below" without a word for it, and it
+     spends no weight, no rule and no colour, all three of which are already
+     carrying other meanings in this table. Logical, so it is the right edge in
+     Arabic without a second rule. */
+  table td.indent { padding-inline-start: 15px; }
 
   /* A pairlabel is ALREADY a ruled head - that is the whole of what it is - so
      the column head directly beneath it must not draw a second one. Left in,

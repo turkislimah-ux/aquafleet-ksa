@@ -399,25 +399,20 @@ html[dir="rtl"] { --dock-dir: -1; }
 @media print {
   body * { visibility: hidden !important; }
   #history-print, #history-print *,
-  /* Reports tab 2 — one id per statement, so "print" means "print THIS
-     statement". Only one statement is mounted at a time, so exactly one of
-     these subtrees exists in the DOM on any given print.
+  /* Reports tab 2 — ONE STATEMENT LEFT, and the gap is the design.
 
-     SIX STATEMENTS ARE NO LONGER ON THIS LIST, and the gap is the design.
-     Revenue, Receivables, Costs, Operations, the Narrative and Custom build a
-     standalone document through lib/docvm/* + lib/docs/* and hand it to
-     printHtml(), so they have no print id to whitelist — their markup is
-     screen-only now. Leaving a stale id here would be worse than useless: it
-     would un-hide a card that the document already says better, and nothing in
-     the DOM would signal it. app/reports/StatementsTab.tsx's MIGRATED set is
-     the other half. */
-  #pnl-print, #pnl-print *,
+     The P&L, Revenue, Receivables, Costs, Operations, Daily Trips, the
+     Narrative and Custom all build a standalone document through lib/docvm/* +
+     lib/docs/* and hand it to printHtml(), so none of them has a print id to
+     whitelist — their markup is screen-only now. Leaving a stale id here would
+     be worse than useless: it would un-hide a card that the document already
+     says better, and nothing in the DOM would signal it.
+     app/reports/StatementsTab.tsx's MIGRATED set is the other half.
+
+     What remains is the payslips surface, and only because of the rule directly
+     below: it is the one place two print subtrees coexist in one DOM. */
   #payslips-print, #payslips-print *,
-  #commission-review-print, #commission-review-print *,
-  /* Daily Trips — a statement in the same pack (?statement=daily), printed the
-     same way. Its own Print button is inside the report because it carries its
-     own date and period controls; the isolation rule here is unchanged. */
-  #daily-trips-print, #daily-trips-print * { visibility: visible !important; }
+  #commission-review-print, #commission-review-print * { visibility: visible !important; }
   /* THE PAYSLIPS SURFACE IS THE ONE PLACE TWO PRINT SUBTREES COEXIST.
      Every other statement is mounted alone, so "one id visible" is enough.
      Here the register and the commission review render together, so a body
@@ -471,8 +466,7 @@ html[dir="rtl"] { --dock-dir: -1; }
   header.h-14 { display: none !important; }
   main { padding: 0 !important; margin: 0 !important; }
 
-  #pnl-print, #payslips-print,
-  #commission-review-print, #daily-trips-print {
+  #payslips-print, #commission-review-print {
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
@@ -484,77 +478,44 @@ html[dir="rtl"] { --dock-dir: -1; }
     font-size: 10pt;
   }
 
-  /* #pnl-print is the ONE print id that wraps two cards rather than being one:
-     the P&L statement and the VAT list are separate boxes on screen, sharing a
-     print id so they land on the same printout. The reset above hits the
-     wrapper, which has no chrome anyway — these are the boxes that do.
-
-     A card is a screen metaphor for "this is a distinct thing on a page of
-     other things". A sheet of A4 is already that, so on paper the borders and
-     the shadow are noise, and two floating cards read as a slide rather than a
-     statement. What has to survive is the SEPARATION, which is why the gap
-     between them is set here rather than left to space-y-5 — it replaces the
-     border as the thing telling a reader the VAT list is not part of the P&L. */
-  #pnl-print > .card {
-    padding: 0 !important;
-    border: 0 !important;
-    box-shadow: none !important;
-    background: #fff !important;
-  }
-  #pnl-print > .card + .card { margin-top: 10mm !important; }
-
   /* Tables: full width, header row repeated on every page, and no row or
      section split across a page break. Without table-header-group a
      multi-page table loses its column headings after page one. */
-  #pnl-print table,
-  #payslips-print table, #commission-review-print table,
-  #daily-trips-print table {
+  #payslips-print table, #commission-review-print table {
     width: 100% !important;
     border-collapse: collapse;
   }
-  #pnl-print thead,
-  #payslips-print thead, #commission-review-print thead,
-  #daily-trips-print thead {
+  #payslips-print thead, #commission-review-print thead {
     display: table-header-group;
   }
-  #pnl-print tr,
-  #payslips-print tr, #commission-review-print tr,
-  #daily-trips-print tr {
+  #payslips-print tr, #commission-review-print tr {
     break-inside: avoid;
     page-break-inside: avoid;
   }
   /* A section heading must never be the last thing on a page. */
-  #pnl-print h3,
-  #payslips-print h3, #commission-review-print h3,
-  #daily-trips-print h3 {
+  #payslips-print h3, #commission-review-print h3 {
     break-after: avoid;
     page-break-after: avoid;
     margin-top: 14pt;
   }
-  /* Daily Trips: each project's table must not split across a page. They are
-     short, and a project heading orphaned from its rows is unreadable on paper —
-     the whole point of this report is that it gets filed. */
-  #daily-trips-print section {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
 
-  /* THE VAT LIST, and now only the VAT list. #pnl-print's only <section> is
-     that box — the second of its two, four source lines plus its caveats. Split
-     across a page it reads as two unrelated fragments, and the second one loses
-     both the heading that says it is NOT part of the profit above and the note
-     that says the lines are not to be added up. That box is the reason this
-     rule is worth the risk of an early break: half a VAT list with no heading
-     is the one fragment here that could be mistaken for part of the statement.
+  /* TWO BLOCKS OF PAGINATION RULES HAVE LEFT THIS FILE WITH THEIR DOCUMENTS,
+     and naming them is cheaper than rediscovering why they are absent.
 
-     This rule used to name #cost-print alongside it, under a general heading
-     about keeping a closing note with its table. The cost statement prints a
-     document now, where break-inside is the kit's own decision per block — see
-     `.chart` in lib/atlas/shell.ts — so there is nothing general left here. */
-  #pnl-print section {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
+     `#pnl-print > .card` and `#pnl-print > .card + .card` stripped the chrome
+     off the P&L's two boxes and set a 10mm gap between them, because the wrapper
+     shared one print id so the statement and the VAT list would land on the same
+     sheet. The document has no wrapper and no cards: the VAT list is a SECTION
+     of it, which is a stronger attachment than a shared id ever was.
+
+     `#pnl-print section` and `#daily-trips-print section` each said
+     break-inside: avoid — the VAT box so it could not split away from the
+     heading that says it is NOT part of the profit above, each daily project
+     table so a heading could not be orphaned from its rows. Both claims are the
+     kit's now, per block, and made better: see `.stack > .sec-head` and `tfoot`
+     in lib/atlas/shell.ts, which hold a heading to its own sub-line and pull the
+     last body row over with the totals. A blanket section rule could only ever
+     avoid the break, never decide what travels with what. */
 
   /* History payout — a single record. Absolute + inset:0 pins it edge-to-edge
      for a clean one-page printout (it fits a page). */

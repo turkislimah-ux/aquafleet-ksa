@@ -10,11 +10,15 @@
 // computed Narrative, and Custom. One is visible at a time, which is what makes
 // "Print" mean "print THIS statement".
 //
-// AND IT NOW MEANS TWO DIFFERENT THINGS. The statements migrated onto the ATLAS
-// kit build a standalone document and hand it to printHtml(); the rest still
-// print the screen through globals.css, which hides the page and un-hides the
-// mounted statement's print id. MIGRATED below is the list, and the one Print
-// button branches on it — see handlePrint().
+// AND IT NOW MEANS ONE THING ON EIGHT OF THE NINE. Those eight build a
+// standalone document through lib/docvm/* + lib/docs/* and hand it to
+// printHtml(); only Payslips still prints the screen through globals.css, which
+// hides the page and un-hides the mounted statement's print id. MIGRATED below
+// is the list, and the one Print button branches on it — see handlePrint().
+//
+// Daily Trips is on that list while keeping its OWN button, which is not a
+// contradiction — the entry is what arms the Cmd/Ctrl+P intercept. The set's
+// own comment says why leaving it off would print a blank sheet.
 //
 // This file owns the P&L and the period controls; the rest live in
 // StatementViews.tsx, a leaf module it imports one-way, except Daily Trips —
@@ -103,12 +107,18 @@ import { useApp } from "@/components/AppShell";
 import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
 import type { CsvValue } from "@/lib/csv";
 import { useCsvSource, type RegisterCsv } from "./exportSource";
-import type { PrintSource, RegisterPrint } from "./printSource";
+import { usePrintSource, type PrintSource, type RegisterPrint } from "./printSource";
 import { printHtml } from "@/lib/printHtml";
+import { buildPnlVm } from "@/lib/docvm/pnl";
+import { buildPnlHtml } from "@/lib/docs/pnl";
 
-// One statement at a time. That keeps each print id the ONLY print subtree in
-// the DOM, so "Print" prints the statement you are looking at rather than the
-// whole pack — and it keeps a long tab from becoming a scroll marathon.
+// One statement at a time, so "Print" prints the statement you are looking at
+// rather than the whole pack — and a long tab does not become a scroll marathon.
+//
+// That used to be a statement about PRINT IDS: one mounted subtree meant one
+// whitelisted id in the DOM. It is a statement about REGISTRATION now — one
+// mounted statement means one print source registered (./printSource) — and the
+// invariant it buys is the same one.
 type Statement =
   | "pnl" | "revenue" | "receivables" | "cost" | "operations"
   | "daily" | "payslips" | "narrative" | "custom";
@@ -130,12 +140,76 @@ type Statement =
  * registered source prints nothing at all, which is visibly nothing happening.
  *
  * It shrinks as batches land and disappears with the last un-migrated statement,
- * taking the fallback with it. What is left: `daily` (its own button, its own
- * id) and `payslips`.
+ * taking the fallback with it. What is left: `payslips`, and only because its
+ * surface is the one place two print subtrees coexist (see globals.css).
+ *
+ * `daily` IS IN THE SET THOUGH IT DOES NOT USE THE SHARED BUTTON. Daily Trips
+ * carries its own Print button inside the report — its own date and period
+ * controls are there, and the controls at the top of this tab cannot express a
+ * single day — and that button calls printHtml() directly. The set entry is for
+ * the OTHER path: the Cmd/Ctrl+P intercept below, which is a window listener and
+ * has no idea which button is on screen. Leave `daily` out and the keyboard
+ * shortcut prints the blank sheet this comment exists to prevent, on the one
+ * statement whose whole purpose is to be printed.
  */
 const MIGRATED: ReadonlySet<Statement> = new Set<Statement>([
   "revenue", "receivables", "cost", "operations", "narrative", "custom",
+  "pnl", "daily",
 ]);
+
+/**
+ * VAT for the period — FOUR INDEPENDENT PASSES, one per source, and deliberately
+ * not a reconciliation. Nothing here adds one source to another and there is no
+ * total: see the panel's own footnotes for why a sum across these lines would
+ * not be a quantity of anything.
+ *
+ * `on` is a plain YYYY-MM-DD and so are period_start and period_end, so a string
+ * comparison IS a date comparison — the same filter RevenueStatement applies to
+ * `month`. Document grain rather than the monthly views: these rows carry their
+ * own dates, so a quarter or a year needs no month spine.
+ *
+ * REJECTED IS SPLIT OUT, NOT DROPPED. A rejected purchase is real VAT on a
+ * document the purchasing screens still show, so omitting it silently is how a
+ * reader ends up with a figure here they cannot reconcile against those screens.
+ * It gets its own line and is never subtracted from another.
+ *
+ * Sales VAT sums the `invoices` rows the component already holds — the same
+ * v_revenue_invoices rows the Revenue statement sums, filtered on `month`
+ * exactly as it does. Sales VAT already had a definition in SQL; the fix for a
+ * missing number was never to write a second one.
+ *
+ * AT MODULE SCOPE, WHICH IS THE PART THAT MOVED. These were plain consts in the
+ * component body, below the `if (!current)` return, because a hook there would
+ * be conditional. The printed sheet needs the same six figures and registers
+ * from a hook, which cannot sit below that return — so the RULE moves up here
+ * where both callers reach it and the two evaluations cannot drift. A stable
+ * module identity also keeps it out of the print builder's dependency list.
+ */
+function pnlVatLines(
+  cur: PnlPeriodRow,
+  invoices: readonly RevenueInvoiceRow[],
+  orders: readonly VatSourceDocRow[],
+  receipts: readonly VatSourceDocRow[],
+  repairs: readonly VatSourceDocRow[],
+) {
+  const line = (rows: readonly VatSourceDocRow[], rejected: boolean) => {
+    const hit = rows.filter(
+      (r) => r.on >= cur.period_start && r.on <= cur.period_end && r.rejected === rejected,
+    );
+    return { total: sumOver(hit, (r) => r.vat_sar), count: hit.length };
+  };
+  const salesDocs = invoices.filter(
+    (i) => i.month >= cur.period_start && i.month <= cur.period_end,
+  );
+  return {
+    sales: { total: sumOver(salesDocs, (i) => i.vat_sar), count: salesDocs.length },
+    ordered: line(orders, false),
+    received: line(receipts, false),
+    repairs: line(repairs, false),
+    orderedRejected: line(orders, true),
+    receivedRejected: line(receipts, true),
+  };
+}
 
 // `revenue` points at reports.metric.revenue rather than minting a ninth tab
 // leaf: the statement is named after the metric it reports, so a second copy of
@@ -488,6 +562,51 @@ export default function StatementsTab({
     printSource.current = src;
   }, []);
 
+  // ---- The P&L's own document ----------------------------------------------
+  // THE ONE STATEMENT THAT REGISTERS WITH ITSELF. Every other sheet in the pack
+  // is a child in StatementViews and registers from there; the P&L renders in
+  // this file, so the builder and the registration are both here. The mechanism
+  // is the same one either way — see ./printSource for why registration beats a
+  // switch in the button.
+  //
+  // ABOVE THE TWO EARLY RETURNS, which is a hard constraint and the reason
+  // pnlVatLines() was hoisted to module scope: a hook cannot sit below a return.
+  //
+  // EVERY FIGURE IS PASSED, NOT RECOMPUTED. `current` and `prior` are view rows,
+  // the categories are a fetched list, the six VAT lines come from the same
+  // module function the panel below calls, and Zakat is the view-model's — one
+  // expression of `indicativeZakat`, reached through lib/docvm/pnl.ts rather
+  // than spelled a second time here.
+  const buildPnlDoc = useCallback(() => {
+    // Unreachable: the registration below is gated on `current` as well as on
+    // the statement, so nothing is registered when there is no period. A
+    // document of nothing is still better than a throw on a print button.
+    if (!current) return "";
+    return buildPnlHtml(buildPnlVm({
+      lang,
+      // Stamped when the sheet is PRODUCED, which for a printout is now.
+      generatedAt: new Date(),
+      label: periodLabel(current, lang),
+      priorLabel: prior ? periodLabel(prior, lang) : null,
+      inProgress: isPeriodInProgress(current.period_end, today),
+      current,
+      prior,
+      categories,
+      vat: pnlVatLines(
+        current, invoices, vatPurchaseOrders, vatStockReceipts, vatWorkshopPayments,
+      ),
+    }));
+  }, [
+    lang, today, current, prior, categories,
+    invoices, vatPurchaseOrders, vatStockReceipts, vatWorkshopPayments,
+  ]);
+
+  // Gated on the PERIOD as well as the statement. With no period this component
+  // renders the nothing-to-report card, which has no Print button — but the
+  // Cmd/Ctrl+P intercept below is a window listener and does not know that, so
+  // leaving a builder registered would print a sheet for a period that has none.
+  usePrintSource(statement === "pnl" && current ? registerPrint : undefined, buildPnlDoc);
+
   // THE ONE BUTTON, TWO MEANINGS. See MIGRATED above for why a migrated
   // statement with no source prints nothing rather than falling through.
   const handlePrint = useCallback(() => {
@@ -506,10 +625,15 @@ export default function StatementsTab({
   // globals.css un-hides by whitelist and the whitelist entry went with the
   // print CSS.
   //
-  // ONLY WHILE A MIGRATED STATEMENT IS MOUNTED. The other five still print
-  // through that stylesheet, and intercepting their shortcut to call
-  // window.print() ourselves would be an elaborate way of doing what the browser
-  // was already going to do.
+  // ONLY WHILE A MIGRATED STATEMENT IS MOUNTED. Payslips still prints through
+  // that stylesheet, and intercepting its shortcut to call window.print()
+  // ourselves would be an elaborate way of doing what the browser was already
+  // going to do.
+  //
+  // THIS IS DAILY TRIPS' ONLY ROUTE THROUGH HERE. Its Print button is inside the
+  // report and never touches handlePrint(); the shortcut has no button, so
+  // without this it would take the blank-sheet path the moment its whitelist
+  // entry left globals.css. Same commit, both halves.
   //
   // Capture phase, so it runs before anything else can swallow the key. No data
   // in the deps: `handlePrint` reads the ref at FIRE time, so the sheet is built
@@ -531,7 +655,10 @@ export default function StatementsTab({
     return (
       <div className="space-y-4">
         {selector}
-        <DailyTripsTab today={today} registerCsv={registerCsv} />
+        {/* `registerPrint` goes down even though Daily Trips prints from its
+            OWN button. The registration is what the Cmd/Ctrl+P intercept above
+            reads — that listener has no button to consult. */}
+        <DailyTripsTab today={today} registerCsv={registerCsv} registerPrint={registerPrint} />
         {builder}
       </div>
     );
@@ -559,45 +686,16 @@ export default function StatementsTab({
   const zakat = indicativeZakat(current.net_profit_sar);
   const priorZakat = prior ? indicativeZakat(prior.net_profit_sar) : null;
 
-  // VAT for the period — FOUR INDEPENDENT PASSES, one per source, and
-  // deliberately not a reconciliation. Nothing below adds one source to
-  // another and there is no total: see the panel's own footnotes for why a sum
-  // across these lines would not be a quantity of anything.
+  // The six VAT lines. The rule is pnlVatLines() at module scope, which the
+  // printed sheet reads too — see its own comment for why it lives up there.
   //
-  // Plain calls, NOT useMemo: everything from here down runs after the
+  // A plain call, NOT useMemo: everything from here down runs after the
   // `if (!current)` return above, so a hook here would be a conditional hook.
   // The neighbouring monthsIn()/sumOver() calls are un-memoized for the same
   // reason.
-  //
-  // `on` is a plain YYYY-MM-DD and so are period_start and period_end, so a
-  // string comparison IS a date comparison — the same filter RevenueStatement
-  // applies to `month`. Document grain rather than the monthly views: these
-  // rows carry their own dates, so a quarter or a year needs no month spine.
-  //
-  // REJECTED IS SPLIT OUT, NOT DROPPED. A rejected purchase is real VAT on a
-  // document the purchasing screens still show, so omitting it silently is how
-  // a reader ends up with a figure here they cannot reconcile against those
-  // screens. It gets its own line and is never subtracted from another.
-  const inPeriod = (rows: VatSourceDocRow[]) =>
-    rows.filter((r) => r.on >= current.period_start && r.on <= current.period_end);
-  const vatLine = (rows: VatSourceDocRow[], rejected: boolean) => {
-    const hit = inPeriod(rows).filter((r) => r.rejected === rejected);
-    return { total: sumOver(hit, (r) => r.vat_sar), count: hit.length };
-  };
-
-  // Sales VAT sums the `invoices` rows this component already holds — the same
-  // v_revenue_invoices rows the Revenue statement sums, filtered on `month`
-  // exactly as it does. Sales VAT already had a definition in SQL; the fix for
-  // a missing number was never to write a second one.
-  const vatSalesDocs = invoices.filter(
-    (i) => i.month >= current.period_start && i.month <= current.period_end,
+  const vat = pnlVatLines(
+    current, invoices, vatPurchaseOrders, vatStockReceipts, vatWorkshopPayments,
   );
-  const vatSales = { total: sumOver(vatSalesDocs, (i) => i.vat_sar), count: vatSalesDocs.length };
-  const vatOrdered = vatLine(vatPurchaseOrders, false);
-  const vatReceived = vatLine(vatStockReceipts, false);
-  const vatRepairs = vatLine(vatWorkshopPayments, false);
-  const vatOrderedRejected = vatLine(vatPurchaseOrders, true);
-  const vatReceivedRejected = vatLine(vatStockReceipts, true);
 
   // The hint under each VAT row: the document count and the date basis. Every
   // one of the six was a template literal splicing a `count === 1` ternary into
@@ -702,23 +800,20 @@ export default function StatementsTab({
 
       {selector}
 
-      {/* ---- The statement. This subtree is what prints. ---------------
+      {/* ---- The statement. SCREEN ONLY. -------------------------------
 
           THE P&L IS THE ONE STATEMENT THAT IS TWO BOXES: the statement itself
-          and the VAT list under it. #pnl-print sits on a WRAPPER rather than on
-          a card, because the wrapper is what the print stylesheet isolates and
-          both boxes have to land on the same printout — an accountant filing a
-          P&L wants the VAT the period touched attached to it.
+          and the VAT list under it. That used to be a print problem — the two
+          had to land on one sheet, so `#pnl-print` sat on this WRAPPER rather
+          than on either card and globals.css isolated the pair.
 
-          The two alternatives were both worse. A second print id under one
-          statement breaks the pack's one-id-per-statement rule. A sibling
-          OUTSIDE this wrapper renders on screen and silently vanishes on paper,
-          which is the failure mode nobody notices until it is filed.
-
-          So the wrapper carries no card chrome of its own — it is a flow
-          container, and its two children are the boxes. */}
+          THAT ID IS GONE, and so is the constraint it existed to satisfy. The
+          printed P&L is built by lib/docvm/pnl.ts + lib/docs/pnl.ts, where the
+          VAT list is a section of one document and cannot be separated from the
+          statement by any amount of page furniture. What is left here is a
+          screen layout: a flow container with two cards in it. */}
       {statement === "pnl" && (
-      <div id="pnl-print" className="space-y-5">
+      <div className="space-y-5">
         <div className="card p-6">
           <header className="mb-5">
             {/* `&amp;` was JSX escaping, not content — this has always
@@ -881,10 +976,11 @@ export default function StatementsTab({
             not part of that statement. Two columns rather than the statement's
             five, so it reads as a different kind of thing at a glance too.
 
-            STILL INSIDE the shared #pnl-print wrapper, so both boxes print
-            together — the VAT a period touched is exactly the page an
-            accountant wants attached to the P&L. A sibling OUTSIDE that wrapper
-            would render on screen and vanish on paper. */}
+            ON PAPER IT IS A SECTION, NOT A BOX. The printed sheet carries it
+            as the last section of one document, under the same masthead, which
+            is a stronger attachment than two cards sharing a print id ever was
+            — the VAT a period touched is exactly the page an accountant wants
+            with the P&L. See lib/docs/pnl.ts. */}
         <section className="card p-6">
           <div className="flex items-baseline gap-2 flex-wrap">
             <h3 className="text-base font-semibold">{t("reports.vat.title", lang)}</h3>
@@ -914,23 +1010,23 @@ export default function StatementsTab({
                   reader scrolling to the notes. */}
               <VatRow
                 label={t("reports.vat.rowSales", lang)}
-                hint={vatHint("hintSales", vatSales.count)}
-                value={vatSales.total}
+                hint={vatHint("hintSales", vat.sales.count)}
+                value={vat.sales.total}
               />
               <VatRow
                 label={t("reports.vat.rowOrdered", lang)}
-                hint={vatHint("hintOrders", vatOrdered.count)}
-                value={vatOrdered.total}
+                hint={vatHint("hintOrders", vat.ordered.count)}
+                value={vat.ordered.total}
               />
               <VatRow
                 label={t("reports.vat.rowReceived", lang)}
-                hint={vatHint("hintReceipts", vatReceived.count)}
-                value={vatReceived.total}
+                hint={vatHint("hintReceipts", vat.received.count)}
+                value={vat.received.total}
               />
               <VatRow
                 label={t("reports.vat.rowRepairs", lang)}
-                hint={vatHint("hintRepairs", vatRepairs.count)}
-                value={vatRepairs.total}
+                hint={vatHint("hintRepairs", vat.repairs.count)}
+                value={vat.repairs.total}
               />
 
               {/* Rejected documents get their OWN lines under their own seam,
@@ -940,27 +1036,27 @@ export default function StatementsTab({
                   them out silently would put a gap between this page and
                   those. Hidden entirely when there are none: an empty
                   "Rejected" heading reads as a fault. */}
-              {(vatOrderedRejected.count > 0 || vatReceivedRejected.count > 0) && (
+              {(vat.orderedRejected.count > 0 || vat.receivedRejected.count > 0) && (
                 <tr>
                   <td colSpan={2} className="pt-4 pb-1 text-xs uppercase tracking-wide muted font-medium">
                     {t("reports.vat.rejectedHead", lang)}
                   </td>
                 </tr>
               )}
-              {vatOrderedRejected.count > 0 && (
+              {vat.orderedRejected.count > 0 && (
                 <VatRow
                   label={t("reports.vat.rowOrderedRejected", lang)}
-                  hint={vatHint("hintOrders", vatOrderedRejected.count)}
-                  value={vatOrderedRejected.total}
+                  hint={vatHint("hintOrders", vat.orderedRejected.count)}
+                  value={vat.orderedRejected.total}
                   indent
                   muted
                 />
               )}
-              {vatReceivedRejected.count > 0 && (
+              {vat.receivedRejected.count > 0 && (
                 <VatRow
                   label={t("reports.vat.rowReceivedRejected", lang)}
-                  hint={vatHint("hintReceipts", vatReceivedRejected.count)}
-                  value={vatReceivedRejected.total}
+                  hint={vatHint("hintReceipts", vat.receivedRejected.count)}
+                  value={vat.receivedRejected.total}
                   indent
                   muted
                 />
