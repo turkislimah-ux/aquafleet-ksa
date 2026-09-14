@@ -86,156 +86,68 @@ Loading every skill at once wastes context and has crashed sessions.
 
 ---
 
+
 ## 5. Workflow discipline (non-negotiable)
 
-- **One logical unit per commit**, each tsc-clean. `noUnusedLocals` +
-  `noUnusedParameters` are enforced — unused = build failure. A param kept for
-  signature shape gets an `_` prefix, never deletion.
-- **Explicit-path `git add`**, listing each file, **NEVER `git add .`** — on ONE
-  line, then `git status` to confirm; a multi-line paste has silently staged
-  nothing. **Then inspect the STAGED BLOB, not the working tree:** `git show
-  :<path>` is what commits. A file can be right on disk and blank in the index.
-- **A `grep -c` FOR A REMOVED IDENTIFIER HITS THE COMMENT DOCUMENTING THE
-  REMOVAL — STRIP COMMENTS BEFORE TRUSTING THE COUNT.** The epitaph fails the
-  very check that confirms the burial, and reads exactly like a failed fix. Seen
-  7+ times, still live: the ONLY uncoloured `divide-` left in the tree (§6) is
-  the comment documenting the fix. The tool:
-```sh
-  npx tsx scripts/code-grep.ts '<identifier>' [path...]
-```
-  Exit 0 = genuinely gone; exit 1 prints every live site. Reads the STAGED blob
-  (`--worktree` for disk), scans all tracked ts/tsx/css/sql when given no path.
-  **Do NOT hand-roll it with `grep`:** a line filter CANNOT work, because a block
-  comment's continuation lines carry no marker, so dropping the lines that
-  *begin* one reports prose as code. The script lexes, self-tests at import, and
-  two `test:money` checks import it, so a broken stripper turns that suite red
-  instead of green. **The cases that burned us are fixtures inside it now.**
-- **Quote dynamic-route paths:** `git add 'app/fleet/[id]/page.tsx'` — zsh globs
-  `[id]` silently. **Avoid `!` in commit messages** (history expansion).
-- **`.planning/HANDOFF.md` is ours and committed** — read at session start, write
-  at session end. The `HANDOFF.json`s are gsd's (header).
-- **Migrations:** sequential `00NN_name.sql`, **DRAFTED to disk and never
-  self-applied by Claude Code** — draft, stop, let Turki/the architect run it.
-  **Verify the file exists** (`ls supabase/migrations/ | tail -3`) before it runs
-  — migrations have been "drafted in conversation" and never written. Breaking
-  schema changes go **code-then-migrate**: build, migrate, verify in-browser,
-  commit together.
-- **BARE STATEMENTS ONLY — a NEW migration carries no `begin;` / `commit;`.**
-  The SQL Editor already wraps each submission: a nested `begin;` warns and is
-  ignored, then the trailing `commit;` ends the EDITOR's transaction. Grids
-  print, the run reads green, **nothing was created** — 0173 v1 did exactly this.
-  **0173 is the boundary: 0173+ are bare, 147 of the 170 files up to 0172 still
-  carry them.** Those predate the rule — do NOT "fix" them; 147 false hits is a
-  false catastrophe (§6). That editor transaction is also what satisfies §6's
-  "same transaction".
-- **A MIGRATION'S OWN RESULT-GRID IS NOT PROOF IT APPLIED.** Its verification
-  SELECTs are a claim; the catalog is the evidence. Confirm after the fact
-  against `pg_index` / `pg_proc` / `has_function_privilege`.
-- **Turki verifies in-browser before every commit.** Nothing commits unverified.
-- **THE DATABASE OUTRANKS THE NOTES on any question of DB state.** MCP-applied
-  corrections touch the database and **never touch the repo**, so nothing in git
-  signals that a note went stale. DB and note disagree → **the DB won**:
-  re-measure, act on that, then fix the note. Never re-raise an item because a
-  note still lists it open — one corrected trip was re-raised for several
-  sessions by a note wrong about both its paid status and its count.
-- **Re-measure every number before quoting it, ours included; a figure in a
-  handoff is a pointer, not evidence.** **One that dates itself gets CUT, not
-  updated** — a customer count and a file count both rotted here. **"X because Y"
-  is only as strong as Y, so measure Y THIS turn**: never from memory, never off
-  a filename. Two self-caught — a VAT/CR "match" counted on 2 rows not the table,
-  and a table name read off its migration's filename, which reports a healthy
-  migration as MISSING (§6). **Notes earn the strictest check: the next session
-  trusts them without re-measuring.**
-- **No build history in this file.** §7's 15KB cap is the trigger. **Compress by
-  re-verifying every claim, never by trimming prose blind.** Passes 1–4 each
-  found a stale fact; pass 5 (2026-09-09) found none and was read as convergence.
-  **Pass 6 (2026-09-11) then found §6's ACL mechanism wrong** — a rule right in
-  its instruction and wrong in its reason, which is the kind someone eventually
-  argues their way out of. "Converged" is a measurement, never licence to skip
-  the audit: the audit is what makes a cut safe, and the pass that finds nothing
-  is indistinguishable beforehand from the one that finds the bug.
+- **One logical unit per commit.** Each commit tsc-clean. `noUnusedLocals` +
+  `noUnusedParameters` enforced. Required params get `_` prefix, never deleted.
+- **Explicit-path `git add`** — list each file. **NEVER `git add .`**
+- **HANDOFF:** `.planning/HANDOFF.md` — committed, read at session start, write
+  at session end. Must stay under 2KB.
+- **Quote dynamic-route paths:** `git add 'app/fleet/[id]/page.tsx'`
+- **Avoid `!` in commit messages** (zsh history expansion).
+- **Stage with single-line `git add`, then `git status`** before committing.
+- **Inspect staged blob, not working tree.** `git show :<path>` reads what
+  would be committed.
+- **Verify migration files on disk** before running in Supabase.
+- **Code-then-migrate** for breaking schema changes.
+- **Turki verifies in-browser before every commit.**
+- **Migrations DRAFTED to disk** — never self-applied via Supabase MCP.
+- **DO NOT APPEND build diary to this file, HANDOFF.md, or the domain skill.**
+  Session state → HANDOFF.md only. If any of these files exceeds its size cap
+  (CLAUDE.md 15KB, HANDOFF 2KB, domain skill 15KB), Code is appending. Cut back.
 
 ---
 
 ## 6. Architecture locks (persistent — do not violate)
 
-- **Soft-delete, not hard-delete** for operational records (`terminated_at`,
-  `archived_at`). Terminated = a pre-filter, never a state.
-- **Derived driver state** (`lib/driver-state.ts`): 4 states, on_leave > off_duty
-  > idle > active, server-computed. **EXACTLY TWO EXPRESSIONS:** the TS helper and
-  `v_driver_state_now` (0106). `v_fleet_state_now` / `v_drivers_ops_now` compose on
-  the view. A drift guard asserts agreement at Dashboard load. Do not add a third.
-- **Water stations ≠ Operation stations** (0014). Separate; do NOT unify.
-- **`lib/project-colors.ts`** = the shared id-hashed project colour palette.
-- **Immutable keys** on lookup tables (`water_stations.key`) — a rename updates
-  the name only.
+- **Soft-delete, not hard-delete.** `terminated_at`, `archived_at`. Terminated =
+  pre-filter, never a state.
+- **Derived driver state** (`lib/driver-state.ts`): 4 states, server-computed.
+  Exactly TWO expressions: TS helper + `v_driver_state_now`. Do not add a third.
+- **Water stations ≠ Operation stations** (0014). Do NOT unify.
+- **`lib/project-colors.ts`** = shared project color palette.
+- **EVERY VIEW REPLACEMENT RESTATES ITS SECURITY FOOTER:**
+```sql
+  alter view public.X set (security_invoker = true);
+  revoke all on public.X from anon;
+  grant select on public.X to authenticated;
+```
+  Re-measure after every view change — counts matching is the check:
+```sql
+  select count(*) as views,
+         count(*) filter (where c.reloptions::text[] @> array['security_invoker=true']) as security_invoker,
+         count(*) filter (where has_table_privilege('anon', c.oid, 'select')) as anon_readable
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where c.relkind = 'v' and n.nspname = 'public';
+```
+- **42P16:** `create or replace view` can only APPEND columns. Cannot insert,
+  reorder, rename, or change type. Fix type changes with explicit cast.
+- **Immutable keys** on lookup tables. Rename updates name only.
 - **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew.
-- **`divide-*` CARRIES ITS OWN COLOUR: `divide-y divide-[rgb(var(--border))]`.**
-  `border-color` is not inherited, so an inline `borderColor` paints the
-  container's own frame only — the `divide-y` rules stay at preflight `#e5e7eb`,
-  right in light mode and wrong in dark, which is how it reached seven sites.
-  Nothing else covers it: no `borderColor.DEFAULT`, no `@layer base` for `*`. On
-  a border-less container that inline style is inert — delete it. **An uncoloured
-  `divide-` IS the bug**; grep is its regression test (§5).
-
-**WHAT SURVIVES A REPLACEMENT IS NOT OBVIOUS, AND DIFFERS BY FORM.** The next
-three rules are that one lesson; the fourth is how to read it back without
-fooling yourself.
-
-- **EVERY VIEW REPLACEMENT RESTATES ITS SECURITY FOOTER** — `security_invoker`,
-  `revoke` from anon, `grant select` to authenticated. `create or replace view`
-  silently drops reloptions, and does NOT refresh the view's comment (same OID),
-  so a stale comment outlives the branch it described. **Then re-measure: the
-  check is `views` == `security_invoker` and `anon_readable` == 0, never the
-  absolute count.** SQL: domain skill, "View & function security footers".
-- **`create or replace view` can only APPEND a column** (42P16) — never insert,
-  reorder, rename or retype, and arithmetic retypes too (bare `numeric` vs
-  `numeric(12,2)`); fix with an explicit cast, `(case … end)::numeric(12,2)`.
-  Verify with `format_type(atttypid, atttypmod)` on `pg_attribute`, never by
-  reading the view body.
-- **EVERY FUNCTION DEFINITION CARRIES ITS OWN REVOKE — AND ONLY ONE FORM STRIPS
-  THE ACL.** `drop`+`create` resets it to the Postgres default, `EXECUTE TO
-  PUBLIC`, being a NEW OID; **`create or replace function` PRESERVES `proacl`.**
-  Measured, not reasoned: 0150 replaces that way and asserts the before-ACL
-  against the after (`is distinct from`, 0150:329), and production passed. **The
-  rule does not weaken on that** — the two forms sit one line apart in a diff and
-  re-revoking is free. So every SECURITY DEFINER function and every money or
-  guarded RPC ends with a `revoke execute` naming **BOTH `public` and `anon`**
-  (statement: domain skill, "View & function security footers"). The offender is
-  the PUBLIC entry (EMPTY grantee, `=X/postgres`) that `anon` inherits, and the
-  anon key ships in the client bundle; revoking `anon` alone changes nothing, and
-  **no default-privileges equivalent exists for functions** (0161's covers TABLES
-  only). **Not hypothetical:** 0115 defined `issue_driver_payslip` with NO revoke
-  — it landed after 0083's sweep, so nothing ever gave it one — and 0118's
-  `drop`+`create` added none either, leaving a definer money RPC callable by
-  anyone holding the anon key, bypassing RLS *and* 0161's table revoke since a
-  definer runs as its owner. Closed in **0163**; **0164** locked the guarded
-  RPCs. Invariant: **zero NON-TRIGGER functions anon-executable** — trigger
-  functions are unreachable via PostgREST and several legitimately remain.
-- **TWO WAYS TO READ THAT BACK WRONG, and both INVERT the answer** — a healthy
-  function reported as a breach. **A false catastrophe reads exactly like a real
-  one.** Read back with `has_function_privilege('anon', …, 'execute')` = false,
-  **never `proacl` matching**; identify by `p.oid::regprocedure::text`, **never
-  `pg_get_function_identity_arguments()`**. Why each inverts: domain skill, same
-  section.
-- **New tables in `public` still end with `revoke all on public.X from anon`,**
-  even though 0161 revoked anon everywhere. Default privileges only reach tables
-  created AFTER them, and on a fresh `db reset` every earlier migration runs
-  first — the per-table line is what makes each migration correct on its own.
+- **Commission:** effective-dated, delivery-moment freeze, one-writer
+  (`set_project_commission`). See domain skill for full rules.
+- **Rates:** effective-dated salary history, trips.rate_sar frozen at delivery.
+  See domain skill for full rules.
+- **Tax:** No income tax (100% Saudi-owned). Zakat is indicative only (2.5% of
+  profit-before-Zakat). VAT is never profit.
 
 ---
 
-## 7. Current state & what's next
+## 7. Current state
 
-**Do NOT append build history, implementation notes, or money rules here.**
-- Money/schema rules → `.claude/skills/aquafleet-domain/SKILL.md`
-- Session state → `.planning/HANDOFF.md`
-- If this file exceeds 15KB, Code is appending. Cut back to this stub.
+**Do NOT append here.** Read `.planning/HANDOFF.md` for session state.
+Domain rules → `.claude/skills/aquafleet-domain/SKILL.md`
 
-**State:** DB at migration 0195. All pages built+verified. Arabic phase complete (copy fixes land as they surface).
-
-**Do not read this number out of `schema_migrations`** — its versions are
-timestamps, not our `00NN`, and a SQL Editor run writes no row while an
-MCP-applied migration does, so it is neither complete nor empty and cannot answer
-"what number are we on". The files on disk and the objects in the catalog are the
-record.
+DB at latest migration. All pages built+verified. Arabic phase closed.
+Notifications + Settings feature in progress.
