@@ -1681,6 +1681,14 @@ export const dict = {
     /** Cost buckets — keys mirror `CostSliceKey` / lib/cost-colors.ts. */
     costType: {
       parts: { en: "Parts", ar: "قطع الغيار" },
+      // THE TWO HALVES OF `parts`, printed instead of it on the cost sheet in
+      // any period that issued stock outside maintenance. `maintenanceParts`
+      // is the same figure as that sheet's per-truck table foot, which is the
+      // point: the bar and the table below it are then visibly the same
+      // number. `otherStock` is the remainder — exit permits, which have no
+      // truck and so can never appear in that table.
+      maintenanceParts: { en: "Maintenance parts", ar: "قطع الصيانة" },
+      otherStock: { en: "Other stock issued", ar: "مخزون صادر آخر" },
       outsourced: { en: "Outsourced", ar: "أعمال خارجية" },
       payroll: { en: "Payroll", ar: "الرواتب" },
       commissions: { en: "Commissions", ar: "العمولات" },
@@ -4153,10 +4161,10 @@ export const dict = {
         caveat: { en: "Not a period measure and not a view: it is computed in the app, per customer, for the instant you are looking at. paid-up = running - payable, so this is the running balance with the not-yet-settled work added back. A customer can hold pool credit and still owe on Amount Payable at the same time; that is the model, not a discrepancy. Prepaid only — a postpaid customer has no pool. Never place it in a period column or on a monthly trend line.", ar: "ليس مقياس فترة ولا عرضًا: فهو يُحسب داخل التطبيق، لكل عميل، للحظة التي تنظر فيها. والمعادلة: الرصيد المسدَّد = الرصيد الجاري - المبلغ الواجب السداد، أي أنه الرصيد الجاري مضافًا إليه العمل الذي لم يُسدَّد بعد. وقد يحمل العميل رصيدًا في الحوض ويكون مدينًا بالمبلغ الواجب السداد في الوقت نفسه؛ وذلك هو النموذج لا تعارضًا فيه. وهو مقصور على الدفع المقدم — فعميل الدفع الآجل بلا حوض رصيد. ولا يوضع أبدًا في عمود فترة ولا على خط اتجاه شهري." },
       },
       parts_cost_at_consumption: {
-        meaning: { en: "The FIFO cost of parts that actually left stock — maintenance draws plus non-maintenance exits.", ar: "تكلفة FIFO للقطع التي خرجت فعليًا من المخزون — مسحوبات الصيانة زائد الخروج لغير الصيانة." },
-        formula: { en: "Net of returns from both per-lot ledgers (consume minus return), plus a fallback of work_order_parts.qty x unit_price_sar for work orders deducted before the ledger existed.", ar: "صافي المرتجعات من سجلَّي الدفعات كليهما (استهلاك ناقص إرجاع)، زائد بديل احتياطي هو work_order_parts.qty × unit_price_sar لأوامر العمل التي خُصمت قبل وجود السجل." },
+        meaning: { en: "The FIFO cost of parts that left stock for good — maintenance draws plus PERMANENT non-maintenance exits.", ar: "تكلفة FIFO للقطع التي خرجت من المخزون نهائيًا — مسحوبات الصيانة زائد الخروج الدائم لغير الصيانة." },
+        formula: { en: "Net of returns from both per-lot ledgers (consume minus return), counting an exit-permit draw only when the permit is status=exited and kind=permanent, plus a fallback of work_order_parts.qty x unit_price_sar for work orders deducted before the ledger existed.", ar: "صافي المرتجعات من سجلَّي الدفعات كليهما (استهلاك ناقص إرجاع)، مع احتساب مسحوب تصريح الخروج فقط حين تكون حالة التصريح exited ونوعه permanent، زائد بديل احتياطي هو work_order_parts.qty × unit_price_sar لأوامر العمل التي خُصمت قبل وجود السجل." },
         grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
-        caveat: { en: "Purchases are NOT a cost here — a purchase is inventory until consumed, and expensing both would double-count. Live, receipts over the same window are roughly 57x the consumption figure. The pre-ledger fallback is the same stamped price from the other end of the same write, not a recomputation.", ar: "المشتريات ليست تكلفة هنا — فالشراء مخزون حتى يُستهلك، وتحميل الاثنين يحتسب المبلغ مرتين. وعلى البيانات الحية، بلغت المستلمات خلال المدة نفسها نحو 57 ضعف رقم الاستهلاك. والبديل الاحتياطي السابق للسجل هو السعر المثبَّت نفسه من الطرف الآخر للعملية نفسها، لا إعادة حساب." },
+        caveat: { en: "Purchases are NOT a cost here — a purchase is inventory until consumed, and expensing both would double-count. Live, receipts over the same window are roughly 57x the consumption figure. The pre-ledger fallback is the same stamped price from the other end of the same write, not a recomputation. A RETURNABLE exit permit is stock on loan, not a cost, so its parts stay out of this figure while they are out (0197). The schema has no written-off status, so a returnable permit whose parts never come back is never expensed at all: that stock is neither a cost nor on-hand, and no screen reports it.", ar: "المشتريات ليست تكلفة هنا — فالشراء مخزون حتى يُستهلك، وتحميل الاثنين يحتسب المبلغ مرتين. وعلى البيانات الحية، بلغت المستلمات خلال المدة نفسها نحو 57 ضعف رقم الاستهلاك. والبديل الاحتياطي السابق للسجل هو السعر المثبَّت نفسه من الطرف الآخر للعملية نفسها، لا إعادة حساب. وتصريح الخروج القابل للإرجاع مخزون مُعار لا تكلفة، فتبقى قطعه خارج هذا الرقم ما دامت خارجة (0197). ولا توجد في المخطط حالة «مشطوب»، فالتصريح القابل للإرجاع الذي لا تعود قطعه أبدًا لا يُحمَّل تكلفةً إطلاقًا: ذلك المخزون ليس تكلفة ولا رصيدًا قائمًا، ولا تعرضه أي شاشة." },
       },
       payroll_cost: {
         meaning: { en: "Monthly salaries of staff and drivers employed during the month.", ar: "الرواتب الشهرية للموظفين والسائقين العاملين خلال الشهر." },

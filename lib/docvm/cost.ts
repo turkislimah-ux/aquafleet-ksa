@@ -169,14 +169,29 @@ export type CostDocVm = {
   /**
    * THE RANKED COST BUCKETS — the masthead figure taken apart, and nothing else.
    *
-   * Every bar is a column of the SAME P&L row the headline comes from, so the
-   * five add to it exactly. What they do NOT necessarily add up to is the
-   * tables further down: the P&L's parts figure is priced at consumption while
-   * the maintenance table sums parts ATTRIBUTABLE TO A TRUCK, and where a work
-   * order reached no truck the two diverge. Measured 2026-09-13 across the live
-   * months: identical in June, July and September; 240.00 SAR apart in August.
-   * The chart states the P&L's answer because the headline above it does; the
-   * table states the per-truck view's, because that is what it is a table OF.
+   * Every bar is a column of the SAME P&L row the headline comes from, so they
+   * add to it exactly.
+   *
+   * PARTS PRINTS AS TWO BARS, NOT ONE, in any period that issued stock outside
+   * maintenance. The P&L's parts figure covers every part that left the
+   * warehouse; the maintenance table below covers only parts consumed on a
+   * TRUCK's work order. Exit permits have no truck — v_parts_consumption_daily
+   * hardcodes null for them — so they are in the first and can never be in the
+   * second. Splitting the bar into `maintenanceParts` + `otherStock` makes the
+   * first half equal the table's foot exactly, so the two reconcile on the page
+   * instead of differing by an amount the sheet never names.
+   *
+   * AN EARLIER NOTE HERE BLAMED work orders that "reached no truck". That
+   * cannot happen: work_orders.truck_id is NOT NULL. Measured 2026-09-14, the
+   * whole 240.00 SAR August divergence was exit-permit parts and none of it was
+   * truck-less maintenance. Migration 0197 then narrowed the P&L side to
+   * PERMANENT exits — a returnable permit is stock on loan, not a cost — which
+   * takes August's `otherStock` from 240.00 to 50.00.
+   *
+   * ONE BAR WHEN `otherStock` IS ZERO OR LESS, which is most periods: a
+   * zero-length bar labelled "Other stock issued" states nothing, and a
+   * negative one could only come from a return posted against a permanent
+   * permit, where a single `Parts` bar is the honest reading.
    *
    * KEPT IN GRAYSCALE, unlike the receivables split bar that was dropped. This
    * is `rankedBars`, which gives every bucket its own row, its own name at the
@@ -271,6 +286,27 @@ export function buildCostVm(input: CostDocInput): CostDocVm {
   const costLabel = t("common.cost", lang);
 
   const maintTotal = input.maintenance.parts + input.maintenance.os;
+
+  // THE PARTS BAR, SPLIT SO IT RECONCILES WITH THE TABLE BELOW IT. `pnl.parts`
+  // is every part that left the warehouse this period; `maintenance.parts` is
+  // the foot of the per-truck table further down the sheet. The remainder is
+  // stock issued on an exit permit, which has no truck and so cannot reach that
+  // table. Naming both halves is what lets a reader add the table up and find
+  // it on the chart. Split only when the remainder is positive — see `chart`.
+  const otherStock = input.pnl.parts - input.maintenance.parts;
+  const partsBars =
+    otherStock > 0
+      ? [
+          { label: t("dashboard.costType.maintenanceParts", lang), value: input.maintenance.parts },
+          { label: t("dashboard.costType.otherStock", lang), value: otherStock },
+        ]
+      : [{ label: t("dashboard.costType.parts", lang), value: input.pnl.parts }];
+  const otherBuckets = [
+    { label: t("dashboard.costType.outsourced", lang), value: input.pnl.os },
+    { label: t("dashboard.costType.payroll", lang), value: input.pnl.payroll },
+    { label: t("dashboard.costType.commissions", lang), value: input.pnl.commissions },
+    { label: t("dashboard.costType.filling", lang), value: input.pnl.filling },
+  ];
 
   // A COUNT CELL IS A DASH AT ZERO, exactly as the screen writes `v.uncosted ||
   // "—"`. A 0 in that column would be a measured zero; the claim is that this
@@ -389,25 +425,21 @@ export function buildCostVm(input: CostDocInput): CostDocVm {
     ],
 
     chart: {
-      // THE SAME FIVE KEYS `costBuckets()` USES, in value order rather than its
-      // fixed order — a ranked bar that is not ranked is a bar chart pretending.
+      // THE KEYS `costBuckets()` USES, in value order rather than its fixed
+      // order — a ranked bar that is not ranked is a bar chart pretending.
       // `other` is NOT among them: costBuckets does not emit it for a P&L row
-      // and inventing a sixth bucket here would put a figure on the sheet that
-      // no column measures.
-      // `as const` so the five keys stay LITERALS through the sort — widened to
-      // `string` they no longer satisfy `TKey`, which is the dictionary's own
-      // guarantee that a key printed here exists in both languages.
-      bars: ([
-        { key: "dashboard.costType.parts", value: input.pnl.parts },
-        { key: "dashboard.costType.outsourced", value: input.pnl.os },
-        { key: "dashboard.costType.payroll", value: input.pnl.payroll },
-        { key: "dashboard.costType.commissions", value: input.pnl.commissions },
-        { key: "dashboard.costType.filling", value: input.pnl.filling },
-      ] as const)
-        .slice()
+      // and inventing a bucket here would put a figure on the sheet that no
+      // column measures. `parts` is the one exception, and it is a SPLIT of a
+      // column rather than an addition to it — see the note on `chart` above.
+      //
+      // Every key goes into `t()` as a LITERAL at the call site, which is where
+      // `TKey` is checked. The previous shape stored the keys and resolved them
+      // after the sort, and needed `as const` to stop them widening to `string`
+      // on the way; resolving them here needs no such guard.
+      bars: [...partsBars, ...otherBuckets]
         .sort((a, b) => b.value - a.value)
         .map((b) => ({
-          label: t(b.key, lang),
+          label: b.label,
           value: b.value,
           // The currency rides on the figure because this block has no column
           // head to carry it, unlike every table on the sheet.

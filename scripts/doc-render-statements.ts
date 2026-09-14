@@ -143,10 +143,14 @@ const PNL: PnlPeriodRow[] = [
     commissions_sar: 2445.72, operating_cost_sar: 56234.67, operating_profit_sar: 14415.33,
     expenses_sar: 13000, net_profit_sar: 1415.33, operating_margin_pct: 20.4,
     filling_cost_sar: 1285, filling_uncosted_trips: 3 },
+  // RE-READ 2026-09-14, after 0197. This is the only month the exit-permit
+  // recognition rule moved: 190.00 SAR of returnable stock left operating cost,
+  // so parts, operating cost, both profit lines and the margin all shifted.
+  // Jun, Jul and Sep are byte-identical to the 2026-09-13 read.
   { period_type: "month", period_start: "2026-08-01", period_end: "2026-08-31", label: "Aug 2026",
-    revenue_sar: 50700, parts_cost_sar: 3779, os_cost_sar: 7200, payroll_sar: 31300,
-    commissions_sar: 14104.93, operating_cost_sar: 61748.93, operating_profit_sar: -11048.93,
-    expenses_sar: 0, net_profit_sar: -11048.93, operating_margin_pct: -21.8,
+    revenue_sar: 50700, parts_cost_sar: 3589, os_cost_sar: 7200, payroll_sar: 31300,
+    commissions_sar: 14104.93, operating_cost_sar: 61558.93, operating_profit_sar: -10858.93,
+    expenses_sar: 0, net_profit_sar: -10858.93, operating_margin_pct: -21.4,
     filling_cost_sar: 5365, filling_uncosted_trips: 0 },
   { period_type: "month", period_start: "2026-09-01", period_end: "2026-09-30", label: "Sep 2026",
     revenue_sar: 20290, parts_cost_sar: 0, os_cost_sar: 0, payroll_sar: 31300,
@@ -159,12 +163,15 @@ const PNL: PnlPeriodRow[] = [
 // Both batch-4 sheets need it: operations cannot show a by-month table or the
 // dual-axis chart without more than one month, and the cost sheet's maintenance
 // table only reaches twelve trucks over a quarter.
+//
+// RE-READ 2026-09-14 alongside the Aug row above: Q3 contains August, so 0197's
+// 190.00 SAR moves through this row by exactly the same amount.
 const Q3: PnlPeriodRow = {
   period_type: "quarter", period_start: "2026-07-01", period_end: "2026-09-30",
-  label: "Q3 2026", revenue_sar: 141640, parts_cost_sar: 8652.95, os_cost_sar: 17030,
-  payroll_sar: 100400, commissions_sar: 18534.84, operating_cost_sar: 151567.79,
-  operating_profit_sar: -9927.79, expenses_sar: 13000, net_profit_sar: -22927.79,
-  operating_margin_pct: -7, filling_cost_sar: 6950, filling_uncosted_trips: 3,
+  label: "Q3 2026", revenue_sar: 141640, parts_cost_sar: 8462.95, os_cost_sar: 17030,
+  payroll_sar: 100400, commissions_sar: 18534.84, operating_cost_sar: 151377.79,
+  operating_profit_sar: -9737.79, expenses_sar: 13000, net_profit_sar: -22737.79,
+  operating_margin_pct: -6.9, filling_cost_sar: 6950, filling_uncosted_trips: 3,
 };
 
 // RE-READ 2026-09-13 for batch 4. The previous copy of this fixture carried
