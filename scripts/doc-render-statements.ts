@@ -2,10 +2,15 @@
 // Cost and Operations, and batch 5's P&L. It renders every sheet in BOTH
 // languages to a directory, and the tools that judge them read that directory:
 //
-//   npx tsx scripts/doc-render-statements.ts        # writes the corpus
-//   node scripts/doc-bidi-check.mjs                 # structure, exits non-zero
-//   node scripts/doc-a4-proof.mjs                   # A4 PDFs + page counts
-//   npm run test:bidi                               # the first two, chained
+//   npm run doc:render     # this file AND doc-render-records.ts
+//   npm run test:bidi      # render, then the bidi structure check
+//   npm run test:pages     # render, then the page-count diff
+//
+// THIS FILE IS HALF THE CORPUS. scripts/doc-render-records.ts writes the payout
+// voucher and the part record into the SAME directory, and both checks read the
+// directory rather than either file — so rendering only this half leaves the
+// other half stale on disk, which the page-count diff will report as MOVED
+// against a baseline that covers all of it. Use `npm run doc:render`.
 //
 // Output goes to $DOC_SHEETS, default /tmp/atlas-sheets — outside the repo on
 // purpose, because these are the artefacts of a check and not sources.

@@ -9,11 +9,12 @@
 // sheet has no direction to mix.
 //
 // ONLY EDGE FAILS THE RUN, AND THAT ASYMMETRY IS THE WHOLE DESIGN. The corpus
-// holds 194 NAKED strings and 0 EDGE, and the 194 are not 194 bugs: a naked
-// mixed string is one the browser MIGHT reorder, and most of them — a month name
-// beside a year, a total beside "SAR" — resolve correctly because the neutral
-// between the runs resolves to the run's own direction. Exiting 1 on those would
-// be a gate that is red on a clean tree, which is a gate nobody reads.
+// holds a few hundred NAKED strings and 0 EDGE, and those hundreds are not
+// hundreds of bugs: a naked mixed string is one the browser MIGHT reorder, and
+// most of them — a month name beside a year, a total beside "SAR", a unit beside
+// its label — resolve correctly, because the neutral between the two runs
+// resolves to the run's own direction. Exiting 1 on those would be a gate that
+// is red on a clean tree, which is a gate nobody reads.
 //
 // EDGE is different in kind. It is an isolate that swept a boundary separator
 // into the LTR run, so the separator renders at that run's wrong end. There is

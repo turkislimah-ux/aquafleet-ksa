@@ -11,10 +11,15 @@
 // scripts/doc-render-statements.ts writes. PDFs land in `<dir>/pdf`.
 //
 // THE BASELINE IS THE CHECK, and it is committed for the same reason a snapshot
-// test is: a page count is not a thing anyone remembers. 68 sheets print between
-// one and six pages each, and the number that matters is not any single count
-// but WHICH ONE MOVED. Held in the repo, that question is answered by a diff
-// rather than by two terminal windows and a good memory.
+// test is: a page count is not a thing anyone remembers. The corpus prints
+// between one and six pages a sheet, and the number that matters is not any
+// single count but WHICH ONE MOVED. Held in the repo, that question is answered
+// by a diff rather than by two terminal windows and a good memory.
+//
+// The sharpest entry in the file is part-OIL-5W30.ar at 2pp. That sheet has six
+// sections and a chart, and it printed a third page holding nothing but the
+// footer until lib/docs/part.ts tightened its own section rhythm. A kit spacing
+// change puts it back over, and this is what says so.
 //
 // A MOVED COUNT IS NOT AUTOMATICALLY A BUG. Adding a row to a fixture legimately
 // pushes a sheet to a second page. The check's claim is narrower and is the one
