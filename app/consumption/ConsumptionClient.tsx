@@ -24,7 +24,7 @@ import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
 import { t, arText, type Lang, type TKey } from "@/lib/i18n";
 import {
-  outstandingQty, permitOutstanding, permitValueSar, isOverdue, daysOverdue,
+  permitLineOutstanding, permitOutstanding, permitValueSar, isOverdue, daysOverdue,
   lineUnitCost, EXIT_PERMIT_STATUS_PILL, EXIT_PERMIT_KIND_TKEY,
   EXIT_PERMIT_DESTINATION_TKEY, type LotLite, type ConsumptionLedgerRow,
 } from "@/lib/exit-permits";
@@ -233,7 +233,7 @@ export default function ConsumptionClient({
   const kpis = useMemo(() => {
     const exited = permits.filter((p) => p.status === "exited");
     const outstandingValue = exited.reduce(
-      (n, p) => n + permitValueSar(linesByPermit.get(p.id) ?? []), 0,
+      (n, p) => n + permitValueSar(p, linesByPermit.get(p.id) ?? []), 0,
     );
     return {
       drafts: permits.filter((p) => p.status === "draft").length,
@@ -484,8 +484,15 @@ export default function ConsumptionClient({
                               </div>
                             )}
                           </TD>
+                          {/* DRAFT stays a dash: nothing has been drawn, so
+                              there is no value yet to state. VOIDED prints an
+                              actual 0 rather than a dash, because zero is a
+                              MEASURED fact there — the void returned the stock
+                              — and the KPI above already counts it as zero. A
+                              dash would read as "not applicable" and leave the
+                              row and the KPI looking like they disagree. */}
                           <TD className="text-xs tabular-nums">
-                            {p.status === "draft" ? <span className="muted">—</span> : formatSar(permitValueSar(pl))}
+                            {p.status === "draft" ? <span className="muted">—</span> : formatSar(permitValueSar(p, pl))}
                           </TD>
                           <TD>
                             <div className="flex items-center gap-1 flex-wrap">
@@ -584,7 +591,38 @@ export default function ConsumptionClient({
                                   <tbody>
                                     {pl.map((l) => {
                                       const part = partsById.get(l.part_id);
-                                      const out = outstandingQty(l);
+                                      // THIS ROW PUTS Qty out, Returned AND
+                                      // Outstanding SIDE BY SIDE, so the three
+                                      // have to add up or the row argues with
+                                      // itself. They are therefore derived
+                                      // together, from `out`, rather than read
+                                      // from three independent expressions.
+                                      //
+                                      // A DRAFT IS A PREVIEW on this table and
+                                      // always has been — the Value cell below
+                                      // prices it off `qty` for exactly that
+                                      // reason — so it previews the exit with
+                                      // everything still out. Nothing has left,
+                                      // so nothing has come back either, and
+                                      // Returned lands on 0 by construction.
+                                      const out = p.status === "draft"
+                                        ? Number(l.qty)
+                                        : permitLineOutstanding(p, l);
+                                      // WHAT CAME BACK, BY ANY ROUTE — not the
+                                      // `qty_returned` counter. The two are
+                                      // equal on every exited permit (measured:
+                                      // qty_returned reconciles exactly to the
+                                      // sum of its return-event lines on every
+                                      // line in the database). They part company
+                                      // on a VOIDED permit, where the void put
+                                      // the stock back without filing a return
+                                      // event, leaving the counter at 0 while
+                                      // the shelf says otherwise. Printing the
+                                      // counter there gave "2 out, 0 returned,
+                                      // 0 outstanding". Which return events fired
+                                      // is still on the page — the Returns list
+                                      // directly below breaks them down.
+                                      const back = Number(l.qty) - out;
                                       return (
                                         <tr key={l.id}>
                                           <TD>
@@ -601,7 +639,7 @@ export default function ConsumptionClient({
                                               : <span className="text-[11px] muted">—</span>}
                                           </TD>
                                           <TD className="text-xs tabular-nums">{l.qty}</TD>
-                                          <TD className="text-xs tabular-nums">{l.qty_returned || <span className="muted">—</span>}</TD>
+                                          <TD className="text-xs tabular-nums">{back || <span className="muted">—</span>}</TD>
                                           <TD className="text-xs tabular-nums font-medium">{out}</TD>
                                           <TD className="text-xs tabular-nums">
                                             {(() => {
@@ -620,8 +658,12 @@ export default function ConsumptionClient({
                                           <TD className="text-xs tabular-nums">
                                             {(() => {
                                               const u = lineUnitCost(p.status, l, lots);
-                                              const basis = p.status === "draft" ? Number(l.qty) : out;
-                                              return u === null ? <span className="muted">—</span> : formatSar(basis * u);
+                                              // PRICES THE OUTSTANDING COLUMN, literally —
+                                              // `out` already carries the draft preview
+                                              // (whole qty) and the voided zero, so the
+                                              // money cell cannot disagree with the count
+                                              // two columns to its left.
+                                              return u === null ? <span className="muted">—</span> : formatSar(out * u);
                                             })()}
                                           </TD>
                                         </tr>

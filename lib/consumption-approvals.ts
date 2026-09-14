@@ -217,7 +217,7 @@ export function buildApprovalEvents(input: {
         };
       }),
       payments: [],
-      valueSar: permitValueSar(lines),
+      valueSar: permitValueSar(p, lines),
       ...fold(byPermit.get(p.id) ?? [], input.viewer),
     });
   }

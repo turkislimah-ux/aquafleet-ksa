@@ -18,7 +18,7 @@ import {
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import {
-  outstandingQty, permitValueSar, fifoPreviewUnitCost, lineUnitCost,
+  outstandingQty, permitLineOutstanding, permitValueSar, fifoPreviewUnitCost, lineUnitCost,
   returnedUnitPricePreview, EXIT_PERMIT_KIND_TKEY, EXIT_PERMIT_DESTINATION_TKEY,
   type LotLite, type ConsumptionLedgerRow,
 } from "@/lib/exit-permits";
@@ -1200,7 +1200,10 @@ export function PermitPrintView({
 }) {
   const { lang } = useApp();
   const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
-  const value = permitValueSar(lines);
+  // Takes the permit, so a VOIDED gate pass reprints an internal value of zero
+  // instead of the cost of stock that came back the moment it was voided. The
+  // sheet already stamps VOIDED; the figures now agree with the stamp.
+  const value = permitValueSar(permit, lines);
 
   // THE UNIT LIVES IN THE QTY HEADER when every item shares one — "Qty (pcs)"
   // reads as a quantity, where a whole Unit column repeated the same word down
@@ -1242,7 +1245,11 @@ export function PermitPrintView({
               partName: p ? arText(p.name, p.name_ar, lang) : t("consumption.modals.unknownPart", lang),
               sku: p?.sku ?? "—",
               qtyOut: Number(l.qty),
-              outstanding: outstandingQty(l),
+              // `qtyOut` is history and stays as it is — that quantity did
+              // leave. `outstanding` is a claim about NOW, so it is gated: a
+              // voided permit has nothing out. docvm's totalValue sums this
+              // times the unit price, so the document total follows.
+              outstanding: permitLineOutstanding(permit, l),
               unit: p?.unit ?? null,
               unitPriceSar: Number(l.unit_price_sar),
             };
@@ -1331,8 +1338,16 @@ export function PermitPrintView({
           <tbody>
             {lines.map((l, i) => {
               const p = partsById.get(l.part_id);
-              const out = outstandingQty(l);
-              const returned = Number(l.qty_returned) > 0;
+              const out = permitLineOutstanding(permit, l);
+              // THE ARROW NOW KEYS OFF THE GAP IT DESCRIBES, not off
+              // `qty_returned > 0`. Those two agreed until a voided permit
+              // appeared: `qty_returned` counts return EVENTS and a void files
+              // none, so on voided EP-26-0001 one line had come back through a
+              // return (1 -> 0, arrow) and the other came back through the void
+              // itself (2, no arrow) — two lines of one cancelled permit
+              // reading differently. `out < qty` is the condition the arrow was
+              // always trying to express, and it covers both.
+              const returned = out < Number(l.qty);
               return (
                 <tr key={l.id}>
                   <TD className="text-xs tabular-nums">{i + 1}</TD>

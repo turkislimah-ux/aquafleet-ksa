@@ -48,10 +48,49 @@ export const EXIT_PERMIT_DESTINATION_INLINE_TKEY: Record<ExitPermitDestinationKi
   other: "consumption.enums.destInlineOther",
 };
 
+// OUTSTANDING ONLY EXISTS ON AN 'exited' PERMIT, AND THAT RULE BELONGS HERE.
+//
+// `qty - qty_returned` is arithmetic, not a fact about the world. It only means
+// "still out" while the permit is exited:
+//
+//   draft   — nothing has left the building, so nothing can be outstanding.
+//   voided  — the permit was CANCELLED and void_exit_permit already returned
+//             every outstanding line to stock. Nothing is out.
+//
+// The voided case is the one that bit us, and it is not a data defect. 0093
+// states plainly that `qty_returned` is NOT bumped on a void: it counts what
+// physically came back through a RETURN EVENT, and a void is a cancellation,
+// not a return. Measured, that definition is exact — `qty_returned` equals
+// `sum(exit_permit_return_lines.qty)` on every line in the database.
+//
+// So on EP-26-0001 (voided) the Sand Filter line reads qty 2 / qty_returned 0
+// while its consumption ledger nets to zero and stock_movements shows the 2
+// going back at the exact moment of the void. Every reader that subtracted the
+// two columns without asking the permit's status reported 40,000 SAR of stock
+// standing in a yard that had been empty for a month.
+//
+// Six readers already gated on 'exited' and were right; five did not and were
+// wrong. Rather than add a sixth copy of the check, the gate now lives in these
+// two functions, and `permitValueSar` TAKES THE PERMIT so it cannot be called
+// without one. That is why its signature changed.
+
+/** RAW ARITHMETIC, no status gate. Correct ONLY where the permit is already
+ *  known to be exited — the return and void modals, whose RPCs refuse any other
+ *  status. Everywhere else reach for `permitLineOutstanding`. */
 export function outstandingQty(line: Pick<ExitPermitLine, "qty" | "qty_returned">): number {
   return Number(line.qty) - Number(line.qty_returned);
 }
 
+/** What is still out on ONE line — zero unless the permit is exited. */
+export function permitLineOutstanding(
+  permit: Pick<ExitPermit, "status">,
+  line: Pick<ExitPermitLine, "qty" | "qty_returned">,
+): number {
+  return permit.status === "exited" ? outstandingQty(line) : 0;
+}
+
+/** RAW ARITHMETIC over a whole permit, same caveat as `outstandingQty`. Its one
+ *  caller pairs it with its own `status === "exited"` check. */
 export function permitOutstanding(lines: Pick<ExitPermitLine, "qty" | "qty_returned">[]): number {
   return lines.reduce((n, l) => n + outstandingQty(l), 0);
 }
@@ -87,10 +126,17 @@ export function daysOverdue(expectedReturnOn: string, today: string): number {
 
 // Permit-level roll-up for the list row: what a permit is "worth" is the FIFO
 // cost of what actually left and has NOT come back. A returned item is back
-// in stock and should not still be counted as consumed.
+// in stock and should not still be counted as consumed — and so is everything
+// on a voided permit, which is why this takes the permit rather than just its
+// lines. See the note above `permitLineOutstanding`.
+//
+// The early return is not merely an optimisation: on a voided permit the line
+// arithmetic is non-zero and would produce a real, wrong number.
 export function permitValueSar(
+  permit: Pick<ExitPermit, "status">,
   lines: Pick<ExitPermitLine, "qty" | "qty_returned" | "unit_price_sar">[],
 ): number {
+  if (permit.status !== "exited") return 0;
   return lines.reduce((n, l) => n + outstandingQty(l) * Number(l.unit_price_sar), 0);
 }
 

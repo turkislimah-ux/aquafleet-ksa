@@ -213,7 +213,7 @@ export function buildLedger(input: {
       title: p.note?.trim() || "Parts leaving the warehouse",
       outcome: f.status === "approved" ? "approved" : "rejected",
       completedAt: f.completedAt,
-      valueSar: permitValueSar(linesByPermit.get(p.id) ?? []),
+      valueSar: permitValueSar(p, linesByPermit.get(p.id) ?? []),
       votes: consumptionVotes(f.approvals),
       reason: f.rejection?.reason ?? null,
     }, "consumption", null));
