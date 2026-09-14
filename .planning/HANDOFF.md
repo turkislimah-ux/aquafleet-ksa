@@ -21,7 +21,8 @@
   `@page { size: A4; margin: 14mm }` is all that is left, for a raw Ctrl+P.
 - Verify sheets on an A4 PDF (Playwright `page.pdf({format:'A4'})`, run from
   repo root), never a browser viewport — the sheet's measure is ~658px.
-  `scripts/doc-*.mjs` are the standing render/bidi/crop helpers, still UNTRACKED.
+  `npm run test:bidi` renders the statement corpus and checks it; add
+  `scripts/doc-a4-proof.mjs <dir>` for page counts. Both committed `16f4013`.
 - Open, source-side, not print: Cost report Parts figure off ~240 SAR (two
   queries disagree); `app/reports/StatementViews.tsx` ~:1080 prints "Payouts N"
   under the AMOUNT column head.
