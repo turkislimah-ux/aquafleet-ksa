@@ -1056,9 +1056,15 @@ export function CostStatement({
         <div>
           <Table>
             <thead>
+              {/* VALUE, not AMOUNT. This column holds a COUNT on the first row
+                  and money on the foot, so an "Amount" head is a lie about the
+                  first one. Purchasing below has the same mixed shape and has
+                  always headed it Measure/Value; the CSV at :731 already tags
+                  these two rows CNT and SAR for the same reason. The earned
+                  panel beside this one is money throughout and keeps Amount. */}
               <tr>
                 <TH>{t("reports.costs.paidCash", lang)}</TH>
-                <TH className="text-end">{t("reports.th.amount", lang)}</TH>
+                <TH className="text-end">{t("reports.th.value", lang)}</TH>
               </tr>
             </thead>
             <tbody>

@@ -198,16 +198,19 @@ export function buildCostHtml(vm: CostDocVm): string {
             label: vm.commissions.earnedLabel,
             body: lines(
               "",
-              vm.commissions.amount,
+              vm.commissions.earnedAmount,
               vm.commissions.earnedRows,
               vm.commissions.earnedFoot,
             ),
           },
           {
+            // Value, not Amount: the panel's first row is a payout count. The
+            // two panels sit side by side with different numeric heads on
+            // purpose — one is money throughout, the other is not.
             label: vm.commissions.paidLabel,
             body: lines(
               "",
-              vm.commissions.amount,
+              vm.commissions.paidValue,
               vm.commissions.paidRows,
               vm.commissions.paidFoot,
             ),

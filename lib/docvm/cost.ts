@@ -251,7 +251,13 @@ export type CostDocVm = {
      *  heading. The renderer prints it once, as the pair label. */
     earnedLabel: string;
     paidLabel: string;
-    amount: string;
+    /** The numeric column head of each panel, and they DIFFER. Earned is money
+     *  on every row, so it is an Amount. Paid carries a payout COUNT above a
+     *  money foot, so it is a Value — the same call purchasing makes, for the
+     *  same mixed-unit reason. One shared `amount` used to serve both and put a
+     *  count under a head that said Amount. */
+    earnedAmount: string;
+    paidValue: string;
     earnedRows: readonly CostDocLine[];
     earnedFoot: CostDocLine;
     paidRows: readonly CostDocLine[];
@@ -547,7 +553,8 @@ export function buildCostVm(input: CostDocInput): CostDocVm {
       head: t("reports.costs.commissionsHead", lang),
       earnedLabel: t("reports.costs.earnedAccrual", lang),
       paidLabel: t("reports.costs.paidCash", lang),
-      amount: amountLabel,
+      earnedAmount: amountLabel,
+      paidValue: t("reports.th.value", lang),
       earnedRows: [
         { label: t("reports.costs.tripCommission", lang), value: money(input.commissions.trip) },
         { label: t("reports.costs.specials", lang), value: money(input.commissions.specials) },
