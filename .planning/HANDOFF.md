@@ -1,10 +1,10 @@
 # SESSION HANDOFF
 
 ## State
-- DB at 0197. `ls supabase/migrations/ | tail -5`. `git log --oneline -10`.
-- **0198 DRAFTED, NOT APPLIED** — architect reviews and applies.
-- **UNCOMMITTED:** Payouts-N column-head fix (StatementViews + docvm/docs
-  cost), waiting on Turki's browser check.
+- DB at 0198. `ls supabase/migrations/ | tail -5`. `git log --oneline -10`.
+- **0198 APPLIED (2a0b9ca)** — notification_thresholds read-only to
+  authenticated, verified.
+- Payouts-N column-head fix committed (bcd33c9). Tree clean, nothing in flight.
 
 ## Rules
 - CLAUDE.md = rules. Read it, NEVER append.
