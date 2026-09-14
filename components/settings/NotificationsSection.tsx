@@ -187,8 +187,16 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
     if (res.error) setLoadError(res.error);
     await load();
     setTogglingKey(null);
-    // The bell lives in AppShell and holds its own copy of the alert list;
-    // refresh so a severity switched off disappears from it without a reload.
+    // The bell lives in AppShell, which is a CLIENT component holding its own
+    // copy of the alert list in state. `router.refresh()` re-runs server
+    // components; it does not remount NotificationsMenu or reset that state,
+    // so the badge does NOT update here — an earlier comment claimed it did.
+    // The stale badge corrects itself the next time the panel is opened, which
+    // refetches (AppShell.tsx, the `open` effect). Left as-is deliberately:
+    // the window is short, the failure is a slightly stale count rather than a
+    // wrong one, and lifting the bell's fetch to fix it is a bigger change than
+    // the symptom earns. The refresh call still does useful work for the server
+    // components on the page behind the modal.
     router.refresh();
   }
 

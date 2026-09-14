@@ -155,4 +155,3 @@ Loading every skill at once wastes context and has crashed sessions.
 Domain rules → `.claude/skills/aquafleet-domain/SKILL.md`
 
 DB at latest migration. All pages built+verified. Arabic phase closed.
-Notifications + Settings feature in progress.
