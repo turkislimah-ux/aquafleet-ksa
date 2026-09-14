@@ -91,6 +91,11 @@ Loading every skill at once wastes context and has crashed sessions.
 
 - **One logical unit per commit.** Each commit tsc-clean. `noUnusedLocals` +
   `noUnusedParameters` enforced. Required params get `_` prefix, never deleted.
+- **`npm test` before committing** — typecheck + money + copy + sheets, ~30s.
+  `npm run test:db` is SEPARATE and not in it: it reads the live database, so it
+  is the one suite that can fail for a reason that is not the diff. Run it when
+  the change touches schema, an RPC or a server action. Never `npx tsc` — it
+  resolves a joke package that exits 0. `npm run typecheck` is the real one.
 - **Explicit-path `git add`** — list each file. **NEVER `git add .`**
 - **HANDOFF:** `.planning/HANDOFF.md` — committed, read at session start, write
   at session end. Must stay under 2KB.
