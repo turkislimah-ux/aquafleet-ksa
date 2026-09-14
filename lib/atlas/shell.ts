@@ -591,6 +591,31 @@ export const ATLAS_CSS = `
   .name { font-weight: 500; }
   .quiet { color: var(--quiet); font-style: italic; }
   .wrap { white-space: normal; }
+  /* A cell whose WORDING is a mid-sentence noun the screen sets in a column of
+     its own. The leaf really is lowercase ("special") because it is written to
+     read inside a sentence too, and the screen lifts it with CSS rather than
+     storing a second cased copy. The sheet mirrors the screen, so it lifts it
+     the same way — casing here is LOOK, and moving it into the view-model
+     would be a second spelling of one word. Inert in Arabic, which has no
+     case; that is the whole reason the device is case and not letter-spacing. */
+  .cap { text-transform: capitalize; }
+  /* A line that was REFUSED. The rule is the whole device: the screen also
+     drops the row to 60% opacity, and a grey row is a grey row on a
+     photocopier — indistinguishable from ink that ran. The severity word in the
+     gutter carries what the opacity was saying; this carries what the
+     line-through was. A sub-line under the value keeps full ink and no rule,
+     because the REASON is not itself struck out. */
+  .strike { text-decoration: line-through; }
+  /* text-decoration: none CANNOT cancel an ancestor's line. Decorations
+     PROPAGATE to in-flow descendants and are drawn by the ancestor across
+     them, so a "none" on the child is inert — measured on an A4 proof, where
+     the deny reason came out struck through with this exact rule in place.
+     Only a box the line does not propagate INTO escapes it, and an atomic
+     inline is one; width:100% then makes that inline-block occupy the whole
+     measure, so it still starts its own line as display:block did. */
+  .strike .sub-line {
+    display: inline-block; width: 100%; text-decoration: none;
+  }
   tfoot td {
     border-top: var(--rule-mid) solid var(--ink); border-bottom: var(--rule-heavy) solid var(--ink);
     font-weight: 500; padding-top: 8px; padding-bottom: 8px;

@@ -236,6 +236,22 @@ export type MetaPair = {
   num?: boolean;
   /** Trailing prose after the value, e.g. "per delivered trip". */
   tail?: string;
+  /**
+   * The LEAD fact of a meta stack, set in weight.
+   *
+   * For the stack whose lines are BARE VALUES with no label word — where two
+   * neighbours can be the same string standing for different facts, and the
+   * reader has only rank to tell them apart. The payout voucher is exactly
+   * that: the month a run SETTLED sits above the run's own frozen caption, and
+   * on most rows both read "Sep 2026". Unranked they print as one line typed
+   * twice.
+   *
+   * WEIGHT rather than case or tracking, because this marks a VALUE: caps and
+   * tracking are the label register here, and a value wearing it reads as a
+   * heading for the line beneath. Weight is also one of the three devices that
+   * survive Arabic, which has no case (see the RTL note further down).
+   */
+  strong?: boolean;
 };
 
 /** Issuing-company identity, for documents that instruct a third party. */
@@ -290,7 +306,11 @@ function metaPair(p: MetaPair): string {
   // that gets it wrong produces a defect nobody sees until the sheet is an
   // image. Caught exactly that way, diffing the kit against the approved JPGs.
   const tail = p.tail ? (/^[,.;:!?)\]]/.test(p.tail) ? "" : " ") + esc(p.tail) : "";
-  return `${esc(p.label)} ${v}${tail}`;
+  const body = `${esc(p.label)} ${v}${tail}`;
+  // Around the WHOLE pair, not just the value: a labelled lead line ranks as
+  // one line. The letterhead already sets its name this way, so <b> is the
+  // block's established weight device rather than a new one.
+  return p.strong ? `<b>${body}</b>` : body;
 }
 
 /**

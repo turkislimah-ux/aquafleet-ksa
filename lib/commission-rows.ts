@@ -368,6 +368,11 @@ export type CommCycle = {
 export type CommPayout = {
   id: string;
   driver_id: string;
+  // The voucher's document number, DP-YYYY-NNNN. NOT NULL and unique in the
+  // database (0196 backfilled every pre-existing row before adding the
+  // constraint), so it is required here rather than nullable — a payout with
+  // no number cannot exist.
+  payout_number: string;
   paid_at: string;
   approved_by: string | null;
   period_label: string;

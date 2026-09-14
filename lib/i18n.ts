@@ -174,7 +174,15 @@ export const dict = {
     // would misdescribe itself the first time the Dashboard called it.
     na: { en: "N/A", ar: "غير متاح" },
     capacity: { en: "Capacity", ar: "السعة" },
-    days: { en: "days", ar: "يوم" },
+    // Counted noun, so it cannot be one bare word: Arabic inflects across four
+    // buckets and English still needs the singular. Both consumers pass a
+    // number, so there is no caller that wants the uncounted word.
+    days: {
+      one: { en: "{n} day", ar: "يوم واحد" },
+      two: { en: "{n} days", ar: "يومان" },
+      few: { en: "{n} days", ar: "{n} أيام" },
+      many: { en: "{n} days", ar: "{n} يومًا" },
+    },
     component: { en: "Component", ar: "المكون" },
     cost: { en: "Cost", ar: "التكلفة" },
     revenue: { en: "Revenue", ar: "الإيرادات" },
@@ -6964,6 +6972,57 @@ export const dict = {
       thItem: { en: "Item", ar: "البند" },
       noItems: { en: "No items.", ar: "لا توجد بنود." },
       deniedReason: { en: "Denied: {reason}", ar: "مرفوضة: {reason}" },
+
+      /**
+       * PRINTED PAYOUT VOUCHER — the wording the SHEET needs and the screen
+       * does not have. Six leaves, and the shortness of the list is the point:
+       * every other word on that sheet already exists above or in
+       * `drivers.comm`, and is reused rather than restated.
+       *
+       * Reused deliberately, NOT duplicated here:
+       *   payoutOf      — the modal's own heading, and therefore the document
+       *                   <title>. A second "Payout — {name}" leaf would be the
+       *                   same fact under two names, which is how a translation
+       *                   drifts.
+       *   statTotalPaid — the History tab's own caption for this exact figure,
+       *                   so the masthead figure borrows it rather than coining
+       *                   a synonym.
+       *   comm.denied   — the pill's word, which becomes the severity gutter
+       *                   word. Same word, different device.
+       *
+       * NO sarUnit KEY HERE, AND DO NOT ADD ONE BACK — the same rule
+       * `trips.breakdown.doc` and `inventory.po.doc` carry, for the same
+       * reason. Every figure on this sheet comes from a screen that writes it
+       * through formatSar (lib/utils.ts), whose unit is a hard-coded " SAR" in
+       * BOTH languages. An Arabic sheet saying "ريال" beside an Arabic screen
+       * saying "SAR" is a WORDING deviation. The unit is a literal in
+       * lib/docvm/payout-history.ts.
+       */
+      doc: {
+        eyebrow: { en: "Commission payout", ar: "دفعة عمولة" },
+        /**
+         * Labels the DP number on the masthead's trailing edge. NEW on paper —
+         * the screen has no document number because a modal is not a document
+         * — so it is the one identity word here that mirrors nothing.
+         */
+        payoutNo: { en: "Payout no.", ar: "رقم الدفعة" },
+        /**
+         * The signature role. Matches `consumption.modals.printRoleReceivedBy`
+         * word for word in both languages, and is declared separately anyway:
+         * that one is a role on a gate pass, this one is a role on a payout
+         * voucher, and a shared leaf would tie two unrelated vouchers'
+         * wording together. Same reasoning as `inventory.stock.receivedBy`
+         * above, in the opposite direction.
+         */
+        receivedBy: { en: "Received by", ar: "المُستلِم" },
+        signatureLine: { en: "{role} — name & signature", ar: "{role} — الاسم والتوقيع" },
+        /** The spelled-out unit under the masthead figure. English spells it
+         *  out too, so unlike the SAR chip this one IS translatable. */
+        figureUnit: { en: "Saudi Riyals", ar: "ريال سعودي" },
+        /** `{date}` is an app-formatted date. The company name beside it in the
+         *  footer is not a leaf. */
+        generated: { en: "Generated {date}", ar: "أُنشئ في {date}" },
+      },
     },
 
     // NO `role` BLOCK — A ROLE'S NAME IS NOT A TRANSLATABLE STRING.
@@ -10687,6 +10746,13 @@ export const dict = {
       movementHistoryIsnt: { en: "Movement history isn't available yet (pending setup).", ar: "سجل الحركات غير متاح بعد (بانتظار الإعداد)." },
       noMovementsYet: { en: "No movements yet.", ar: "لا توجد حركات بعد." },
       financialSummary: { en: "Financial summary", ar: "الملخص المالي" },
+      // Shown IN THE DRAWER, beside the Print button, when the document read
+      // fails — which is why it lives here and not in `doc` below: that group
+      // is leaves the drawer never renders, and this one only ever appears on
+      // screen. The sheet is refused rather than printed half-read, so the
+      // sentence has to say the sheet was not produced, not that data is
+      // missing.
+      printFailed: { en: "Could not prepare the item record for printing.", ar: "تعذّر تجهيز سجل الصنف للطباعة." },
       reorderInfo: { en: "Reorder info", ar: "معلومات إعادة الطلب" },
       suggestedQty: { en: "Suggested qty", ar: "الكمية المقترحة" },
       leadTime: { en: "Lead time", ar: "مدة التوريد" },
@@ -10749,6 +10815,54 @@ export const dict = {
         two: { en: "Parts, fluids, tires & equipment across {n} warehouses", ar: "قطع وسوائل وإطارات ومعدات في مستودعين" },
         few: { en: "Parts, fluids, tires & equipment across {n} warehouses", ar: "قطع وسوائل وإطارات ومعدات في {n} مستودعات" },
         many: { en: "Parts, fluids, tires & equipment across {n} warehouses", ar: "قطع وسوائل وإطارات ومعدات في {n} مستودعًا" },
+      },
+      /**
+       * THE PRINTED ITEM RECORD — leaves the Item drawer never renders.
+       *
+       * Every figure and every section head on that sheet already has a leaf
+       * above, because the sheet mirrors the drawer. These eight exist only
+       * because a SHEET has to do things a drawer does not: name itself, name
+       * its own generation, and label a chart the drawer has no room for.
+       *
+       * NO sarUnit KEY HERE, AND DO NOT ADD ONE. Same reason inventory.po.doc
+       * gives at length: the drawer writes money through formatSar /
+       * formatSarVat, both of which append a hard-coded " SAR" in BOTH
+       * languages, so an Arabic sheet reading "ريال" would restate a screen
+       * that says "SAR" — a WORDING deviation, which the printable law forbids
+       * as squarely as a wrong number.
+       */
+      doc: {
+        // The <title> of the printed document. Never seen on the sheet itself;
+        // it is what the print dialog and a saved PDF are named. `{sku}` is the
+        // part's SKU, which is the only name of it that cannot collide.
+        docTitle: { en: "Item {sku}", ar: "الصنف {sku}" },
+        eyebrow: { en: "Item record", ar: "سجل الصنف" },
+        // Gutter words beside the price-change figure. They replace the
+        // drawer's up/down ARROW GLYPH, which is a hue-and-icon device with no
+        // meaning in grayscale — the sheet keeps the signed figure and says the
+        // direction in a word instead.
+        priceRise: { en: "Rise", ar: "ارتفاع" },
+        priceDrop: { en: "Drop", ar: "انخفاض" },
+        // The financial summary's stock figure is qty_on_hand x unit_cost_sar,
+        // which is NOT the masthead's lots-derived (FIFO) figure. A filed sheet
+        // carries both, so each caption has to say which basis it is on.
+        stockAtCurrentPrice: {
+          en: "Stock at current price",
+          ar: "قيمة المخزون بالسعر الحالي",
+        },
+        // The two series of the movement chart, which has no on-screen
+        // counterpart at all: it is drawn from the very stock_movements rows
+        // the table beneath it lists, bucketed by month, so it adds no data the
+        // drawer does not already show — only a shape.
+        stockIn: { en: "Stock in", ar: "وارد" },
+        stockOut: { en: "Stock out", ar: "صادر" },
+        chartAria: {
+          en: "Stock received and consumed by month",
+          ar: "الوارد والمستهلك شهريًا",
+        },
+        // `{date}` is an app-formatted date. The company name beside it in the
+        // footer is not a leaf.
+        generated: { en: "Generated {date}", ar: "أُنشئ في {date}" },
       },
     },
     /** Copy rendered only by PurchaseOrders.tsx — PO list, detail, approvals and receiving. */
@@ -10866,7 +10980,12 @@ export const dict = {
       purchasedButNot: { en: "Purchased but not yet consumed — review storage and assignment.", ar: "تم الشراء ولم يُستهلك بعد — راجع التخزين والإسناد." },
       stockPricingLook: { en: "Stock and pricing look healthy. No action recommended.", ar: "المخزون والسعر في حالة جيدة. لا حاجة لإجراء." },
       purchases: { en: "Purchases", ar: "المشتريات" },
-      poLines: { en: "PO lines", ar: "بنود أوامر" },
+      poLines: {
+        one: { en: "{n} PO line", ar: "بند أمر شراء واحد" },
+        two: { en: "{n} PO lines", ar: "بندا أمر شراء" },
+        few: { en: "{n} PO lines", ar: "{n} بنود أمر شراء" },
+        many: { en: "{n} PO lines", ar: "{n} بند أمر شراء" },
+      },
       consumption: { en: "Consumption", ar: "الاستهلاك" },
       allTime: { en: "all time", ar: "الإجمالي" },
       inStock: { en: "in stock", ar: "في المخزون" },

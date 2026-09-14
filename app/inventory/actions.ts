@@ -17,6 +17,7 @@ import type {
   Part,
   PriceLot,
   PurchaseOrder,
+  PurchaseOrderLine,
   StockMovement,
   StockReceipt,
   Supplier,
@@ -380,6 +381,118 @@ export async function getPriceLots(
   if (error) return { error: error.message, lots: [] };
 
   return { error: null, lots: (data ?? []) as PriceLot[] };
+}
+
+// ---------------------------------------------------------------------------
+// getPartDocument — the ONE call behind the printed part sheet.
+//
+// ViewPartModal assembles its own view from four sources: two props threaded
+// down from the page (all purchase orders, all PO lines) and two client-side
+// fetches it fires on mount (getPartMovements, getPriceLots). A document
+// cannot be built that way. printHtml() runs from a click handler and has to
+// hand a COMPLETE view-model to the builder synchronously, so the alternative
+// is a document that renders whatever happened to have loaded — a sheet that
+// silently prints an empty batches table because the lots fetch had not landed
+// yet is the same class of bug as the payout voucher that clipped its totals.
+//
+// The queries below are the modal's own, restated server-side and narrowed to
+// one part, so screen and sheet cannot report different figures:
+//   * lots      — getPriceLots' exact ordering (received_on, then created_at
+//                 ascending). Last element is the current FIFO batch.
+//   * movements — getPartMovements' exact ordering AND its limit of 50. The
+//                 cap is a mirror, not a document decision: printing a 51st
+//                 row the screen never showed would be a deviation.
+//   * PO lines  — this part's lines only, and the POs that carry them.
+//                 computePartFinanceStats scans every PO and picks the FIRST
+//                 line matching this part; narrowing the input reaches the
+//                 same set because no (purchase_order, part) pair holds more
+//                 than one line. Measured 2026-09-14: zero such pairs.
+// ---------------------------------------------------------------------------
+
+export type PartDocumentData = {
+  part: Part;
+  warehouseName: string | null;
+  lots: PriceLot[];
+  movements: StockMovement[];
+  purchaseOrders: PurchaseOrder[];
+  purchaseOrderLines: PurchaseOrderLine[];
+};
+
+export async function getPartDocument(
+  partId: string,
+): Promise<{ error: string | null; data: PartDocumentData | null }> {
+  if (!partId) return { error: "Missing part.", data: null };
+
+  const supabase = createClient();
+
+  const [partRes, lotsRes, movementsRes, linesRes] = await Promise.all([
+    supabase
+      .from("parts")
+      .select(
+        "id, sku, name, name_ar, category, unit, unit_cost_sar, qty_on_hand, reorder_level, reorder_qty, lead_time_days, supplier, warehouse_id, active, created_at",
+      )
+      .eq("id", partId)
+      .maybeSingle(),
+    supabase
+      .from("price_lots")
+      .select("id, part_id, price_sar, qty_purchased, qty_remaining, received_on, note, created_at")
+      .eq("part_id", partId)
+      .order("received_on", { ascending: true })
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("stock_movements")
+      .select("id, part_id, movement_type, qty_delta, qty_after, note, created_by, created_at")
+      .eq("part_id", partId)
+      .order("created_at", { ascending: false })
+      .limit(50),
+    supabase
+      .from("purchase_order_lines")
+      .select(
+        "id, purchase_order_id, part_id, qty, unit_price_sar, received_qty, received_unit_price_sar, created_at, line_vat_sar, received_line_vat_sar",
+      )
+      .eq("part_id", partId),
+  ]);
+
+  const firstError =
+    partRes.error?.message ??
+    lotsRes.error?.message ??
+    movementsRes.error?.message ??
+    linesRes.error?.message ??
+    null;
+  if (firstError) return { error: firstError, data: null };
+  if (!partRes.data) return { error: "Part not found.", data: null };
+
+  const part = partRes.data as Part;
+  const lines = (linesRes.data ?? []) as PurchaseOrderLine[];
+  const poIds = [...new Set(lines.map((l) => l.purchase_order_id))];
+
+  const [warehouseRes, poRes] = await Promise.all([
+    supabase.from("warehouses").select("id, name").eq("id", part.warehouse_id).maybeSingle(),
+    poIds.length > 0
+      ? supabase
+          .from("purchase_orders")
+          .select(
+            "id, po_number, supplier_id, warehouse_id, status, request_date, expected_delivery, note, requested_by, issued_at, received_by, received_date, rejected_by, rejected_at, rejection_reason, ai_generated, ai_rationale, ai_rationale_ar, created_at, subtotal_sar, vat_sar, total_sar, received_subtotal_sar, received_vat_sar, received_total_sar",
+          )
+          .in("id", poIds)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (warehouseRes.error) return { error: warehouseRes.error.message, data: null };
+  if (poRes.error) return { error: poRes.error.message, data: null };
+
+  return {
+    error: null,
+    data: {
+      part,
+      warehouseName: warehouseRes.data?.name ?? null,
+      lots: (lotsRes.data ?? []) as PriceLot[],
+      movements: (movementsRes.data ?? []) as StockMovement[],
+      purchaseOrders: (poRes.data ?? []) as PurchaseOrder[],
+      purchaseOrderLines: lines,
+    },
+  };
 }
 
 // addPriceLot() — the standalone single-part "Add new price" quick-action

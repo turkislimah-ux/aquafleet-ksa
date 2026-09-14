@@ -210,6 +210,7 @@ import {
   Zap,
   BarChart3,
   Pencil,
+  Printer,
 } from "lucide-react";
 import { useApp } from "@/components/AppShell";
 import { PageHeader, Btn, Stat, Table, TH, TD, Card } from "@/components/ui";
@@ -249,7 +250,6 @@ import {
   FinancialAnalysisTab,
   PartFinanceModal,
   PartFinanceSummaryCard,
-  computePartFinanceStats,
   suggestAIPurchaseLines,
   type NewPOAISuggestion,
   type NewPOQuickReorder,
@@ -262,7 +262,6 @@ import {
   AdjustItemModal,
   SupplierContactCard,
   InvoiceFileTile,
-  categoryLabel,
   useNumField,
   parseNumField,
   PartPicker,
@@ -273,44 +272,30 @@ import {
 } from "./SharedCreateModals";
 import {
   adjustStock,
+  getPartDocument,
   getPartMovements,
   getPriceLots,
   receiveLooseParts,
   type ReceiveLine,
 } from "./actions";
 import { arText, fill, plural, t } from "@/lib/i18n";
+import { categoryLabel, lotStatusLabel, movementLabel } from "@/lib/inventory-labels";
+import { computePartFinanceStats } from "@/lib/part-finance";
+// THE PRINTED ITEM RECORD IS A DOCUMENT, not this drawer with the chrome
+// hidden — same split PurchaseOrders.tsx already prints through: the
+// view-model decides every word and figure, the renderer only the look, and
+// printHtml owns the transport (a hidden same-origin iframe).
+import { buildPartVm } from "@/lib/docvm/part";
+import { buildPartHtml } from "@/lib/docs/part";
+import { printHtml } from "@/lib/printHtml";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-// Every movement_type the DB CHECK permits, verified live:
-//   CHECK (movement_type = ANY (ARRAY['receive','adjust','receive_lot','consume','return']))
-// Keyed on StockMovement["movement_type"], so once that union matches the
-// CHECK the compiler REFUSES an incomplete map — which is what should have
-// caught the missing 'return' before it reached the page.
-const MOVEMENT_LABEL: Record<StockMovement["movement_type"], { en: string; ar: string }> = {
-  receive: { en: "Received", ar: "استلام" },
-  adjust: { en: "Adjusted", ar: "تعديل" },
-  receive_lot: { en: "Price lot", ar: "دفعة سعر" },
-  consume: { en: "Consumed", ar: "استهلاك" },
-  // Written by the maintenance reversal path (return_to_lots) and by
-  // exit-permit returns and voids (return_exit_permit_line, 0093).
-  return: { en: "Return", ar: "إرجاع" },
-};
-
-// Never let an unlabeled movement type white-screen the page.
-//
-// The crash this replaces: MOVEMENT_LABEL[type].en on a type with no entry
-// threw "Cannot read properties of undefined (reading 'en')" and took the
-// whole Inventory page down — over a LABEL, while the ledger data itself was
-// perfectly correct. The typed Record above is the real guard; this is the
-// backstop for the case where the database gains a type before the app is
-// rebuilt, which no amount of compile-time checking can prevent.
-function movementLabel(type: string, lang: "en" | "ar"): string {
-  const entry = (MOVEMENT_LABEL as Record<string, { en: string; ar: string } | undefined>)[type];
-  return entry?.[lang] ?? type;
-}
+// MOVEMENT_LABEL/movementLabel moved DOWN to lib/inventory-labels.ts, together
+// with the crash postmortem that shaped them, so the part-details print sheet
+// names a movement the same way this table does.
 
 // preview/'s invInventoryView's own hardcoded CATS list, verbatim (its exact
 // order, "all" excluded here since the "All" chip is rendered separately).
@@ -1392,6 +1377,9 @@ function ViewPartModal({
   const [loadingLots, setLoadingLots] = useState(true);
   const [lotsError, setLotsError] = useState<string | null>(null);
 
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     setLoadingMovements(true);
@@ -1465,6 +1453,39 @@ function ViewPartModal({
   // (both scoped to this part.id already), same computePartFinanceStats
   // PartFinanceModal uses, so the two never drift out of sync.
   const financeStats = computePartFinanceStats(part, lots, purchaseOrders, purchaseOrderLines, movements);
+
+  // PRINT — an awaited read, not a render of what this drawer happens to hold.
+  //
+  // The drawer's own state is assembled from four places: `purchaseOrders` and
+  // `purchaseOrderLines` arrive as props, `lots` and `movements` land whenever
+  // their fetches resolve. Building the sheet from those would print whatever
+  // had loaded at the instant of the click — an empty batches table on a part
+  // with six batches, looking complete. getPartDocument re-reads all four
+  // server-side in one call, so the sheet is either whole or refused.
+  //
+  // It is also the ONE place the two halves meet: buildPartVm decides every
+  // word and figure, buildPartHtml only the look. Nothing about the document is
+  // decided here.
+  async function handlePrint() {
+    setPrinting(true);
+    setPrintError(null);
+    const res = await getPartDocument(part.id);
+    setPrinting(false);
+    if (res.error || !res.data) {
+      setPrintError(res.error ?? t("inventory.stock.printFailed", lang));
+      return;
+    }
+    printHtml(
+      buildPartHtml(
+        buildPartVm({
+          lang,
+          // Stamped when the sheet is PRODUCED, which for a printout is now.
+          generatedAt: new Date(),
+          ...res.data,
+        }),
+      ),
+    );
+  }
 
   return (
     <ModalOverlay onClick={onClose}>
@@ -1649,11 +1670,10 @@ function ViewPartModal({
                   const subtotal = lot.qty_remaining * lot.price_sar;
                   const vat = lineVat(lot.qty_remaining, lot.price_sar);
                   const total = subtotal + vat;
-                  const badge = depleted
-                    ? { en: "Depleted", ar: "منتهية", cls: "muted" }
-                    : isCurrent
-                    ? { en: "Current batch", ar: "الدفعة الحالية", cls: "text-brand-600" }
-                    : { en: "Old batch", ar: "دفعة قديمة", cls: "muted" };
+                  // The three words moved DOWN to lib/inventory-labels.ts so
+                  // the print sheet says them too; the COLOUR stays here,
+                  // being screen-only.
+                  const badgeCls = depleted ? "muted" : isCurrent ? "text-brand-600" : "muted";
                   return (
                     <tr key={lot.id} className={depleted ? "opacity-60" : ""}>
                       <TD className="text-xs">{lot.received_on}</TD>
@@ -1675,8 +1695,8 @@ function ViewPartModal({
                       <TD className="tabular-nums muted text-xs">{formatSarVat(vat)}</TD>
                       <TD className="tabular-nums font-medium">{formatSarVat(total)}</TD>
                       <TD>
-                        <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border", badge.cls)} style={{ borderColor: "rgb(var(--border))" }}>
-                          {lang === "en" ? badge.en : badge.ar}
+                        <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border", badgeCls)} style={{ borderColor: "rgb(var(--border))" }}>
+                          {lotStatusLabel({ depleted, isCurrent }, lang)}
                         </span>
                       </TD>
                     </tr>
@@ -1796,7 +1816,11 @@ function ViewPartModal({
             <div>
               <div className="text-[11px] muted uppercase">{t("inventory.stock.leadTime", lang)}</div>
               <div className="font-medium tabular-nums">
-                {part.lead_time_days != null ? `${part.lead_time_days} ${t("common.days", lang)}` : "—"}
+                {part.lead_time_days != null
+                  ? fill(t(`common.days.${plural(part.lead_time_days)}`, lang), {
+                      n: part.lead_time_days,
+                    })
+                  : "—"}
               </div>
             </div>
             <div>
@@ -1806,9 +1830,24 @@ function ViewPartModal({
           </div>
         </Card>
 
+        {/* The refusal sits ABOVE the button row rather than replacing the
+            button: a print that failed is still a drawer the reader is using,
+            and a footer that swaps a control for a sentence loses the other
+            four. */}
+        {printError && (
+          <p className="mt-4 text-sm text-rose-600 dark:text-rose-400 text-end">{printError}</p>
+        )}
+
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <Btn variant="outline" onClick={onClose}>
             {t("common.close", lang)}
+          </Btn>
+          {/* BATCH 7 — the printed item record. First on the row after Close
+              because it is the one footer action that changes nothing: the
+              three beside it open write flows. */}
+          <Btn variant="outline" onClick={handlePrint} disabled={printing}>
+            <Printer className="h-4 w-4" />
+            {t("common.print", lang)}
           </Btn>
           {/* Item 7 (polish round) — "Adjust Item": edit descriptive info,
               distinct from "Adjust Stock" right after it (that one is the

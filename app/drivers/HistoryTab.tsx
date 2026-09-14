@@ -4,8 +4,8 @@
 // commission_payouts (each made by the strict Pay in the Breakdown). Opening a
 // record shows the FROZEN snapshot (jsonb captured at pay time) — base lines +
 // every item (denied lines struck/greyed with reason) + the totals the driver
-// was actually paid. Print renders only the record (scoped @media print in
-// globals.css isolates #history-print).
+// was actually paid. Print builds a DOCUMENT of its own — see PayoutDetail's
+// handlePrint, which is also where the mechanism it replaced is described.
 //
 // Nothing here mutates: a paid cycle is immutable. Filter by driver and/or by
 // the month the payout PAID FOR to browse.
@@ -19,7 +19,7 @@
 // from every specific-month filter. An unmonthed sweep is not evidence that the
 // month you picked was paid — so it is never counted as one.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye, X, Printer, History as HistoryIcon } from "lucide-react";
 import { Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
@@ -35,6 +35,9 @@ import {
   type SnapItem,
 } from "@/lib/commission-rows";
 import ScrollLock from "@/components/ScrollLock";
+import { printHtml } from "@/lib/printHtml";
+import { buildPayoutDocVm } from "@/lib/docvm/payout-history";
+import { buildPayoutHistoryHtml } from "@/lib/docs/payout-history";
 
 function fmtDate(iso: string, lang: Lang): string {
   // Frozen paid_at is an ISO timestamptz. Show date + short time.
@@ -280,6 +283,60 @@ function PayoutDetail({
   // Snapshot is frozen jsonb — render straight from it (computed-truth at pay time).
   const snap = payout.snapshot as PayoutSnapshot | null;
 
+  // PRINT — a document of its own, no longer this modal on paper.
+  //
+  // WHAT THIS REPLACES, AND WHY IT HAD TO GO. `window.print()` under a
+  // globals.css @media block that hid the whole page and un-hid `#history-print`
+  // — which was pinned at `position: absolute; inset: 0`. An absolutely
+  // positioned box does not paginate: a payout with more items than one sheet
+  // holds had the overflow CLIPPED, silently, with no mark on the paper. The
+  // five totals sit at the BOTTOM of that box, so they were the first thing to
+  // go. The sheet came out stating no total at all and looking complete.
+  //
+  // The document FLOWS, so nothing can be cut (lib/docs/payout-history.ts holds
+  // the pagination rules). DATA, GROUPING and WORDING are the view-model's and
+  // are read off this same frozen snapshot — only the LOOK is the renderer's.
+  function handlePrint() {
+    printHtml(
+      buildPayoutHistoryHtml(
+        buildPayoutDocVm({
+          lang,
+          generatedAt: new Date(),
+          payout,
+          // The screen's own resolution of the name, passed through rather than
+          // re-derived: the docvm is pure and holds no drivers list.
+          driverName,
+          payoutNo: payout.payout_number,
+        }),
+      ),
+    );
+  }
+
+  // Ctrl/Cmd+P is intercepted, on the precedent of every other document surface
+  // (see InvoiceDetailModal.handlePrint's note).
+  //
+  // The failure it guards against CHANGED with this commit and did not go away.
+  // While `#history-print` was on the whitelist, a raw browser print produced
+  // this modal, clipped. The whitelist was down to that one entry, so removing
+  // it removed the @media block itself — and a raw print now produces the
+  // APPLICATION WINDOW: sidebar, dimmed overlay, screen number formats. Better
+  // than a blank sheet, nowhere near a voucher. Routing the shortcut here makes
+  // the keyboard and the button emit the same document, which is what anyone
+  // pressing Ctrl+P in front of a payout record means. Capture phase so nothing
+  // swallows it first.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      handlePrint();
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, payout, driverName]);
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <ScrollLock />
@@ -287,12 +344,12 @@ function PayoutDetail({
         className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between mb-4 no-print">
+        <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-semibold">{fill(t("drivers.hist.payoutOf", lang), { name: driverName })}</h2>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={handlePrint}
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5"
               style={{ borderColor: "rgb(var(--border))" }}
             >
@@ -304,7 +361,12 @@ function PayoutDetail({
           </div>
         </div>
 
-        <div id="history-print" className="space-y-4">
+        {/* No print id and no `no-print` siblings any more. Both were halves of
+            one mechanism — a stylesheet naming this subtree and hiding
+            everything around it — and the document replaced the mechanism, not
+            just the id. The class is undefined as of this commit; a leftover
+            would read like live print isolation that isn't there. */}
+        <div className="space-y-4">
           <div className="flex items-baseline justify-between gap-3 flex-wrap">
             <div>
               <div className="text-lg font-semibold">{driverName}</div>
@@ -460,7 +522,7 @@ function PayoutDetail({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 mt-5 no-print">
+        <div className="flex justify-end gap-2 mt-5">
           <button
             type="button"
             onClick={onClose}

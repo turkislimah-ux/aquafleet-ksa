@@ -104,7 +104,7 @@ export default async function DriversPage() {
       // Frozen History records (newest first; client filters by driver).
       supabase
         .from("commission_payouts")
-        .select("id, driver_id, paid_at, approved_by, period_label, base_sar, specials_sar, adjustments_sar, bonus_sar, total_sar, snapshot")
+        .select("id, driver_id, payout_number, paid_at, approved_by, period_label, base_sar, specials_sar, adjustments_sar, bonus_sar, total_sar, snapshot")
         .order("paid_at", { ascending: false }),
       // Management & support staff — ACTIVE only (soft-deleted hidden), newest first.
       supabase.from("staff").select("*").is("terminated_at", null).order("created_at", { ascending: false }),

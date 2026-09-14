@@ -343,9 +343,9 @@ function cycle(
   // pre-0131 sweep carries none, and no month may be back-derived from
   // period_label (a payout-RUN caption, not the work period).
   const payouts: CommPayout[] = [
-    { id: "p_old", driver_id: "d1", paid_at: "2026-04-01T00:00:00Z", approved_by: "M", period_label: "Apr", base_sar: 100, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 100, snapshot: {} },
-    { id: "p_new", driver_id: "d1", paid_at: "2026-06-01T00:00:00Z", approved_by: "M", period_label: "Jun", base_sar: 200, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 200, snapshot: { monthKey: "2026-05" } },
-    { id: "p_other", driver_id: "d2", paid_at: "2026-05-01T00:00:00Z", approved_by: "M", period_label: "May", base_sar: 50, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 50, snapshot: { monthKey: "2026-05" } },
+    { id: "p_old", driver_id: "d1", payout_number: "DP-2026-0001", paid_at: "2026-04-01T00:00:00Z", approved_by: "M", period_label: "Apr", base_sar: 100, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 100, snapshot: {} },
+    { id: "p_new", driver_id: "d1", payout_number: "DP-2026-0003", paid_at: "2026-06-01T00:00:00Z", approved_by: "M", period_label: "Jun", base_sar: 200, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 200, snapshot: { monthKey: "2026-05" } },
+    { id: "p_other", driver_id: "d2", payout_number: "DP-2026-0002", paid_at: "2026-05-01T00:00:00Z", approved_by: "M", period_label: "May", base_sar: 50, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 50, snapshot: { monthKey: "2026-05" } },
   ];
   const all = buildHistoryRows(payouts);
   check("history newest first", [all[0].id, all[1].id, all[2].id], ["p_new", "p_other", "p_old"]);

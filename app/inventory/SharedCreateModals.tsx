@@ -52,6 +52,7 @@ import type { Warehouse, Part, Supplier, Unit } from "@/lib/db-types";
 // VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
 // NOT lib/vat.ts (see lib/inventory-vat.ts's own header).
 import { calculateInventoryVatDocument, formatSarVat } from "@/lib/inventory-vat";
+import { categoryLabel } from "@/lib/inventory-labels";
 import {
   createSupplier,
   createPart,
@@ -122,24 +123,10 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 // inconsistency is preview's own, not something introduced here).
 const CREATE_CATS = ["fluid", "filter", "brake", "tire", "electrical", "tank", "engine", "consumable", "equipment"];
 
-const CATEGORY_LABEL: Record<string, { en: string; ar: string }> = {
-  fluid: { en: "Fluid", ar: "سوائل" },
-  filter: { en: "Filter", ar: "فلتر" },
-  brake: { en: "Brake", ar: "فرامل" },
-  tire: { en: "Tire", ar: "إطارات" },
-  electrical: { en: "Electrical", ar: "كهرباء" },
-  tank: { en: "Tank", ar: "خزان" },
-  engine: { en: "Engine", ar: "محرك" },
-  consumable: { en: "Consumable", ar: "مستهلكات" },
-  equipment: { en: "Equipment", ar: "معدات" },
-};
-
-export function categoryLabel(cat: string | null, lang: "en" | "ar"): string {
-  if (!cat) return "—";
-  const found = CATEGORY_LABEL[cat];
-  if (!found) return cat;
-  return lang === "en" ? found.en : found.ar;
-}
+// CATEGORY_LABEL/categoryLabel moved DOWN to lib/inventory-labels.ts so the
+// part-details print sheet's view-model can say the same words — a docvm may
+// not import from app/. Imported at the top of this file; the screens that
+// took it from here now take it from there.
 
 // Item 3 (follow-up polish) — "Supplier contact" card, blank "—" until a
 // supplier is picked, then shows name/name_ar/contact/phone/email. Was

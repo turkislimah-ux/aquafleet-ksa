@@ -116,7 +116,7 @@ export default async function ArchivePage() {
     // payouts, newest first; READ-ONLY (a paid cycle is immutable).
     supabase
       .from("commission_payouts")
-      .select("id, driver_id, paid_at, approved_by, period_label, base_sar, specials_sar, adjustments_sar, bonus_sar, total_sar, snapshot")
+      .select("id, driver_id, payout_number, paid_at, approved_by, period_label, base_sar, specials_sar, adjustments_sar, bonus_sar, total_sar, snapshot")
       .order("paid_at", { ascending: false }),
     // Trucks — active AND terminated in one query, same reasoning as drivers/
     // staff: the matrix needs the active ones, the Soft-deleted sub-tab needs

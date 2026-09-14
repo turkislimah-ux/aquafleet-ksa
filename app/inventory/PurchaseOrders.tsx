@@ -103,9 +103,10 @@ import {
   NewSupplierModal,
   AddPartModal,
   InvoiceFileTile,
-  categoryLabel,
   PartPicker,
 } from "./SharedCreateModals";
+import { categoryLabel } from "@/lib/inventory-labels";
+import { computePartFinanceStats, partAiTip } from "@/lib/part-finance";
 import ScrollLock from "@/components/ScrollLock";
 import { arText, fill, plural, t } from "@/lib/i18n";
 // THE PRINTED PURCHASE ORDER IS A DOCUMENT, not this DOM with the chrome hidden.
@@ -3739,107 +3740,9 @@ export function FinancialAnalysisTab({
   );
 }
 
-// Per-part financial report — preview's INV.openPartFinance/D().partFinance
-// (pages-2.js ~1969-2050, data.js ~1898-1919), opened from the chart-icon
-// button next to "View" on the parts table (InventoryClient.tsx's
-// PartsTable). Purchases come from real purchase_order_lines (approved/
-// pending_approval POs only, actual received qty/price where available —
-// same received_qty ?? qty / received_unit_price_sar ?? unit_price_sar
-// convention PODetailModal already uses). Price trend compares the latest
-// price_lots entry against the average of every earlier one for this part.
-//
-// CONSUMPTION IS REAL, JUST CURRENTLY ALWAYS ZERO: preview's partFinance
-// also reports consumption (spentByConsumption/totalConsumed) from a
-// partUsage log — in preview that's static seed data, not something any
-// button in preview's own UI actually writes either. This app derives the
-// same numbers from stock_movements where movement_type = 'consume' (CHECK
-// constraint added by migration 0046) — a real column, just nothing writes
-// to it yet (no Maintenance/work-order consumption flow exists). So
-// totalConsumed reads 0 for every part today, honestly, not faked — it
-// starts reflecting real numbers the moment that flow ships. spentByConsumption
-// stays 0 specifically because stock_movements has no per-movement cost
-// column to derive it from (qty_delta/qty_after only) — whichever feature
-// eventually writes 'consume' rows will need to decide how cost gets
-// attributed (most likely via consume_from_lots, which does know per-lot
-// cost) at that time.
-//
-// Pure calc, shared between PartFinanceModal and ViewPartModal's own
-// "Financial summary" card (InventoryClient.tsx) so both stay in sync on
-// exactly one definition of each number, instead of two hand-copied
-// implementations drifting apart later. PartFinanceModal additionally
-// needs the per-PO purchase rows for its own history table — that stays
-// caller-side (different shape), this only returns the 6 aggregate
-// primitives PartFinanceSummaryCard renders.
-export function computePartFinanceStats(
-  part: Part,
-  priceLots: PriceLot[],
-  purchaseOrders: PurchaseOrder[],
-  purchaseOrderLines: PurchaseOrderLine[],
-  movements: StockMovement[]
-): {
-  totalPurchased: number;
-  // VAT (0056) — "Purchases" is the one stat in this card that's a real
-  // purchasing-money figure (a booked cost of parts bought), so it's the
-  // one place here VAT applies. stockValue/priceTrendPct/totalConsumed/
-  // spentByConsumption stay VAT-free (see this function's own callers'
-  // header comments + 0056's "must NOT appear" list) — untouched below.
-  // Sourced from each qualifying line's STORED line_vat_sar/
-  // received_line_vat_sar, never recomputed — a pre-0056 line honestly
-  // reads 0 here, not back-computed.
-  purchasesVat: number;
-  purchasesTotal: number; // totalPurchased + purchasesVat
-  purchaseCount: number;
-  stockValue: number;
-  priceTrendPct: number;
-  totalConsumed: number;
-  spentByConsumption: number;
-} {
-  const lots = priceLots
-    .filter((l) => l.part_id === part.id)
-    .sort((a, b) => (a.received_on !== b.received_on ? (a.received_on < b.received_on ? -1 : 1) : a.created_at < b.created_at ? -1 : 1));
-  const currentPrice = lots.length > 0 ? lots[lots.length - 1].price_sar : part.unit_cost_sar;
-  let priceTrendPct = 0;
-  if (lots.length >= 2 && currentPrice != null) {
-    const hist = lots.slice(0, -1);
-    const avgOld = hist.reduce((s, l) => s + l.price_sar, 0) / hist.length;
-    if (avgOld > 0) priceTrendPct = Math.round(((currentPrice - avgOld) / avgOld) * 1000) / 10;
-  }
-  const stockValue = part.unit_cost_sar != null ? part.unit_cost_sar * part.qty_on_hand : 0;
-
-  let totalPurchased = 0;
-  let purchasesVat = 0;
-  let purchaseCount = 0;
-  for (const po of purchaseOrders) {
-    if (po.status !== "approved" && po.status !== "pending_approval") continue;
-    const line = purchaseOrderLines.find((l) => l.purchase_order_id === po.id && l.part_id === part.id);
-    if (!line) continue;
-    const qty = line.received_qty ?? line.qty;
-    const unit = line.received_unit_price_sar ?? line.unit_price_sar;
-    totalPurchased += qty * unit;
-    purchasesVat += line.received_line_vat_sar ?? line.line_vat_sar;
-    purchaseCount += 1;
-  }
-  const purchasesTotal = totalPurchased + purchasesVat;
-
-  // See this file's own header comment above (CONSUMPTION IS REAL...) —
-  // always 0 today, not faked, just nothing writes movement_type='consume'
-  // rows yet.
-  const totalConsumed = movements
-    .filter((m) => m.part_id === part.id && m.movement_type === "consume")
-    .reduce((s, m) => s + Math.abs(m.qty_delta), 0);
-  const spentByConsumption = 0;
-
-  return {
-    totalPurchased,
-    purchasesVat,
-    purchasesTotal,
-    purchaseCount,
-    stockValue,
-    priceTrendPct,
-    totalConsumed,
-    spentByConsumption,
-  };
-}
+// computePartFinanceStats MOVED to lib/part-finance.ts — the part-details
+// print sheet states the same four figures, and a docvm may not import from
+// app/. Re-exported by nobody: both callers import it from there now.
 
 export function PartFinanceSummaryCard({
   lang,
@@ -3868,53 +3771,9 @@ export function PartFinanceSummaryCard({
     priceTrendPct > 0 ? "text-rose-600 dark:text-rose-400" : priceTrendPct < 0 ? "text-emerald-700 dark:text-emerald-400" : "muted";
   const trendArrow = priceTrendPct > 0 ? "↑" : priceTrendPct < 0 ? "↓" : "→";
 
-  // Same 4 branches + healthy fallback preview's own per-part AI tip uses
-  // (pages-2.js:1772-1792) — "purchased but not consumed" is back now that
-  // consumption is real data (see header comment above); it'll fire for
-  // most parts with purchase history until a real consumption flow exists,
-  // which is an accurate reflection of today's app state, not a bug.
-  const aiTip: { tone: "warn" | "info" | "ok"; text: string } = (() => {
-    if (part.reorder_level != null && part.qty_on_hand <= part.reorder_level * 0.5) {
-      return {
-        tone: "warn",
-        text:
-          fill(t("inventory.po.tipStockCritical", lang), {
-            qty: part.qty_on_hand,
-            unit: part.unit ?? "",
-            level: part.reorder_level,
-            reorderQty: part.reorder_qty ?? "?",
-          }),
-      };
-    }
-    if (priceTrendPct >= 10) {
-      return {
-        tone: "warn",
-        text:
-          fill(t("inventory.po.tipPriceUp", lang), { pct: priceTrendPct }),
-      };
-    }
-    if (totalConsumed === 0 && purchaseCount > 0) {
-      return {
-        tone: "warn",
-        text:
-          t("inventory.po.purchasedButNot", lang),
-      };
-    }
-    if (part.reorder_level != null && part.reorder_level > 0 && part.qty_on_hand > part.reorder_level * 3) {
-      return {
-        tone: "info",
-        text:
-          fill(t("inventory.po.tipOverstocked", lang), {
-            qty: part.qty_on_hand,
-            unit: part.unit ?? "",
-          }),
-      };
-    }
-    return {
-      tone: "ok",
-      text: t("inventory.po.stockPricingLook", lang),
-    };
-  })();
+  // The five branches moved to lib/part-finance.ts so the print sheet can
+  // say the same sentence; the TONE still only paints here.
+  const aiTip = partAiTip(part, { priceTrendPct, totalConsumed, purchaseCount }, lang);
   const tipStyle =
     aiTip.tone === "warn"
       ? { background: "rgba(245,158,11,.06)", borderColor: "rgba(245,158,11,.3)" }
@@ -3939,7 +3798,7 @@ export function PartFinanceSummaryCard({
             {formatSarVat(totalPurchased)} + {formatSarVat(purchasesVat)} VAT
           </div>
           <div className="text-[11px] muted">
-            {purchaseCount} {t("inventory.po.poLines", lang)}
+            {fill(t(`inventory.po.poLines.${plural(purchaseCount)}`, lang), { n: purchaseCount })}
           </div>
         </div>
         <div className="rounded-lg border p-3" style={INPUT_STYLE}>
