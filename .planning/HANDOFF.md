@@ -15,15 +15,15 @@
 - **Printable-reports ATLAS redesign: COMPLETE.** Every report renders from
   `lib/atlas/` (kit) + `lib/docvm/` (words+numbers) + `lib/docs/` (renderers),
   EN and AR as separate documents, printed via `printHtml()` into a hidden
-  iframe. Batch 7 (payout voucher + part record) shipped `fc3541c`; the old
-  print stylesheet was removed in `2767ef3` — no `@media print`, no `.no-print`,
-  no `printing-*` body classes, no `*-print` ids, no PrintBand, no portals.
-  `@page { size: A4; margin: 14mm }` is all that is left, for a raw Ctrl+P.
-- Verify sheets on an A4 PDF (Playwright `page.pdf({format:'A4'})`, run from
-  repo root), never a browser viewport — the sheet's measure is ~658px.
-  `npm run test:bidi` + `test:pages` render the statement corpus and check it.
-  Page counts diff against `scripts/doc-page-counts.json` — a sheet that moves
-  fails until you re-run `doc-a4-proof.mjs --update` and commit the baseline.
+  iframe. Old print stylesheet removed in `2767ef3`; `@page { size: A4 }` is all
+  that is left, for a raw Ctrl+P.
+- **Sheets are verified by a committed suite now, not by eye.** `npm test` =
+  typecheck + money + copy + sheets, ~30s, run before committing. `test:db` is
+  separate — it reads the live DB, so run it only for schema/RPC/action work.
+  `npm run doc:render` writes all 88 sheets (9 documents x EN/AR) to
+  /tmp/atlas-sheets. Page counts diff against `scripts/doc-page-counts.json`:
+  a sheet that moves FAILS until you re-run `doc-a4-proof.mjs --update` and
+  commit the new baseline. That is the proof a kit change is safe.
 - Open, source-side, not print: Cost report Parts figure off ~240 SAR (two
   queries disagree); `app/reports/StatementViews.tsx` ~:1080 prints "Payouts N"
   under the AMOUNT column head.
