@@ -443,7 +443,7 @@ export default function StatementModal({
               <span className="muted"> · {vm.modeLabel[lang]}</span>
             </p>
           </div>
-          <div className="no-print flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
             {/* Two different documents, so two buttons: Print hands THIS popup
                 to the browser, Download fetches the A4 file. They fail
                 separately and say so separately. */}
@@ -470,10 +470,10 @@ export default function StatementModal({
             the same two values, so the document adds a rendering of the period,
             not a second source of it. */}
         <p className="text-sm muted mb-4">{vm.subtitle[lang]}</p>
-        {pdfError && <p className="no-print text-sm text-rose-600 dark:text-rose-400 mb-4">{pdfError}</p>}
+        {pdfError && <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{pdfError}</p>}
 
         {/* Period picker — table rows only, footer figures stay global. */}
-        <div className="no-print flex items-end gap-2 flex-wrap mb-4">
+        <div className="flex items-end gap-2 flex-wrap mb-4">
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium muted">{t("trips.statement.from", lang)}</span>
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={INPUT} style={INPUT_STYLE} />
@@ -545,7 +545,7 @@ export default function StatementModal({
               {formatSar(vm.headline.value)}
             </span>
           </div>
-          <Btn variant="outline" onClick={onClose} className="no-print">
+          <Btn variant="outline" onClick={onClose}>
             {t("common.close", lang)}
           </Btn>
         </div>

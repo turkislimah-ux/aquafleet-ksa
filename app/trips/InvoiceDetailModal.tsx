@@ -820,7 +820,7 @@ export default function InvoiceDetailModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Toolbar — not printed. */}
-        <div className="no-print sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-app bg-[rgb(var(--card))] px-5 py-3">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-app bg-[rgb(var(--card))] px-5 py-3">
           <div className="flex items-center gap-3">
             <button type="button" onClick={onBack} className="text-sm muted hover:text-[rgb(var(--fg))]">
               {t("trips.invoice.backToInvoices", lang)}
@@ -886,7 +886,7 @@ export default function InvoiceDetailModal({
                     : t("trips.invoiceSheet.headlineDraft", lang)}
                 </h2>
                 {status === "draft" && !readOnly && editingPeriod ? (
-                  <form onSubmit={onSavePeriod} className="no-print flex items-end gap-2 flex-wrap mt-1">
+                  <form onSubmit={onSavePeriod} className="flex items-end gap-2 flex-wrap mt-1">
                     <label className="flex flex-col gap-1 text-xs">
                       <span className="font-medium">{t("trips.invoiceSheet.fPeriodStart", lang)}</span>
                       <input value={periodStartInput} onChange={(e) => setPeriodStartInput(e.target.value)} type="date" required className={INPUT} style={INPUT_STYLE} />
@@ -1217,9 +1217,12 @@ export default function InvoiceDetailModal({
             )}
 
             {/* Transfer Details — LAST content block on the sheet, below Grand
-                Total in both payment modes, and PRINTED (no `no-print`): a
+                Total in both payment modes. It used to be marked as one of the
+                few blocks the print stylesheet did NOT suppress, because a
                 printed invoice needs its payment instruction more than the
-                screen does.
+                screen does. That distinction is not this markup's to make any
+                more: nothing prints this popup, and the document decides for
+                itself what it carries.
 
                 One expression with the download. `buildBankBlock` is the same
                 function lib/invoicePdfTemplate.ts renders from — it owns the
@@ -1235,7 +1238,7 @@ export default function InvoiceDetailModal({
                 Highlight-on-click/clear-on-hover comes free from
                 TripRefLink -> useIncomingTripHighlight (Batch A). */}
             {status === "review" && blockers.length > 0 && (
-              <div className="no-print rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2 break-inside-avoid">
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
                 <p className="text-sm text-amber-800 dark:text-amber-300 flex gap-2">
                   <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                   {fill(t(`trips.invoiceSheet.blockers.${plural(blockers.length)}`, lang), { n: blockers.length })}
@@ -1257,21 +1260,21 @@ export default function InvoiceDetailModal({
                 {t("trips.invoiceSheet.via", lang)}{" "}
                 {raw.payment_method ? paymentMethodLabel(raw.payment_method, lang) : "—"}.
                 {raw.proof_of_payment_path && (
-                  <Btn variant="ghost" className="ms-2 no-print" onClick={onViewProof}>
+                  <Btn variant="ghost" className="ms-2" onClick={onViewProof}>
                     {t("trips.invoiceSheet.viewProof", lang)}
                   </Btn>
                 )}
               </div>
             )}
 
-            {actionError && <p className="text-sm text-rose-600 dark:text-rose-400 no-print">{actionError}</p>}
-            {pdfError && <p className="text-sm text-rose-600 dark:text-rose-400 no-print">{pdfError}</p>}
-            {printError && <p className="text-sm text-rose-600 dark:text-rose-400 no-print">{printError}</p>}
+            {actionError && <p className="text-sm text-rose-600 dark:text-rose-400">{actionError}</p>}
+            {pdfError && <p className="text-sm text-rose-600 dark:text-rose-400">{pdfError}</p>}
+            {printError && <p className="text-sm text-rose-600 dark:text-rose-400">{printError}</p>}
 
             {/* Actions — status-dependent, not printed, and absent entirely
                 on a read-only mount. */}
             {!readOnly && (
-            <div className="no-print border-t border-app pt-4 space-y-3">
+            <div className="border-t border-app pt-4 space-y-3">
               {status === "draft" && !deletingDraft && (
                 <div className="flex items-center gap-2">
                   <Btn variant="primary" onClick={() => runAction(() => setInvoiceReview(invoiceId))} className={busy ? "opacity-50 pointer-events-none" : ""}>
@@ -1561,7 +1564,7 @@ export default function InvoiceDetailModal({
 
     {emailPickerOpen && (
       <div
-        className="no-print fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40"
+        className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40"
         onClick={() => setEmailPickerOpen(false)}
       >
         <ScrollLock />
@@ -2011,7 +2014,7 @@ function SpecialChargesSection({
                         )}
                       </TD>
                       <TD>
-                        <div className="flex items-center gap-2.5 no-print">
+                        <div className="flex items-center gap-2.5">
                           {l.image_path ? (
                             <button
                               type="button"
@@ -2066,7 +2069,7 @@ function SpecialChargesSection({
           tinted-panel surface (item 7: "stays exactly as-is, separate"). */}
       {editable && (
         <section className="break-inside-avoid">
-          <form onSubmit={onAddCharge} className="no-print space-y-4 rounded-2xl bg-black/[0.025] dark:bg-white/[0.035] p-6">
+          <form onSubmit={onAddCharge} className="space-y-4 rounded-2xl bg-black/[0.025] dark:bg-white/[0.035] p-6">
             <p className="text-xs font-semibold uppercase tracking-wide muted">{t("trips.invoiceSheet.addChargeTitle", lang)}</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <label className="flex flex-col gap-1.5 text-sm col-span-2">
@@ -2271,7 +2274,7 @@ function HideAmountDueToggle({
       type="button"
       onClick={onToggle}
       disabled={busy}
-      className={"no-print inline-flex items-center gap-2 text-xs " + (busy ? "opacity-50 pointer-events-none" : "")}
+      className={"inline-flex items-center gap-2 text-xs " + (busy ? "opacity-50 pointer-events-none" : "")}
       title={t("trips.invoiceSheet.hideDueTitle", lang)}
     >
       <span

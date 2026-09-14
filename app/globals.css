@@ -390,158 +390,76 @@ html[dir="rtl"] { --dock-dir: -1; }
    app/reports/StatementViews.tsx stamped on top of a statement so the printed
    sheet would say what it was and for which month. Every statement that band
    served now builds its own document, and a document's masthead is part of the
-   document. The class went with the band; see the epitaph at the end of the
-   @media block. */
+   document. The class went with the band; see the epitaph below. */
 
-/* A4 with real margins. Without this the browser applies its own default
-   margin box and adds URL/date furniture, which looks wrong on a statement
-   that is meant to be signed and filed. */
+/* A4 with real margins, for the APPLICATION document only.
+   ---------------------------------------------------------------
+   No printable surface reaches this rule any more — every one of them prints
+   from an iframe that declares its own page box (`@page { size: A4; margin:
+   17mm 18mm 16mm }` in lib/atlas/shell.ts), and an iframe does not inherit its
+   parent's. What it still governs is a raw Ctrl/Cmd+P on an ordinary screen,
+   where the alternative is the browser's default margin box with URL and date
+   furniture printed into it. A sane page box for an unconsidered print is worth
+   one line; it is not a document, and it is not trying to be. */
 @page { size: A4; margin: 14mm; }
 
-/* Print isolation — show only the report subtree (#history-print, and as of
-   this commit NOTHING ELSE). Everything else is hidden so the printout is just
-   the record, edge-to-edge. */
-@media print {
-  body * { visibility: hidden !important; }
-  /* ONE ID LEFT IN THE WHITELIST, and the emptiness around it is the design.
-     Every statement and every modal that used to be named here now builds a
-     standalone document through lib/docvm/* + lib/docs/* and hands it to
-     printHtml(), which prints it out of a hidden same-origin iframe this
-     stylesheet cannot reach into. A stale id would be worse than useless: it
-     would un-hide a card the document already says better, and nothing in the
-     DOM would signal it. See both epitaphs below. */
-  #history-print, #history-print * { visibility: visible !important; }
-  .no-print { display: none !important; }
+/* ==================================================================
+   THE @media print BLOCK IS GONE, AND ITS ABSENCE IS THE POINT.
+   ==================================================================
+   Ten surfaces printed through it: hide the whole page with
+   `body * { visibility: hidden }`, un-hide one whitelisted subtree, print the
+   live React DOM. Every one of them now builds a standalone DOCUMENT
+   (lib/docvm/* for the data and wording, lib/docs/* for the look) and hands it
+   to printHtml(), which prints it out of a hidden same-origin iframe this
+   stylesheet cannot reach into. The last of the ten was the driver payout
+   record, `#history-print`, and the block went with it — a whitelist with
+   nothing on it hides the entire application and shows nothing back.
 
-  /* ===================================================================
-     THE SHELL HAS TO LEAVE THE FLOW, NOT MERELY TURN INVISIBLE.
-     ===================================================================
-     `visibility: hidden` hides the sidebar and topbar but KEEPS THEIR LAYOUT,
-     so a printable subtree stays indented by the sidebar's width and overflows
-     the right edge of the sheet. This was the actual cause of a clipped PAID
-     column on the old revenue statement.
+   WHAT LEFT WITH IT, so nobody rediscovers the absences as bugs:
 
-     Selectors are pinned to something UNIQUE TO THE SHELL — `header.h-14`
-     rather than `header`, because a printable subtree may render its own
-     <header>, and a blanket rule would delete its title.
+   - `.no-print`, and every hand-placed class that used it. A control was
+     suppressed one by one because print WAS the screen; a document renders no
+     controls to suppress.
+   - The shell hooks `aside[data-app-chrome="sidebar"]`, `header.h-14` and
+     `main`'s padding reset. `visibility: hidden` keeps layout, so a printable
+     subtree stayed indented by the sidebar's width and overflowed the right
+     edge — that was the real cause of a clipped PAID column on the old revenue
+     statement. An iframe has no shell to escape.
+   - Three sets of pagination rules (`#pnl-print`, `#daily-trips-print`,
+     `#payslips-print` / `#commission-review-print`): card resets, repeating
+     `thead`, `break-inside` on rows, `break-after` on headings. All the kit's
+     now (lib/atlas/shell.ts), and one deliberately DIFFERENT there: the kit
+     sets `tfoot { display: table-row-group }`, NOT table-footer-group, because
+     Chromium repeats a footer group on every page and a totals row printed
+     three times is three claims about the same money. A stylesheet that styles
+     someone else's markup can only guess at that; a renderer that owns the
+     markup does not have to.
+   - Two `position: absolute; inset: 0` pins, `#permit-print`'s and
+     `#history-print`'s. Both were WRONG, and silently: an absolutely
+     positioned box does not paginate, so anything past the first sheet was
+     CLIPPED with no mark on the paper. The payout's five totals sat at the
+     bottom of that box and went first — a voucher listing nine of eleven fines
+     and stating no total at all, looking complete.
+   - The body-class switches (`printing-invoice`, `printing-statement`,
+     `printing-breakdown`, `printing-po`, `printing-review`) and their portals.
+     A whitelist is GLOBAL and can name only one winner, which is why two
+     printables on one screen needed a body class to arbitrate; a builder
+     closure is LOCAL and each button simply names the document it means.
+   - The statement's settlement-row tint strippers and the breakdown's
+     print-color-adjust override. The documents are B&W by construction — there
+     is no screen colour to undo.
 
-     The sidebar hook is a data attribute, not `aside.w-64`. It was that class
-     until the sidebar became a hover-expanding rail — at which point `w-64`
-     stopped existing, this rule silently stopped matching, and printing lost
-     its only guard with nothing in git to signal it. An attribute cannot drift
-     with the design, which is the point of using one.
+   THE TRAP THIS FILE USED TO SET IS ALSO GONE, and the reason is worth keeping
+   because it governed the order of nine commits: while the block existed, a
+   subtree that left the whitelist WITHOUT its owner intercepting Ctrl/Cmd+P
+   printed a legally blank sheet — a failure that reads like the printer's
+   fault. Every one of those surfaces still intercepts the shortcut, and should:
+   a raw print now emits the application window rather than nothing, which is
+   better and still not a document.
 
-     THIS BLOCK OUTLIVES THE STATEMENTS IT WAS WRITTEN FOR, because
-     #history-print is still in the flow of the same shell. It is not dead with
-     them; it is the last thing standing between that one subtree and the
-     sidebar's indent. */
-  aside[data-app-chrome="sidebar"] { display: none !important; }
-  header.h-14 { display: none !important; }
-  main { padding: 0 !important; margin: 0 !important; }
+   DO NOT REOPEN THIS BLOCK to make one screen printable. That is the eleventh
+   exception to a pattern ten surfaces have left. Build a document. */
 
-  /* THREE BLOCKS OF PAGINATION RULES HAVE LEFT THIS FILE WITH THEIR DOCUMENTS,
-     and naming them is cheaper than rediscovering why they are absent.
-
-     `#pnl-print > .card` and `#pnl-print > .card + .card` stripped the chrome
-     off the P&L's two boxes and set a 10mm gap between them, because the wrapper
-     shared one print id so the statement and the VAT list would land on the same
-     sheet. The document has no wrapper and no cards: the VAT list is a SECTION
-     of it, which is a stronger attachment than a shared id ever was.
-
-     `#pnl-print section` and `#daily-trips-print section` each said
-     break-inside: avoid — the VAT box so it could not split away from the
-     heading that says it is NOT part of the profit above, each daily project
-     table so a heading could not be orphaned from its rows. Both claims are the
-     kit's now, per block, and made better: see `.stack > .sec-head` and `tfoot`
-     in lib/atlas/shell.ts, which hold a heading to its own sub-line and pull the
-     last body row over with the totals. A blanket section rule could only ever
-     avoid the break, never decide what travels with what.
-
-     `#payslips-print` / `#commission-review-print` carried the third and
-     largest: a full-width, border-less, 10pt reset of the card, plus
-     `table { border-collapse }`, `thead { display: table-header-group }`,
-     `tr { break-inside: avoid }` and `h3 { break-after: avoid }`. EVERY ONE OF
-     THOSE IS NOW THE KIT'S, and one of them is deliberately DIFFERENT there:
-     the kit sets `tfoot { display: table-row-group }`, NOT table-footer-group,
-     because Chromium repeats a footer group on every page and a totals row
-     printed three times is three claims about the same money. A stylesheet that
-     styles someone else's markup can only guess at that distinction; a renderer
-     that owns the markup does not have to. */
-
-  /* History payout — a single record. Absolute + inset:0 pins it edge-to-edge
-     for a clean one-page printout (it fits a page). */
-  #history-print {
-    position: absolute;
-    inset: 0;
-    margin: 0;
-    padding: 1rem;
-    max-height: none !important;
-    overflow: visible !important;
-  }
-
-  /* FIVE DOCUMENTS HAVE LEFT THIS STYLESHEET, AND THEIR ABSENCE IS THE FEATURE.
-     They used to live here: `#invoice-print` + `body.printing-invoice`, then
-     `#statement-print` + `body.printing-statement` + `.statement-print-portal`,
-     then `#breakdown-print` + `body.printing-breakdown` +
-     `.breakdown-print-portal` (which also carried a `table tr` break-inside
-     rule and a print-color-adjust override for its emerald figures), and now
-     BOTH remaining ones at once: `#po-print` + `body.printing-po` +
-     `.po-print-portal` + its own `table tr` rule, and `#permit-print`'s
-     whitelist entry plus its `position: absolute; inset: 0` pin. All the same
-     portal/paginate pattern: hide the whole page, un-hide one modal subtree,
-     print the live React DOM. Each now prints as its own DOCUMENT into a hidden
-     same-origin iframe the browser prints on its own: the invoice from
-     lib/invoicePrintTemplate.ts, the statement from lib/statementPdfTemplate.ts,
-     and the breakdown, the purchase order and the exit permit from
-     lib/docs/*.ts through the ATLAS kit. Nothing in this stylesheet reaches
-     inside those iframes, which is the point — no printed document inherits the
-     app's screen styling, and no document's layout can be broken from here.
-     Pagination, page-break hygiene and B&W treatment are the kit's now
-     (lib/atlas/shell.ts), which is also why the breakdown's colour override left
-     with it: the document has no colour.
-
-     THE PERMIT'S PIN IS THE ONE WORTH NAMING, because it was not merely
-     redundant — it was WRONG, and silently. `position: absolute; inset: 0` does
-     not paginate: it pins a subtree to a single page and DROPS whatever does not
-     fit. A permit with more lines than one sheet holds printed as a gate pass
-     listing some of its items and looking complete. The comment here called that
-     "right for a one-page gate pass", which assumed a permit is always one page;
-     nothing enforced that, and nothing marked the paper when it was not true.
-     `#history-print` above still carries the same pin and the same assumption —
-     it is next in line, and when it goes this whole mechanism goes with it.
-
-     Also gone with the statement's block: the two rules that stripped a
-     settlement row's green tint and ink at print time. They were only ever
-     needed because print re-used the SCREEN's markup, and the screen tints
-     settlement rows to make a long statement scannable. The document has no
-     tint to strip — it is B&W by construction.
-
-     AND WITH THEM, THE LAST BODY-CLASS PRINT SWITCH IN THIS FILE:
-     `body.printing-review #payslips-print { display: none }` and its
-     `body:not(.printing-review)` twin. The payslips surface was the one place
-     TWO printable subtrees coexisted in a single DOM — the register and the
-     commission review render together — so "one id visible" was not enough and
-     a class toggled on <body> by the review's own Print button had to decide
-     which survived. The document path has no such problem, and the reason is
-     worth keeping: a whitelist is GLOBAL and can only ever name one winner,
-     while a builder closure is LOCAL and each button simply names the document
-     it means. Two printables on one screen is now two functions, and the
-     register's own button branches a third way — a selected driver prints that
-     driver's payslip. A stylesheet could not have expressed that at all.
-
-     THIS IS WHY EVERY ONE OF THOSE SURFACES INTERCEPTS CTRL/CMD+P. This @media
-     block opens with `body * { visibility: hidden }` and un-hides by whitelist,
-     so a subtree that leaves the whitelist without an intercept prints a BLANK
-     SHEET — a failure that reads like the printer's fault. Each intercept was
-     ADDED in the same commit that deleted its whitelist entry, because deleting
-     the entry is what arms the trap. Do not delete a whitelist entry here
-     without checking what its owner does with the shortcut.
-
-     ONE ENTRY IS LEFT, AND THE RULE NOW READS FORWARD RATHER THAN BACK. There
-     is no longer a list of surfaces to check against — there is `#history-print`
-     and nothing else. Adding a new id here is adding the tenth exception to a
-     pattern nine surfaces have already left; build a document instead. */
-}
 
 /* ===============================================================
    Skeleton tokens — ported from preview/app.css:33-43 alongside the
