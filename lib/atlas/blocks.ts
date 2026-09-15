@@ -267,15 +267,23 @@ export function isoUnit(value: string | number): string {
   return `<span class="iso" dir="ltr">${inner}</span>`;
 }
 
-export function iso(value: string | number): string {
-  const s = String(value);
-  // The common case, and the ONLY case in an English document: no strong RTL
-  // character anywhere, so the whole value is a single run. Same bytes this
-  // function emitted before it learned to split - and the separator rule below
-  // is deliberately NOT applied here, because in an LTR paragraph a middot has
-  // nowhere wrong to go.
-  if (!RTL_RUN.test(s)) return ltrRun(s);
-  return s
+/**
+ * iso()'s SPLITTING DISCIPLINE on its own: every RTL run left bare, every Latin
+ * fragment isolated between the separators, which stay outside.
+ *
+ * Split out of iso() unchanged, for the one caller iso()'s shortcut below would
+ * mislead. That shortcut asks "is there an RTL character in this STRING", and
+ * answers a question about the PARAGRAPH — which is sound for a whole cell
+ * value, because a cell with no RTL in it on an Arabic sheet is a lone Latin
+ * object with nowhere wrong to go. It stops being sound for a FRAGMENT of a
+ * line whose other fragments are Arabic: " · “Replenishing check”" has no RTL
+ * character, but it is not a paragraph, and wrapping it whole would sweep the
+ * leading middot into the isolate and print it at that run's far end - the
+ * exact defect SEP_RUN exists to prevent, reached by the one door that skips
+ * SEP_RUN.
+ */
+const isoParts = (s: string): string =>
+  s
     .split(RTL_RUN)
     .map((part, i) => {
       if (i % 2 === 1) return esc(part); // an RTL run: never isolated
@@ -285,6 +293,54 @@ export function iso(value: string | number): string {
         .join("");
     })
     .join("");
+
+export function iso(value: string | number): string {
+  const s = String(value);
+  // The common case, and the ONLY case in an English document: no strong RTL
+  // character anywhere, so the whole value is a single run. Same bytes this
+  // function emitted before it learned to split - and the separator rule below
+  // is deliberately NOT applied here, because in an LTR paragraph a middot has
+  // nowhere wrong to go.
+  if (!RTL_RUN.test(s)) return ltrRun(s);
+  return isoParts(s);
+}
+
+/**
+ * A PHRASE BUILT AROUND ONE LOCALISED DATE.
+ *
+ * For the line that is not a date and not prose but both: an approval stamp
+ * followed by the approver's comment, a rejection naming a person, an instant
+ * and a reason. Three facts of three different kinds on one line, and each kind
+ * needs the opposite treatment from its neighbours:
+ *
+ *   unit   ONE Latin-ordered token through isoUnit(). A localised stamp reads
+ *          month, day, year, time, PM and holds that order only if the whole
+ *          thing is one isolate with its month sealed inside it.
+ *   lead   Prose BEFORE it, and `tail` prose after, both through the split
+ *          discipline: an Arabic word stays bare, a Latin one is isolated on
+ *          its own, and the separators between them stay OUTSIDE every isolate
+ *          so the paragraph orders the pieces.
+ *
+ * WHY NOT ONE ISOLATE OVER THE WHOLE LINE, which is the obvious cheaper answer.
+ * isoUnit() on the lot would pin the entire phrase left-to-right, so on an
+ * Arabic sheet the reader would meet the LAST fact first: the comment before
+ * the stamp it comments on, the reason before the rejection it explains. The
+ * pieces must stay separately isolated precisely so that the RTL paragraph can
+ * put them in ITS order, which is the order they were written in.
+ *
+ * WHY NOT A FLAG ON THE COLUMN. Measured on the purchase order, where the stamp
+ * is a `sub` under the approver's NAME: a column flag reaches the value and the
+ * sub alike, so `unit` there would isolate an Arabic name as left-to-right -
+ * the same bug pointing the other way. The isolation belongs to the CELL.
+ */
+export type UnitPhrase = { lead?: string; unit: string; tail?: string };
+
+export function unitPhrase(p: UnitPhrase): string {
+  return (
+    (p.lead ? isoParts(p.lead) : "") +
+    isoUnit(p.unit) +
+    (p.tail ? isoParts(p.tail) : "")
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -741,8 +797,15 @@ export type Cell =
        * ESCAPED AND ISOLATED ON THE COLUMN'S OWN RULE, exactly as the value is
        * — a sub-line is not a back door past `raw`. It is inert under `raw`,
        * where the caller owns the whole cell's markup.
+       *
+       * A UnitPhrase INSTEAD OF A STRING is the one case that overrides the
+       * column, because it is the one case where the sub and the value need
+       * OPPOSITE handling: an approval's localised stamp under an approver's
+       * name. Isolating both on the column's rule would pin an Arabic name
+       * left-to-right. Still not a `raw` hatch — the kit escapes every piece;
+       * the caller only says which piece is the date.
        */
-      sub?: string;
+      sub?: string | UnitPhrase;
       /**
        * The value is ALREADY HTML and is emitted verbatim. The one escape hatch
        * in this file, for a status mark or an already-isolated figure. Anything
@@ -796,7 +859,11 @@ function cellHtml(c: Cell, col: Col | undefined, afterGroup = false): string {
     col?.unit ? isoUnit(s) : col?.num || col?.iso ? iso(s) : esc(s);
   const body = raw ? o.v : text(o.v);
   const sub =
-    !raw && "sub" in o && o.sub ? `<span class="sub-line">${text(o.sub)}</span>` : "";
+    !raw && "sub" in o && o.sub
+      ? `<span class="sub-line">${
+          typeof o.sub === "string" ? text(o.sub) : unitPhrase(o.sub)
+        }</span>`
+      : "";
   return `<td${attrs}>${body}${sub}</td>`;
 }
 
@@ -1178,7 +1245,11 @@ export function pair(
  * kit: a note that starts quoting a figure tomorrow is naked again and nothing
  * here will say so. The detector, not this comment, is what re-answers it.
  */
-export function note(text: string, opts?: { iso?: boolean }): string {
+export function note(text: string | UnitPhrase, opts?: { iso?: boolean }): string {
+  // A UnitPhrase carries its own isolation rule per piece, so `iso` has nothing
+  // left to decide and is ignored rather than merged: two directions arriving
+  // for one string is a caller disagreeing with itself.
+  if (typeof text !== "string") return `<p class="note">${unitPhrase(text)}</p>`;
   return `<p class="note">${opts?.iso ? iso(text) : esc(text)}</p>`;
 }
 

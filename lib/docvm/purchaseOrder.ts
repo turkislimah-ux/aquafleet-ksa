@@ -51,35 +51,52 @@
 import type { CompanySettings } from "../db-types";
 import { DASH, num2, numPlain } from "../docPrimitives";
 import { arText, fill, t, type Lang } from "../i18n";
-import { formatDateLang, formatDateTime } from "../utils";
+import { formatDateLang, formatDateTimeLang } from "../utils";
 
 // ---------------------------------------------------------------------------
-// WHY THE APPROVAL STAMPS BELOW STAY NUMERIC WHILE THE PERMIT'S DID NOT
+// WHY THIS SHEET CARRIES RAW ISO DATES AND LOCALISED STAMPS AT THE SAME TIME
 // ---------------------------------------------------------------------------
-// The one-sheet-one-date-language rule is real and it is stated in
-// lib/docvm/exitPermit.ts. This sheet is its exception, on two grounds that
-// both had to hold:
+// It looks inconsistent and it is not. The two kinds of date on this sheet
+// answer to two different rules, and each is following its own:
 //
-//   1. THIS SHEET'S DATES ARE DELIBERATELY NOT LOCALISED. Read the contract on
-//      requestDate / expectedDelivery / receivedDate above: raw "YYYY-MM-DD",
-//      "exactly as the modal's own grid prints them", because localising them
-//      "would make the document say something the screen does not". Giving the
-//      two approval stamps Arabic month names would not make this sheet
-//      consistent — it would put localised stamps beside raw ISO dates and make
-//      it less so. An ISO date is script-neutral and orders correctly in Arabic
-//      on its own; so does a purely numeric stamp. Neither can scramble,
-//      because neither contains a word.
+//   THE ORDER'S OWN DATES — requestDate / expectedDelivery / receivedDate —
+//   stay RAW "YYYY-MM-DD", per the contract on them above: "exactly as the
+//   modal's own grid prints them", because localising them would make the
+//   document say something the screen does not. An ISO date is script-neutral,
+//   orders correctly in Arabic unaided, and is the shape a supplier is being
+//   asked to deliver against. Nothing here changes that.
 //
-//   2. THERE IS NO PO FIXTURE IN THE A4 CORPUS. Every other sheet touched by
-//      the date work could be rendered and read at 1:1; this one could not, and
-//      the bug being fixed here is one that only shows up when a human looks at
-//      the page. Shipping an unverifiable change to Arabic bidi is how the
-//      defect got in.
+//   THE APPROVAL AND REJECTION STAMPS are AUDIT, not instruction. They say who
+//   signed and when, they are read by whoever is holding the paper, and the
+//   one-sheet-one-date-language rule in lib/docvm/exitPermit.ts applies to them
+//   exactly as it applies to the permit's issued stamp. They are localised.
 //
-// When a PO fixture exists, revisit BOTH stamps together — and note that the
-// approval stamp is a `sub` under an approver's NAME, so it needs isolating at
-// the cell rather than the column: `unit` on that column would isolate the name
-// as LTR too, which is the same bug pointing the other way.
+// THIS REPLACES AN EARLIER NOTE THAT ARGUED THE OPPOSITE, and the argument is
+// worth recording because MEASUREMENT is what settled it. That note kept both
+// stamps numeric on two grounds. The second — that no PO fixture existed, so
+// the change could not be read at 1:1 — was true and is now false; the corpus
+// has five. The first claimed a numeric stamp "cannot scramble, because it
+// contains no word". That one was simply WRONG, and the Arabic sheet said so:
+//
+//   logical  7/29/2026, 11:08:57 PM · “Replenishing check”
+//   visual   ”PM · “Replenishing check 11:08:57 ,7/29/2026
+//
+// No Arabic word anywhere in it, and it scrambles regardless: the digits are
+// class EN and lay out in right-to-left GROUPS in an Arabic paragraph, while PM
+// is strong L and escapes past the comment entirely, landing inside the closing
+// quote. Staying numeric was never the safe option — it was an unfixed bug with
+// a reason attached. See unitPhrase() in lib/atlas/blocks.ts for the shape that
+// holds, and note that the isolation goes on the CELL: the stamp is a `sub`
+// under an approver's NAME, and a `unit` flag on that column would isolate the
+// name as LTR too, which is the same bug pointing the other way.
+const PO_DATETIME = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+} as const;
 
 // ---------------------------------------------------------------------------
 // Input
@@ -110,7 +127,9 @@ export type PoDocLine = {
 export type PoDocApproval = {
   id: string;
   approver: string;
-  /** timestamptz, formatted here with the same helper the modal uses. */
+  /** timestamptz, formatted here. NOT with the modal's helper any more: the
+   *  stamp is localised on paper and numeric on screen, the same deliberate
+   *  split the permit's issued stamp made. See the header above. */
   approvedAt: string;
   comment: string | null;
 };
@@ -187,6 +206,10 @@ export type DocPair = { label: string; value: string; num?: boolean };
 
 /** Mirrors lib/atlas/blocks.ts's `IdentItem`. */
 export type DocIdent = { label: string; value: string; num?: boolean; sub?: string };
+
+/** Mirrors lib/atlas/blocks.ts's `UnitPhrase`: prose, one localised instant,
+ *  prose. Structural, like every mirror here — the kit is never imported. */
+export type DocUnitPhrase = { lead?: string; unit: string; tail?: string };
 
 /** Mirrors lib/atlas/blocks.ts's `LedgerLine`. */
 export type DocLedgerLine = {
@@ -265,10 +288,10 @@ export type PoDocApprovals = {
    * "Approver" and "Approved at" heads would be inventing wording. One column,
    * one sub-line, same two facts in the same arrangement.
    */
-  rows: readonly { key: string; approver: string; approvedAt: string }[];
+  rows: readonly { key: string; approver: string; approvedAt: DocUnitPhrase }[];
   empty: string;
   /** The whole rejection, as one line. null unless the order was rejected. */
-  rejected: string | null;
+  rejected: DocUnitPhrase | null;
 };
 
 export type PurchaseOrderDocVm = {
@@ -460,12 +483,20 @@ export function buildPurchaseOrderVm(input: PurchaseOrderDocInput): PurchaseOrde
   const note = input.note ? { head: t("common.note", lang), body: input.note } : null;
 
   // --- Approvals ----------------------------------------------------------
-  const rejectedParts: string[] = [];
-  if (input.rejected) {
-    rejectedParts.push(`${t("inventory.po.rejectedBy", lang)}: ${input.rejected.by ?? DASH}`);
-    rejectedParts.push(input.rejected.at ? formatDateTime(input.rejected.at) : DASH);
-    if (input.rejected.reason) rejectedParts.push(`“${input.rejected.reason}”`);
-  }
+  // Three facts on one line — who, when, why — handed over as three pieces
+  // rather than pre-joined into a string. The join is the same " · " it always
+  // was; what changed is that the kit is now told WHICH piece is the instant,
+  // because that is the only piece whose internal order is Latin and the other
+  // two must be free to take the paragraph's. See unitPhrase().
+  const rejected: DocUnitPhrase | null = input.rejected
+    ? {
+        lead: `${t("inventory.po.rejectedBy", lang)}: ${input.rejected.by ?? DASH} · `,
+        unit: input.rejected.at
+          ? formatDateTimeLang(input.rejected.at, lang, PO_DATETIME)
+          : DASH,
+        ...(input.rejected.reason ? { tail: ` · “${input.rejected.reason}”` } : {}),
+      }
+    : null;
 
   const approvals: PoDocApprovals | null = input.showApprovals
     ? {
@@ -478,12 +509,17 @@ export function buildPurchaseOrderVm(input: PurchaseOrderDocInput): PurchaseOrde
           key: a.id,
           approver: a.approver,
           // The modal prints the comment after the stamp, quoted, on the same
-          // muted line. One string, so it cannot drift into a second column
-          // that would need a head nobody wrote.
-          approvedAt: formatDateTime(a.approvedAt) + (a.comment ? ` · “${a.comment}”` : ""),
+          // muted line. Still ONE line, so it cannot drift into a second column
+          // that would need a head nobody wrote — but stamp and comment are
+          // handed over separately, because a comment can be Arabic and the
+          // stamp never orders like one.
+          approvedAt: {
+            unit: formatDateTimeLang(a.approvedAt, lang, PO_DATETIME),
+            ...(a.comment ? { tail: ` · “${a.comment}”` } : {}),
+          },
         })),
         empty: t("inventory.po.awaitingApproval", lang),
-        rejected: rejectedParts.length ? rejectedParts.join(" · ") : null,
+        rejected,
       }
     : null;
 
