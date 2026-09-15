@@ -65,6 +65,72 @@ const MONEY_W = "14%";
  *  kit's default of three would leave a widowed field on a third row. */
 const IDENT_COLS = 4;
 
+/** THE SHEET'S OWN SPACING, tightened, because at the kit's 26px rhythm the
+ *  fullest Arabic purchase order misses one page BY 26px.
+ *
+ *  MEASURED, NOT GUESSED. PO-2026-0012 in Arabic flows 1024px into a 997.8px
+ *  content box (A4 less the kit's own 17mm/16mm margins). What sits in the
+ *  26.2px past the break is the FOOTER and nothing else — it starts at 1007px,
+ *  nine pixels over — so the order prints a second sheet of paper carrying one
+ *  provenance line. The English twin of the same order fits at 920px, and that
+ *  gap is the tell: this is Arabic line height on a sheet already at the edge,
+ *  not a fixture that is simply too long. A sheet with a real second page of
+ *  content is a different thing and is left alone (see below).
+ *
+ *  WHY NOT `compact: true`, which is the kit's own answer to this and which
+ *  lib/atlas/shell.ts argues for by name ("a body class rather than an extraCss
+ *  string passed per document, so the SECOND compact document inherits the same
+ *  decisions"). Because that register is not only spacing — it drops the title
+ *  27px -> 21px — and this document has already refused it on the record:
+ *  lib/docs/exitPermit.ts states that the permit is compact and the purchase
+ *  order is not, a permit being a gate pass read in one hand while "a purchase
+ *  order is filed, read at a desk and may run to several pages by nature." That
+ *  distinction is about the sheet's identity, and an orphaned footer is not a
+ *  reason to give it up. So: the compact register's SPACING values, none of its
+ *  type changes.
+ *
+ *  TWO LEVERS, AND ONLY TWO — AND THE ARITHMETIC IS NOT THE ARITHMETIC. The
+ *  masthead gap looks like a third lever and is not: `.mast` margin-bottom
+ *  COLLAPSES against the first section's margin-top, so the gap is max(20, 17)
+ *  and dropping the masthead to 14 moves the page by exactly zero. That rule
+ *  was written, measured, and deleted. The same collapse is why the section
+ *  rhythm is not paid five times either — the first section's margin is the
+ *  masthead's 20, not 17, so four gaps move and not five.
+ *
+ *  So the saving is MEASURED rather than multiplied: 1024px -> 977px, 47px, and
+ *  the sheet clears its 997.8px box by 20.8px.
+ *
+ *  WHY 17 AND NOT 20. The target is the 26.2px overflow PLUS one full Arabic
+ *  body line (10.6px at 1.72 = 18.2px), about 45px. A fix with half a line of
+ *  slack is one that a supplier name wrapping, or a rejection reason running a
+ *  line longer, puts straight back onto two pages — and the orders that will do
+ *  that are real ones, not the six in this corpus. 20/14 was tried first, for
+ *  consistency with part.ts, and buys 36px: it clears by 9.8px, half a line,
+ *  which is not a margin worth committing. 17/14 buys 47px and clears by a full
+ *  line with a little over.
+ *
+ *  NEITHER NUMBER IS NEW: 17 is the section rhythm the kit's own compact
+ *  register already sets, and 14 is the footer gap part.ts already prints.
+ *  Borrowing compact's SPACING while declining its type change is the whole
+ *  position above, stated in values.
+ *
+ *  SCOPED TO THIS DOCUMENT, NOT THE KIT. `section` and `.sheet-foot` are
+ *  ATLAS-wide, and every other committed sheet is laid out against the 26px
+ *  rhythm — a kit edit would reflow all of them to fix an orphan none of them
+ *  has. `extraCss` is the shell's per-document hook for exactly this.
+ *
+ *  UNCONDITIONAL, not applied only to the sheet that overflows. Two purchase
+ *  orders read side by side at two different rhythms is a worse sheet than a
+ *  marginally tighter one, and the tightening costs the short orders nothing:
+ *  shrinking cannot push a one-page sheet onto a second. The long pagination
+ *  fixture stays at two pages for the same reason — it carries 897px on its
+ *  Arabic second page, so 47px comes nowhere near closing it, which is the
+ *  point: this nudge removes orphans and does not remove pages. */
+const PO_SPACING_CSS = `
+  section { margin-top: 17px; }
+  .sheet-foot { margin-top: 14px; }
+`;
+
 export function buildPurchaseOrderHtml(vm: PurchaseOrderDocVm): string {
   const m = vm.masthead;
 
@@ -190,5 +256,6 @@ export function buildPurchaseOrderHtml(vm: PurchaseOrderDocVm): string {
     dir: vm.rtl ? "rtl" : "ltr",
     title: vm.docTitle,
     body,
+    extraCss: PO_SPACING_CSS,
   });
 }
