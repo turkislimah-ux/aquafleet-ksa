@@ -60,7 +60,10 @@
 // asserted afterwards by a census taken on a FRESH connection.
 
 import { Client, type QueryResult } from "pg";
-import { check, connOptions, fail, failureCount, loadTestEnv, money, ok, TEST_REF } from "./harness";
+import {
+  check, connOptions, fail, failureCount, loadTestEnv, money, ok,
+  PROVISION_STATION_SQL, SEED_STATION, SEED_WATER_TYPE, TEST_REF,
+} from "./harness";
 
 // ---------------------------------------------------------------------------
 // The two scenarios, and every figure this file asserts, derived once here.
@@ -270,6 +273,14 @@ async function main(): Promise<void> {
 
   try {
     await c.query("begin");
+
+    // ---- PRECONDITION, PROVISIONED NOT INHERITED. Inside the transaction, so
+    //      it unwinds with the seed at the ROLLBACK below and the test project
+    //      is left exactly as found. See harness.ts for why this is not a
+    //      re-seed of the test project.
+    const station = (await c.query(PROVISION_STATION_SQL, [SEED_STATION])).rows[0];
+    check(`precondition — ${SEED_STATION} exists and prices ${SEED_WATER_TYPE}`,
+      station?.key === SEED_STATION && station?.fill_cost_potable_sar !== null, true);
 
     // =====================================================================
     // SEED — the real dependency chain, twice: a PREPAID customer whose pool

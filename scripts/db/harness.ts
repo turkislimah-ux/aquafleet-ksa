@@ -4,8 +4,10 @@
 // device. Two copies of a safety device drift, and the copy that drifts is the
 // one nobody re-reads. Every harness in this directory imports this one.
 //
-// Nothing here talks to the database. It loads and validates the target, and
-// counts assertions. The harnesses own their own SQL.
+// Nothing here opens a socket. It loads and validates the target, counts
+// assertions, and holds the ONE seed precondition all three harnesses share as
+// SQL TEXT for them to run on their own connection. The harnesses own the rest
+// of their SQL.
 
 import { readFileSync } from "node:fs";
 
@@ -105,6 +107,54 @@ export function loadTestEnv(envFile: string = ENV_FILE_DEFAULT): Record<string, 
 export function connOptions(env: Record<string, string>) {
   return { connectionString: env.TEST_DB_URL, ssl: { rejectUnauthorized: false } };
 }
+
+// ---------------------------------------------------------------------------
+// SEED PRECONDITIONS — the harnesses provision their own, they do not inherit.
+//
+// WHY THIS EXISTS. Every harness here seeds a delivered POTABLE trip at
+// manfuhah_station, because a delivered trip is the cheapest real dependency an
+// invoice can hang off. 0114 put a guard on that insert: a station that prices
+// one water type and not the other REFUSES the type it does not price. It has
+// an escape hatch — a station with BOTH prices null is "not configured yet" and
+// accepts anything — and the test project used to sit in exactly that state, so
+// the harnesses passed without ever naming the precondition they relied on.
+//
+// Then the test project's stations gained a non-potable price and kept a null
+// potable one. The hatch closed, and all three harnesses died on the seed with
+// "Manfuhah Station does not fill potable water" — nothing to do with money, and
+// nothing proven. Production was never affected: its Manfuhah prices potable.
+//
+// THE FIX IS NOT TO RE-SEED THE TEST PROJECT. That is the same bet again: it
+// holds until someone edits a station in Manage stations. A harness that needs a
+// precondition should CREATE it, inside the transaction it already rolls back,
+// so the row it depends on is one it wrote itself and no ambient edit can move.
+//
+// Zero, not a real price. The guard only asks whether the figure is NOT NULL, so
+// zero satisfies it while contributing nothing to any cost arithmetic — and no
+// assertion in any harness reads a fill cost. Both types are set because the
+// cost of covering the other one is nothing, and a harness that later seeds
+// non-potable should not have to rediscover this comment.
+//
+// The SQL lives here rather than in three files for the reason at the top of
+// this module, and it is a STRING because this module still opens no sockets:
+// the harnesses run it on the connection they already have, inside their own
+// begin/rollback. It must be run AFTER `begin` — run outside one it would be a
+// persistent edit to the test project, which is the thing this replaces.
+// ---------------------------------------------------------------------------
+
+/** The station and water type every harness seeds with. Passed to
+ *  PROVISION_STATION_SQL so the row provisioned is the row seeded. */
+export const SEED_STATION = "manfuhah_station";
+export const SEED_WATER_TYPE = "potable";
+
+/** $1 = station key. Returns the row so the caller can assert the precondition
+ *  actually holds — an UPDATE that matched nothing reports success otherwise. */
+export const PROVISION_STATION_SQL = `
+  update public.water_stations
+     set fill_cost_potable_sar     = coalesce(fill_cost_potable_sar, 0),
+         fill_cost_non_potable_sar = coalesce(fill_cost_non_potable_sar, 0)
+   where key = $1
+  returning key, fill_cost_potable_sar, fill_cost_non_potable_sar`;
 
 // ---------------------------------------------------------------------------
 // Assertion plumbing. One process per harness, so a module-level counter is
