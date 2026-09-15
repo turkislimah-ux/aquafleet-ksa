@@ -1,7 +1,7 @@
 # SESSION HANDOFF
 
 ## State
-- DB at 0200. `ls supabase/migrations/ | tail -5`. `git log --oneline -10`.
+- DB at 0200. Tree clean.
 - **0200 APPLIED TO PROD + VERIFIED (ef45248)** — exit-permit write-offs, DB
   half. Applied 2026-09-15 via `.planning/post-deploy/apply-0200-prod.mjs`
   (archive, NOT a test — never put a prod socket in `npm test`). Part B verify
