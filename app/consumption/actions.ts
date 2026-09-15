@@ -352,6 +352,85 @@ export async function voidExitPermit(
 }
 
 // ---------------------------------------------------------------------------
+// WRITE-OFFS (migration 0200) — the fourth money moment, and the odd one out.
+//
+// The other three MOVE STOCK. These two move NONE. A write-off says the parts
+// that left on a returnable permit are not coming back, so their cost — which
+// has been sitting unexpensed since the exit, because the company still owned
+// them — is booked NOW, in the month the decision was made. A reversal books
+// the mirror credit, also in the month IT was made, and never rewrites the
+// original: a closed month stays closed.
+//
+// TWO CONSEQUENCES THIS FILE HAS TO RESPECT:
+//
+//   1. NO revalidatePath("/inventory"). Nothing about stock changed. Listing
+//      it would be harmless today and a lie in the diff forever.
+//
+//   2. A REVERSAL IS NOT A RETURN, and doing one does not record the other.
+//      If the parts then physically turn up, that is a separate return, filed
+//      afterwards through the return modal. record_exit_permit_return REFUSES
+//      a return against written-off quantity, so the order is forced: reverse
+//      first, then return.
+// ---------------------------------------------------------------------------
+
+export async function writeOffExitPermitLines(
+  permitId: string,
+  lines: { line_id: string; qty: number }[],
+  reason: string,
+  writeOffDate: string,
+  note: string | null,
+  lang: Lang,
+): Promise<{ error: string | null }> {
+  if (!permitId) return { error: t("consumption.errors.permitRequired", lang) };
+  const usable = lines.filter((l) => Number.isFinite(l.qty) && l.qty > 0);
+  if (usable.length === 0) return { error: t("consumption.errors.writeOffNeedsQty", lang) };
+  // The RPC refuses a blank reason too. Checking here as well is not
+  // duplication for its own sake: this one is translated, and a write-off with
+  // no stated reason is unreadable a year later when somebody asks why the
+  // month carried the cost.
+  if (!reason.trim()) return { error: t("consumption.errors.writeOffNeedsReason", lang) };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("write_off_exit_permit_lines", {
+    p_permit_id: permitId,
+    p_lines: usable,
+    p_reason: reason.trim(),
+    // Blank falls through to the RPC's own Riyadh-today default rather than
+    // being turned into a date here — the server's clock decides, as
+    // everywhere else in this codebase.
+    p_write_off_date: writeOffDate || null,
+    p_note: note?.trim() || null,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: rpcError(error, lang) };
+
+  revalidatePath("/consumption");
+  revalidatePath("/reports");
+  return { error: null };
+}
+
+export async function reverseExitPermitWriteOff(
+  writeOffId: string,
+  reason: string,
+  lang: Lang,
+): Promise<{ error: string | null }> {
+  if (!writeOffId) return { error: t("consumption.errors.writeOffRequired", lang) };
+  if (!reason.trim()) return { error: t("consumption.errors.reversalNeedsReason", lang) };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("reverse_exit_permit_write_off", {
+    p_write_off_id: writeOffId,
+    p_reason: reason.trim(),
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: rpcError(error, lang) };
+
+  revalidatePath("/consumption");
+  revalidatePath("/reports");
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
 // Attachments — same shape as the archive's file path.
 // ---------------------------------------------------------------------------
 

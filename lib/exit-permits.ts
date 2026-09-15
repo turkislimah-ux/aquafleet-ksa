@@ -6,7 +6,7 @@
 // event that happened, not something derivable — so it is a column.
 //
 // What is NOT stored, and lives here instead:
-//   - outstanding quantity  = qty - qty_returned
+//   - outstanding quantity  = qty - qty_returned - qty_written_off
 //   - overdue               = a returnable, still exited, with outstanding
 //                             quantity, past its expected_return_on
 
@@ -50,8 +50,8 @@ export const EXIT_PERMIT_DESTINATION_INLINE_TKEY: Record<ExitPermitDestinationKi
 
 // OUTSTANDING ONLY EXISTS ON AN 'exited' PERMIT, AND THAT RULE BELONGS HERE.
 //
-// `qty - qty_returned` is arithmetic, not a fact about the world. It only means
-// "still out" while the permit is exited:
+// `qty - qty_returned - qty_written_off` is arithmetic, not a fact about the
+// world. It only means "still out" while the permit is exited:
 //
 //   draft   — nothing has left the building, so nothing can be outstanding.
 //   voided  — the permit was CANCELLED and void_exit_permit already returned
@@ -73,42 +73,67 @@ export const EXIT_PERMIT_DESTINATION_INLINE_TKEY: Record<ExitPermitDestinationKi
 // wrong. Rather than add a sixth copy of the check, the gate now lives in these
 // two functions, and `permitValueSar` TAKES THE PERMIT so it cannot be called
 // without one. That is why its signature changed.
+//
+// 0200 ADDED THE THIRD TERM, and it was subtracted in exactly this one place.
+// A WRITE-OFF IS NOT A RETURN: nothing came back, the parts are accepted as
+// gone and their cost was expensed at the write-off date. But they are no
+// longer OUTSTANDING either — chasing a truck for a filter the company already
+// wrote off is the same false alarm as chasing a voided permit. The database
+// keeps the two columns disjoint (`qty_returned + qty_written_off <= qty`), so
+// this subtraction can never double-count.
+//
+// OutstandingLine is a named Pick rather than an inline one at each signature
+// precisely so a fourth term could only ever be added here. That is also what
+// makes the compiler the search tool: widening this type turned every caller
+// that hands over a hand-rolled line object into a build error, which is how
+// the readers below were found rather than remembered.
+
+/** The columns the outstanding arithmetic reads. Widen THIS, never a signature. */
+export type OutstandingLine = Pick<ExitPermitLine, "qty" | "qty_returned" | "qty_written_off">;
 
 /** RAW ARITHMETIC, no status gate. Correct ONLY where the permit is already
- *  known to be exited — the return and void modals, whose RPCs refuse any other
- *  status. Everywhere else reach for `permitLineOutstanding`. */
-export function outstandingQty(line: Pick<ExitPermitLine, "qty" | "qty_returned">): number {
-  return Number(line.qty) - Number(line.qty_returned);
+ *  known to be exited — the return, write-off and void modals, whose RPCs
+ *  refuse any other status. Everywhere else reach for `permitLineOutstanding`. */
+export function outstandingQty(line: OutstandingLine): number {
+  return Number(line.qty) - Number(line.qty_returned) - Number(line.qty_written_off);
 }
 
 /** What is still out on ONE line — zero unless the permit is exited. */
 export function permitLineOutstanding(
   permit: Pick<ExitPermit, "status">,
-  line: Pick<ExitPermitLine, "qty" | "qty_returned">,
+  line: OutstandingLine,
 ): number {
   return permit.status === "exited" ? outstandingQty(line) : 0;
 }
 
 /** RAW ARITHMETIC over a whole permit, same caveat as `outstandingQty`. Its one
  *  caller pairs it with its own `status === "exited"` check. */
-export function permitOutstanding(lines: Pick<ExitPermitLine, "qty" | "qty_returned">[]): number {
+export function permitOutstanding(lines: OutstandingLine[]): number {
   return lines.reduce((n, l) => n + outstandingQty(l), 0);
+}
+
+/** How much of a permit has been WRITTEN OFF and not reversed. Drives the chip
+ *  on the list row, so it is deliberately status-blind: a write-off is a money
+ *  decision that stays true whatever the permit's status later becomes. */
+export function permitWrittenOff(lines: Pick<ExitPermitLine, "qty_written_off">[]): number {
+  return lines.reduce((n, l) => n + Number(l.qty_written_off), 0);
 }
 
 /**
  * Is this returnable permit overdue?
  *
  * Deliberately requires ALL of: returnable, still 'exited' (a voided permit
- * is closed, not late), something still outstanding (fully returned is not
- * late even if the date passed), and the date actually behind us. Any one of
- * those omitted produces a badge that cries wolf.
+ * is closed, not late), something still outstanding (fully returned — or, from
+ * 0200, fully written off — is not late even if the date passed), and the date
+ * actually behind us. Any one of those omitted produces a badge that cries
+ * wolf.
  *
  * `today` is passed in as an ISO date string so the server clock (Riyadh via
  * todayKey()) decides, not the browser's — same convention as lib/archive.ts.
  */
 export function isOverdue(
   permit: Pick<ExitPermit, "kind" | "status" | "expected_return_on">,
-  lines: Pick<ExitPermitLine, "qty" | "qty_returned">[],
+  lines: OutstandingLine[],
   today: string,
 ): boolean {
   if (permit.kind !== "returnable") return false;
@@ -132,9 +157,15 @@ export function daysOverdue(expectedReturnOn: string, today: string): number {
 //
 // The early return is not merely an optimisation: on a voided permit the line
 // arithmetic is non-zero and would produce a real, wrong number.
+//
+// Written-off quantity drops out here too, and for the same reason a returned
+// one does: this figure answers "what is the company still holding out there",
+// and written-off stock is no longer held. Its cost has NOT vanished — it was
+// expensed at the write-off date and shows up in Cost / P&L for that month,
+// which is exactly where the write-off put it.
 export function permitValueSar(
   permit: Pick<ExitPermit, "status">,
-  lines: Pick<ExitPermitLine, "qty" | "qty_returned" | "unit_price_sar">[],
+  lines: (OutstandingLine & Pick<ExitPermitLine, "unit_price_sar">)[],
 ): number {
   if (permit.status !== "exited") return 0;
   return lines.reduce((n, l) => n + outstandingQty(l) * Number(l.unit_price_sar), 0);

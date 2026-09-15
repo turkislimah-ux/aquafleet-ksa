@@ -134,6 +134,12 @@ export function buildExitPermitHtml(vm: ExitPermitDocVm): string {
 
     ...(vm.note ? [block(note(vm.note))] : []),
 
+    // Between the note and the money, as on screen. It belongs on the note()
+    // rail rather than in the table because it is a statement ABOUT the table:
+    // it tells the reader which part of the qty column's shrinkage is stock
+    // nobody is chasing any more.
+    ...(vm.writtenOff ? [block(note(vm.writtenOff))] : []),
+
     // Small and last, as on screen: the gate copy is about WHAT left, not what
     // it was worth. note() and not a ledger — a ledger line is a step in an
     // argument the reader is meant to follow, and this is a caveat nobody at the

@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { todayKey } from "@/lib/utils";
 import type {
   ExitPermit, ExitPermitLine, ExitPermitReturn, ExitPermitReturnLine, ExitPermitFile,
+  ExitPermitWriteOff, ExitPermitWriteOffLine,
   ConsumptionApproval, WorkOrder, WorkOrderPart, OutsourcedJob, WorkshopPayment,
 } from "@/lib/db-types";
 import type { LotLite, ConsumptionLedgerRow } from "@/lib/exit-permits";
@@ -30,7 +31,7 @@ export default async function ConsumptionPage() {
   const viewer = auth?.user?.email ?? null;
 
   const [
-    permitsRes, linesRes, returnsRes, returnLinesRes, filesRes,
+    permitsRes, linesRes, returnsRes, returnLinesRes, writeOffsRes, writeOffLinesRes, filesRes,
     warehousesRes, partsRes, stationsRes, projectsRes, trucksRes, customersRes, staffRes,
     lotsRes, ledgerRes,
     approvalsRes, workOrdersRes, workOrderPartsRes, osJobsRes, paymentsRes,
@@ -40,6 +41,12 @@ export default async function ConsumptionPage() {
     supabase.from("exit_permit_lines").select("*").order("created_at", { ascending: true }),
     supabase.from("exit_permit_returns").select("*").order("returned_on", { ascending: false }),
     supabase.from("exit_permit_return_lines").select("*"),
+    // WRITE-OFFS (0200). Reversed ones are fetched too, not filtered out: the
+    // expanded row shows the decision and its reversal side by side, because
+    // both posted real money in real months and a list that silently drops the
+    // reversed half reads as though the cost never happened.
+    supabase.from("exit_permit_write_offs").select("*").order("write_off_date", { ascending: false }),
+    supabase.from("exit_permit_write_off_lines").select("*"),
     supabase.from("exit_permit_files").select("*").order("uploaded_at", { ascending: true }),
     supabase.from("warehouses").select("id, name").order("name"),
     // Parts carry warehouse_id because a permit is warehouse-scoped: the line
@@ -112,7 +119,8 @@ export default async function ConsumptionPage() {
 
   const error =
     permitsRes.error?.message ?? linesRes.error?.message ?? returnsRes.error?.message ??
-    returnLinesRes.error?.message ?? filesRes.error?.message ?? warehousesRes.error?.message ??
+    returnLinesRes.error?.message ?? writeOffsRes.error?.message ??
+    writeOffLinesRes.error?.message ?? filesRes.error?.message ?? warehousesRes.error?.message ??
     partsRes.error?.message ?? stationsRes.error?.message ?? projectsRes.error?.message ??
     trucksRes.error?.message ?? customersRes.error?.message ?? staffRes.error?.message ??
     lotsRes.error?.message ?? ledgerRes.error?.message ??
@@ -128,6 +136,8 @@ export default async function ConsumptionPage() {
       lines={(linesRes.data ?? []) as ExitPermitLine[]}
       returns={(returnsRes.data ?? []) as ExitPermitReturn[]}
       returnLines={(returnLinesRes.data ?? []) as ExitPermitReturnLine[]}
+      writeOffs={(writeOffsRes.data ?? []) as ExitPermitWriteOff[]}
+      writeOffLines={(writeOffLinesRes.data ?? []) as ExitPermitWriteOffLine[]}
       files={(filesRes.data ?? []) as ExitPermitFile[]}
       warehouses={(warehousesRes.data ?? []) as WarehouseLite[]}
       parts={(partsRes.data ?? []) as PartLite[]}

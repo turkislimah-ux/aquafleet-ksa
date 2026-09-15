@@ -54,8 +54,8 @@ import { formatDate, formatDateLang, formatDateTime, formatSar } from "../utils"
  *  component's strings is what makes the two surfaces identical rather than
  *  merely similar.
  *
- *  `qtyOut` is what LEFT, `outstanding` is what is still out. They differ only
- *  on a line that has been partly or wholly returned. */
+ *  `qtyOut` is what LEFT, `outstanding` is what is still out. They differ on a
+ *  line that has been partly or wholly returned — or, since 0200, written off. */
 export type EpDocLine = {
   id: string;
   partName: string;
@@ -81,6 +81,16 @@ export type ExitPermitDocInput = {
   /** "YYYY-MM-DD". Printed only on a RETURNABLE permit, as on screen. */
   expectedReturnOn: string | null;
   voided: boolean;
+  /** Total quantity WRITTEN OFF on this permit and not reversed (0200).
+   *
+   *  It is a permit-level figure and not a per-line one on purpose. The qty
+   *  column already reads "12 → 5", and that arrow means "what is still out"
+   *  whichever route the difference took — the screen says the same, and has
+   *  said it since the void case forced the arrow to key off the gap rather
+   *  than off the return counter. What the sheet owes the reader is that some
+   *  of the gap is stock nobody is chasing any more, which is one sentence
+   *  about the permit, not a fourth number in every row. */
+  writtenOffQty: number;
 
   /** timestamptz, and the session email of whoever confirmed the exit (0093). */
   exitedAt: string | null;
@@ -117,8 +127,9 @@ export type EpDocMasthead = {
   title: string;
   /** Kind, plus the due-back clause on a returnable one. */
   subtitle: string;
-  /** VOIDED only. DRAFT is not a mark: it is already the title, and marking it
-   *  twice would say two things about one state. */
+  /** VOIDED and WRITTEN OFF, either, both, or neither — they are two different
+   *  facts and a permit can carry both. DRAFT is not a mark: it is already the
+   *  title, and marking it twice would say two things about one state. */
   marks: readonly { label: string; on: boolean }[];
   /** Issued-at, then issued-by. Two lines, as the screen stacks them. */
   meta: readonly (readonly DocPair[])[];
@@ -161,6 +172,9 @@ export type ExitPermitDocVm = {
   lines: EpDocLines;
   /** "Note: …" as one line, exactly as the screen composes it. */
   note: string | null;
+  /** "5 written off — accepted as not coming back…", or null when none is.
+   *  Sits between the note and the internal value, where the screen puts it. */
+  writtenOff: string | null;
   /** "Internal value at FIFO cost: 1,240 SAR". */
   internalValue: string;
   /** Issued by / Received by / Gate — three rules to sign on. */
@@ -239,10 +253,17 @@ export function buildExitPermitVm(input: ExitPermitDocInput): ExitPermitDocVm {
     title: input.epNumber ?? t("consumption.modals.printDraft", lang),
     subtitle: t(EXIT_PERMIT_KIND_TKEY[input.kind], lang) + dueBack,
     // Solid, because a void permit HAS been voided — the mark's grammar is
-    // "did this happen", and a dashed VOIDED would say it is pending.
-    marks: input.voided
-      ? [{ label: t("consumption.modals.printVoided", lang), on: true }]
-      : [],
+    // "did this happen", and a dashed VOIDED would say it is pending. WRITTEN
+    // OFF earns a mark on the same grammar and can appear ALONGSIDE it: a
+    // permit can carry a write-off and later be voided, and hiding either mark
+    // behind the other would make the sheet claim one thing happened when two
+    // did.
+    marks: [
+      ...(input.voided ? [{ label: t("consumption.modals.printVoided", lang), on: true }] : []),
+      ...(input.writtenOffQty > 0
+        ? [{ label: t("consumption.modals.printWrittenOff", lang), on: true }]
+        : []),
+    ],
     meta,
   };
 
@@ -306,6 +327,14 @@ export function buildExitPermitVm(input: ExitPermitDocInput): ExitPermitDocVm {
   // section, because the screen does not head it.
   const note = input.note ? `${t("common.note", lang)}: ${input.note}` : null;
 
+  // The one sentence that keeps the qty column honest. Without it the arrow on
+  // a written-off line reads as "it came back", which on a gate pass is the
+  // opposite of what happened.
+  const writtenOff =
+    input.writtenOffQty > 0
+      ? fill(t("consumption.modals.printWrittenOffLine", lang), { n: qty(input.writtenOffQty) })
+      : null;
+
   // Summed from the SAME two numbers the value column prints, so the column
   // foots to this figure by construction. lib/exit-permits.ts's
   // `permitValueSar` is the same expression over the raw rows; it is not called
@@ -330,6 +359,7 @@ export function buildExitPermitVm(input: ExitPermitDocInput): ExitPermitDocVm {
     ident,
     lines,
     note,
+    writtenOff,
     internalValue: fill(t("consumption.modals.printInternalValue", lang), {
       v: formatSar(totalValue),
     }),

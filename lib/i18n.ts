@@ -2536,6 +2536,28 @@ export const dict = {
         ar: "أدخل كمية لصنف واحد على الأقل.",
       },
 
+      // --- write-offs (0200) ---
+      // DELIBERATELY NOT `returnNeedsQty`. The two sentences are identical in
+      // English today, and sharing the leaf would be the cheap move — but a
+      // write-off's quantity and a return's are different decisions, and the
+      // moment either sentence needs to say WHICH one it is refusing, a shared
+      // leaf has to be split under a reader who is already relying on it.
+      writeOffNeedsQty: {
+        en: "Enter a quantity to write off for at least one item.",
+        ar: "أدخل كمية للشطب لصنف واحد على الأقل.",
+      },
+      // A write-off is the one action here that books a cost with no document
+      // behind it — no return note, no gate pass. The reason IS the document.
+      writeOffNeedsReason: {
+        en: "Give a reason. A write-off books a cost, and the reason is the only record of why.",
+        ar: "اذكر السبب. الشطب يُقيّد تكلفة، والسبب هو السجل الوحيد لتبريرها.",
+      },
+      writeOffRequired: { en: "Write-off is required.", ar: "الشطب مطلوب." },
+      reversalNeedsReason: {
+        en: "Give a reason for reversing this write-off.",
+        ar: "اذكر سبب التراجع عن هذا الشطب.",
+      },
+
       // --- attachments ---
       chooseFile: { en: "Choose a file.", ar: "اختر ملفاً." },
       // "10" stays Latin — every figure in this app does — and ميغابايت is the
@@ -3028,6 +3050,11 @@ export const dict = {
       // `consumption.shared`. Only the two this file alone renders stay local.
       colValueOut: { en: "Value out", ar: "القيمة الخارجة" },
       colReturned: { en: "Returned", ar: "المُرجَع" },
+      // A SEPARATE column from `colReturned`, never a share of it. «المُرجَع»
+      // means the parts are on a shelf again; «المشطوب» means they are gone and
+      // the company has stopped waiting. Folding one into the other would make
+      // the Returned column say stock is back when it never came back.
+      colWrittenOff: { en: "Written off", ar: "المشطوب" },
 
       // Row detail. `{d}` is a formatDate() result and `{n}` a Latin numeral —
       // figures and dates stay Latin in both languages, the standing rule.
@@ -3035,12 +3062,22 @@ export const dict = {
       via: { en: "via {name}", ar: "عبر {name}" },
       qtyOutstanding: { en: "{n} out", ar: "{n} خارج" },
       daysOverdue: { en: "{n}d overdue", ar: "متأخر {n} يوم" },
+      // The chip beside the status pill. It STATES a quantity, it does not
+      // sound an alarm: a write-off is a decision already taken, not a thing
+      // to chase, which is why the copy has no verb of urgency in it.
+      writtenOffChip: { en: "{n} written off", ar: "مشطوب {n}" },
 
       // `confirmExit` and `voidPermit` are in `consumption.shared` — each names
       // both the row button HERE and the title of the modal it opens.
       editDraft: { en: "Edit draft", ar: "تعديل المسودة" },
       deleteDraft: { en: "Delete draft", ar: "حذف المسودة" },
       returnBtn: { en: "Return", ar: "إرجاع" },
+      // Sits beside Return, and is deliberately the same shape of word: the two
+      // buttons are the only two answers to "where did the rest of it go".
+      writeOffBtn: { en: "Write off", ar: "شطب" },
+      // The icon button on a write-off that has not been reversed. A title, so
+      // it is the whole action spelled out, not the button's short label.
+      reverseWriteOffTitle: { en: "Reverse write-off", ar: "التراجع عن الشطب" },
       printablePermit: { en: "Printable permit", ar: "إذن للطباعة" },
 
       noPriceTitle: {
@@ -3054,6 +3091,7 @@ export const dict = {
       // `{n}` is a Latin numeral inside parentheses, so one form serves every
       // count in both languages — no plural bucket is needed for a bare tally.
       returnsHeading: { en: "Returns ({n})", ar: "الإرجاعات ({n})" },
+      writeOffsHeading: { en: "Write-offs ({n})", ar: "عمليات الشطب ({n})" },
       attachmentsHeading: { en: "Attachments ({n})", ar: "المرفقات ({n})" },
       // One returned line inside a return's summary: "3 × Oil filter".
       returnItem: { en: "{q} × {p}", ar: "{q} × {p}" },
@@ -3064,6 +3102,10 @@ export const dict = {
       // Optional appendages — see this namespace's header for the leading space.
       onDate: { en: " on {d}", ar: " في {d}" },
       byWho: { en: " by {who}", ar: " بواسطة {who}" },
+      // NOT an appendage, despite sitting next to two that are: this one OPENS
+      // its own line under the write-off it reverses, so it carries no leading
+      // space. `dashReason` follows it and supplies the separator.
+      reversedOn: { en: "Reversed {d}", ar: "تم التراجع عنه {d}" },
       dashReason: { en: " — {reason}", ar: " — {reason}" },
       voidedNote: {
         en: "Only the outstanding quantity was restored; anything already returned had gone back with its own return event.",
@@ -3685,6 +3727,87 @@ export const dict = {
         ar: "يعود المخزون المُرجَع إلى دفعات السعر نفسها التي خرج منها، فتبقى التكلفة دقيقة.",
       },
 
+      // --- write off (0200) ---
+      //
+      // VOCABULARY RULING, because this is the block that reads wrong if the
+      // Arabic is picked casually. A write-off is not an إرجاع and not an
+      // إلغاء: nothing comes back and nothing is undone. «شطب» throughout, and
+      // every sentence here that could be mistaken for stock movement says so
+      // OUT LOUD — "no stock moves" is in the footer of both modals, because
+      // the one wrong belief a reader can leave this screen with is that the
+      // parts came back.
+      writeOffTitle: { en: "Write off outstanding", ar: "شطب الكمية القائمة" },
+      writeOffSubtitle: {
+        en: "Permit {n} — these parts are not coming back. The cost is booked on the date below.",
+        ar: "إذن {n} — هذه القطع لن تعود. تُقيَّد التكلفة بالتاريخ أدناه.",
+      },
+      // The submit, matching `recordReturn`'s shape: the row button is the
+      // short verb, the button that WRITES is the whole act.
+      writeOffBtn: { en: "Record write-off", ar: "تسجيل الشطب" },
+      // The amber banner. `{d}` is the due date, `{n}` the day count — two
+      // tokens, so the caller chains .replace() rather than using fill().
+      // It FLAGS and does not act: the second sentence exists to stop the
+      // banner reading as an instruction to write the permit off.
+      writeOffOverdue: {
+        en: "Due back {d}, now {n} days overdue. Writing off does not move stock — it accepts the loss and books the cost.",
+        ar: "كانت تُستحق في {d}، ومتأخرة الآن {n} يومًا. الشطب لا يحرّك مخزونًا — بل يقبل الفقد ويقيّد التكلفة.",
+      },
+      labelWriteOffDate: { en: "Written off on", ar: "تاريخ الشطب" },
+      // NOT "this month". The date is editable, so the hint names the month the
+      // DATE falls in — which is the whole reason the field is there.
+      writeOffDateHint: {
+        en: "The cost lands in the month of this date, not the month the parts left.",
+        ar: "تُقيَّد التكلفة في شهر هذا التاريخ، لا في شهر خروج القطع.",
+      },
+      writeOffReasonPlaceholder: {
+        en: "Why is this not coming back?",
+        ar: "لماذا لن تعود هذه الكمية؟",
+      },
+      colWritingOff: { en: "Writing off", ar: "المشطوب الآن" },
+      // Same shape as `alreadyBackCaption`, separator included.
+      alreadyWrittenOffCaption: {
+        en: " · {w} of {q} already written off",
+        ar: " · شُطب {w} من {q}",
+      },
+      // NOT "value still out" — a return leaves value behind and a write-off
+      // does not; the figure this column shows is the cost being booked.
+      colCostBooked: { en: "Cost booked", ar: "التكلفة المقيَّدة" },
+      writeOffTotalLabel: { en: "Total cost booked", ar: "إجمالي التكلفة المقيَّدة" },
+      writeOffFooter: {
+        en: "No stock moves. The quantity stays gone and the cost is expensed on the date above — reversing it later credits the reversal's own month, never this one.",
+        ar: "لا يتحرك أي مخزون. تبقى الكمية خارجة وتُحمَّل التكلفة بالتاريخ أعلاه — والتراجع لاحقًا يُقيَّد في شهره هو، لا في هذا الشهر.",
+      },
+
+      // --- reverse a write-off ---
+      // Deliberately NOT the same words as `consumption.client`'s button title:
+      // that one names the action from a list, this one heads the modal doing
+      // it, in the shape `voidTitle` set ("Void this permit").
+      reverseWriteOffTitle: { en: "Reverse this write-off", ar: "التراجع عن هذا الشطب" },
+      reverseWriteOffSubtitle: {
+        en: "Written off {d} — the record is kept and credited back.",
+        ar: "شُطب في {d} — يُحفظ السجل ويُردّ قيده.",
+      },
+      reverseWriteOffBtn: { en: "Record reversal", ar: "تسجيل التراجع" },
+      // `{v}` is a formatted amount. The second sentence is the accounting
+      // rule stated plainly, because it is the question the reader will ask:
+      // no closed month is rewritten.
+      reverseWriteOffIntro: {
+        en: "{v} is credited back, dated today. The month the cost was booked in keeps it; the correction lands in this one.",
+        ar: "يُردّ مبلغ {v} بقيد بتاريخ اليوم. يبقى الشهر الذي قُيّدت فيه التكلفة كما هو، ويقع التصحيح في هذا الشهر.",
+      },
+      // A QUANTITY column, not a money one: reversing raises what the permit
+      // still owes. It says "outstanding" and never "returned" — the parts are
+      // as absent after this as they were before it.
+      colCreditingBack: { en: "Back to outstanding", ar: "يعود قائمًا" },
+      reverseReasonPlaceholder: {
+        en: "Why is this write-off being reversed?",
+        ar: "ما سبب التراجع عن هذا الشطب؟",
+      },
+      reverseWriteOffFooter: {
+        en: "Still no stock moves. If the parts do turn up, record the return after this.",
+        ar: "ولا يتحرك أي مخزون كذلك. وإن ظهرت القطع لاحقًا، فسجّل الإرجاع بعد هذا.",
+      },
+
       // --- void ---
       voidTitle: { en: "Void this permit", ar: "إلغاء هذا الإذن" },
       voidSubtitle: {
@@ -3738,6 +3861,11 @@ export const dict = {
       printDueBack: { en: " · due back {d}", ar: " · تُستحق في {d}" },
       printIssued: { en: "Issued", ar: "صدر في" },
       printVoided: { en: "VOIDED", ar: "ملغى" },
+      // A MARK beside VOIDED, not instead of it — a permit can be both, and the
+      // masthead carries whichever of the two are true. English is all-caps
+      // like its neighbour; Arabic has no case, so it carries the plain word,
+      // which is the same ruling `printDraft` and `printVoided` already made.
+      printWrittenOff: { en: "WRITTEN OFF", ar: "مشطوب" },
       printFromWarehouse: { en: "From warehouse", ar: "من مستودع" },
       // `{kind}` arrives ALREADY TRANSLATED from the caller, which resolves the
       // destination enum through EXIT_PERMIT_DESTINATION_TKEY.
@@ -3746,6 +3874,14 @@ export const dict = {
       // The unit rides in the header when every line shares one. `{u}` is the
       // part's own unit string from the database, so it is not translated.
       colQtyUnit: { en: "Qty ({u})", ar: "الكمية ({u})" },
+      // ONE permit-level sentence, above the internal value, and NOT a fourth
+      // column: the qty column's "12 → 5" already answers "what is still out by
+      // any route", and splitting the 7 into returned-and-written-off on a gate
+      // pass answers a bookkeeping question nobody at the gate is asking.
+      printWrittenOffLine: {
+        en: "{n} written off and not expected back.",
+        ar: "شُطبت {n} ولا يُنتظر عودتها.",
+      },
       printInternalValue: {
         en: "Internal value at FIFO cost: {v}",
         ar: "القيمة الداخلية بتكلفة الوارد أولًا: {v}",

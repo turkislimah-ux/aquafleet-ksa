@@ -18,7 +18,8 @@ import {
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import {
-  outstandingQty, permitLineOutstanding, permitValueSar, fifoPreviewUnitCost, lineUnitCost,
+  outstandingQty, permitLineOutstanding, permitValueSar, permitWrittenOff, daysOverdue,
+  fifoPreviewUnitCost, lineUnitCost,
   returnedUnitPricePreview, EXIT_PERMIT_KIND_TKEY, EXIT_PERMIT_DESTINATION_TKEY,
   type LotLite, type ConsumptionLedgerRow,
 } from "@/lib/exit-permits";
@@ -26,6 +27,7 @@ import {
   EXIT_PERMIT_DESTINATION_LABELS,
   type ExitPermit, type ExitPermitLine, type ExitPermitFile,
   type ExitPermitDestinationKind,
+  type ExitPermitWriteOff, type ExitPermitWriteOffLine,
 } from "@/lib/db-types";
 import { useApp } from "@/components/AppShell";
 import { t, plural, arText, type Lang, type TKey } from "@/lib/i18n";
@@ -40,6 +42,7 @@ import {
   createExitPermitDraft, updateExitPermitDraft,
   addExitPermitLine, updateExitPermitLineQty, removeExitPermitLine,
   confirmExitPermit, recordExitPermitReturn, voidExitPermit,
+  writeOffExitPermitLines, reverseExitPermitWriteOff,
   uploadExitPermitFile, removeExitPermitFile,
   type ExitPermitHeaderInput,
 } from "./actions";
@@ -1176,6 +1179,321 @@ export function VoidModal({
 }
 
 // ---------------------------------------------------------------------------
+// WRITE OFF — the only money popup here that moves NO STOCK.
+//
+// Confirm, return and void all end with parts somewhere different. This one
+// ends with the parts exactly where they were: still gone. What changes is
+// WHOSE BOOKS CARRY THEM. A returnable exit expenses nothing, because the
+// company still owns what left; writing it off is the moment that stops being
+// true, so the cost lands in the month of the DECISION.
+//
+// THE DAYS-OVERDUE LINE FLAGS, IT DOES NOT ACT. Nothing about this popup is
+// automatic and no amount of lateness writes anything off — the number is there
+// so the person deciding can see how long the chase has run before they end it.
+// ---------------------------------------------------------------------------
+export function WriteOffModal({
+  permit, lines, parts, today, onClose,
+}: {
+  permit: ExitPermit; lines: ExitPermitLine[]; parts: PartLite[];
+  today: string; onClose: () => void;
+}) {
+  const { lang } = useApp();
+  const [qtys, setQtys] = useState<Record<string, string>>({});
+  const [reason, setReason] = useState("");
+  const [writeOffDate, setWriteOffDate] = useState(today);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+
+  const open = lines.filter((l) => outstandingQty(l) > 0);
+  const anyOver = open.some((l) => Number(qtys[l.id] ?? 0) > outstandingQty(l));
+  const anyEntered = open.some((l) => Number(qtys[l.id] ?? 0) > 0);
+
+  // The cost this decision will book, priced off the STAMPED unit cost —
+  // `unit_price_sar`, which 0093/0200 keep as the weighted average of what
+  // actually left the lots.
+  //
+  // IT IS A PREVIEW AND NOT A PROMISE, and the difference is worth naming.
+  // write_off_exit_permit_lines does not multiply by this average: it walks the
+  // line's own per-lot ledger newest-lot-first and books each slice at THAT
+  // lot's price, then writes the sum onto the header. On a line drawn from one
+  // lot — which is nearly all of them — the two agree to the fils. On a line
+  // drawn from two lots at different prices they can differ, because the
+  // average is not the price of the units this write-off happens to give up.
+  //
+  // Shown anyway, and shown on this basis on purpose: `unit_price_sar` is what
+  // every other money figure on this page is priced at (Value out, the internal
+  // value on the printout), so a preview computed any other way would disagree
+  // with the row it sits under. The ledger stays the authority, and the header
+  // it writes is what the expanded row reads back afterwards.
+  const bookingSar = open.reduce((n, l) => {
+    const q = Math.min(Number(qtys[l.id] ?? 0), outstandingQty(l));
+    return q > 0 ? n + q * Number(l.unit_price_sar) : n;
+  }, 0);
+
+  const late = permit.expected_return_on ? daysOverdue(permit.expected_return_on, today) : 0;
+
+  return (
+    <Shell
+      size="lg"
+      title={t("consumption.modals.writeOffTitle", lang)}
+      subtitle={fill("consumption.modals.writeOffSubtitle", lang, "{n}", permit.ep_number ?? "")}
+      onClose={onClose}
+      footer={
+        <>
+          <Btn variant="outline" onClick={onClose}>{t("common.cancel", lang)}</Btn>
+          <Btn
+            variant="primary"
+            disabled={busy || anyOver || !anyEntered || !reason.trim()}
+            onClick={async () => {
+              setBusy(true); setError(null);
+              const payload = open
+                .map((l) => ({ line_id: l.id, qty: Number(qtys[l.id] ?? 0) }))
+                .filter((x) => x.qty > 0);
+              const res = await writeOffExitPermitLines(
+                permit.id, payload, reason, writeOffDate, note || null, lang,
+              );
+              setBusy(false);
+              if (res.error) { setError(res.error); return; }
+              onClose();
+            }}
+          >
+            {t(busy ? "common.recording" : "consumption.modals.writeOffBtn", lang)}
+          </Btn>
+        </>
+      }
+    >
+      <ErrorBox msg={error} />
+
+      {/* THE FLAG. Present only when there IS a due date and it has passed —
+          a permit written off early is a decision, not a failure, and telling
+          it that it is "0 days overdue" would be noise dressed as a warning. */}
+      {permit.expected_return_on && late > 0 && (
+        <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-xs bg-amber-500/10 text-amber-800 dark:text-amber-300">
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>
+            {t("consumption.modals.writeOffOverdue", lang)
+              .replace("{d}", () => formatDate(permit.expected_return_on + "T00:00:00"))
+              .replace("{n}", () => String(late))}
+          </span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs muted block mb-1">{t("consumption.modals.labelWriteOffDate", lang)}</label>
+          <input type="date" value={writeOffDate} onChange={(e) => setWriteOffDate(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+          <p className="text-[11px] muted mt-1">{t("consumption.modals.writeOffDateHint", lang)}</p>
+        </div>
+        <div>
+          <label className="text-xs muted block mb-1">{t("consumption.modals.labelReason", lang)}</label>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={t("consumption.modals.writeOffReasonPlaceholder", lang)}
+            className={INPUT}
+            style={INPUT_STYLE}
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs muted block mb-1">{t("common.note", lang)}</label>
+        <input value={note} onChange={(e) => setNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+      </div>
+
+      <Table>
+        <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+          <tr>
+            <TH>{t("consumption.modals.colItem", lang)}</TH>
+            <TH>{t("consumption.modals.colWritingOff", lang)}</TH>
+            <TH>{t("consumption.shared.outstanding", lang)}</TH>
+            <TH>{t("consumption.modals.colCostBooked", lang)}</TH>
+          </tr>
+        </thead>
+        <tbody>
+          {open.map((l) => {
+            const p = partsById.get(l.part_id);
+            const out = outstandingQty(l);
+            const entered = Number(qtys[l.id] ?? 0);
+            const active = entered > 0;
+            const over = entered > out;
+            return (
+              <tr
+                key={l.id}
+                className={cn(
+                  active && !over && "bg-amber-500/[0.09]",
+                  over && "bg-rose-500/10",
+                )}
+              >
+                <TD>
+                  <span className={cn("text-sm", active ? "font-semibold" : "font-medium")}>
+                    {p ? arText(p.name, p.name_ar, lang) : t("consumption.modals.unknownPart", lang)}
+                  </span>
+                  <div className="text-[11px] muted">
+                    {p?.sku}
+                    {Number(l.qty_written_off) > 0 && t("consumption.modals.alreadyWrittenOffCaption", lang)
+                      .replace("{w}", () => String(l.qty_written_off))
+                      .replace("{q}", () => String(l.qty))}
+                  </div>
+                </TD>
+                <TD>
+                  <input
+                    type="number"
+                    min={0}
+                    max={out}
+                    step="0.01"
+                    value={qtys[l.id] ?? ""}
+                    onChange={(e) => setQtys((s) => ({ ...s, [l.id]: e.target.value }))}
+                    placeholder="0"
+                    className={cn(INPUT, "w-24", over && "border-rose-500")}
+                    style={over ? undefined : INPUT_STYLE}
+                  />
+                </TD>
+                {/* Same before -> after cell as the return popup, and the same
+                    reason for it: this row is proposing a CHANGE, so it shows
+                    one. What it will not do is pretend a change on a row
+                    nobody has touched. */}
+                <TD className="text-sm tabular-nums">
+                  {!active ? (
+                    <span className="font-medium">{out}</span>
+                  ) : over ? (
+                    <span className="font-medium text-rose-600 dark:text-rose-400">
+                      {fill("consumption.modals.onlyNOut", lang, "{n}", String(out))}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="muted">{out}</span>
+                      <span className="muted">→</span>
+                      <span className="font-semibold">{out - entered}</span>
+                    </span>
+                  )}
+                </TD>
+                {/* NOT "value still out" — the return popup's column answers
+                    that question because a return leaves value behind. A
+                    write-off's whole point is the cost it BOOKS, so that is
+                    the figure, and it foots to the total under the table. */}
+                <TD className="text-sm tabular-nums">
+                  {active && !over
+                    ? <span className="font-semibold">{formatSar(entered * Number(l.unit_price_sar))}</span>
+                    : <span className="muted">—</span>}
+                </TD>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Table>
+
+      <div className="flex items-center justify-between rounded-lg px-3 py-2 bg-amber-500/10">
+        <span className="text-xs font-medium">{t("consumption.modals.writeOffTotalLabel", lang)}</span>
+        <span className="text-sm font-semibold tabular-nums">{formatSar(bookingSar)}</span>
+      </div>
+      <p className="text-[11px] muted">{t("consumption.modals.writeOffFooter", lang)}</p>
+    </Shell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// REVERSE A WRITE-OFF — a correction, not a return.
+//
+// It credits the write-off back with MIRROR rows dated today, so the month the
+// cost was booked in keeps what it booked and the month of the correction
+// carries the correction. Nothing is deleted and nothing is restated.
+//
+// AND STILL NOTHING COMES BACK. If the parts then physically turn up, that is
+// a separate return recorded afterwards — which is also why the order is
+// forced: record_exit_permit_return refuses a return against written-off
+// quantity, so a reversal has to come first.
+// ---------------------------------------------------------------------------
+export function ReverseWriteOffModal({
+  writeOff, writeOffLines, lines, parts, onClose,
+}: {
+  writeOff: ExitPermitWriteOff; writeOffLines: ExitPermitWriteOffLine[];
+  lines: ExitPermitLine[]; parts: PartLite[]; onClose: () => void;
+}) {
+  const { lang } = useApp();
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+  const linesById = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
+
+  const mine = writeOffLines.filter((w) => w.exit_permit_write_off_id === writeOff.id);
+
+  return (
+    <Shell
+      title={t("consumption.modals.reverseWriteOffTitle", lang)}
+      subtitle={fill(
+        "consumption.modals.reverseWriteOffSubtitle", lang,
+        "{d}", formatDate(writeOff.write_off_date + "T00:00:00"),
+      )}
+      onClose={onClose}
+      footer={
+        <>
+          <Btn variant="outline" onClick={onClose}>{t("common.cancel", lang)}</Btn>
+          <Btn
+            variant="primary"
+            disabled={busy || !reason.trim()}
+            onClick={async () => {
+              setBusy(true); setError(null);
+              const res = await reverseExitPermitWriteOff(writeOff.id, reason, lang);
+              setBusy(false);
+              if (res.error) { setError(res.error); return; }
+              onClose();
+            }}
+          >
+            {t(busy ? "common.recording" : "consumption.modals.reverseWriteOffBtn", lang)}
+          </Btn>
+        </>
+      }
+    >
+      <ErrorBox msg={error} />
+
+      <p className="text-sm">
+        {fill("consumption.modals.reverseWriteOffIntro", lang, "{v}", formatSar(Number(writeOff.amount_sar)))}
+      </p>
+
+      <Table>
+        <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+          <tr>
+            <TH>{t("common.part", lang)}</TH>
+            <TH>{t("consumption.modals.colCreditingBack", lang)}</TH>
+          </tr>
+        </thead>
+        <tbody>
+          {mine.map((w) => {
+            const line = linesById.get(w.exit_permit_line_id);
+            const p = line ? partsById.get(line.part_id) : null;
+            return (
+              <tr key={w.id}>
+                <TD className="text-sm">
+                  {p ? arText(p.name, p.name_ar, lang) : t("consumption.modals.unknownPart", lang)}
+                </TD>
+                <TD className="text-xs tabular-nums font-medium">{w.qty}</TD>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Table>
+
+      <div>
+        <label className="text-xs muted block mb-1">{t("consumption.modals.labelReason", lang)}</label>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder={t("consumption.modals.reverseReasonPlaceholder", lang)}
+          className={INPUT}
+          style={INPUT_STYLE}
+        />
+      </div>
+
+      <p className="text-[11px] muted">{t("consumption.modals.reverseWriteOffFooter", lang)}</p>
+    </Shell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // PRINTABLE PERMIT — the physical document that rides with the driver.
 //
 // THIS MODAL IS NOW A PREVIEW, AND THE PRINTOUT IS SOMETHING ELSE. It used to be
@@ -1204,6 +1522,11 @@ export function PermitPrintView({
   // instead of the cost of stock that came back the moment it was voided. The
   // sheet already stamps VOIDED; the figures now agree with the stamp.
   const value = permitValueSar(permit, lines);
+  // Permit-level, and NOT gated on status: a write-off is a money decision
+  // about parts that left, and voiding the permit afterwards does not un-make
+  // it. The sheet says so in one sentence rather than a per-row column — see
+  // the note on `writtenOffQty` in lib/docvm/exitPermit.ts.
+  const writtenOff = permitWrittenOff(lines);
 
   // THE UNIT LIVES IN THE QTY HEADER when every item shares one — "Qty (pcs)"
   // reads as a quantity, where a whole Unit column repeated the same word down
@@ -1231,6 +1554,7 @@ export function PermitPrintView({
           kind: permit.kind,
           expectedReturnOn: permit.expected_return_on,
           voided: permit.status === "voided",
+          writtenOffQty: writtenOff,
           exitedAt: permit.exited_at,
           exitedBy: permit.exited_by,
           warehouseName,
@@ -1315,6 +1639,12 @@ export function PermitPrintView({
             {permit.status === "voided" && (
               <div className="mt-1 font-semibold text-rose-600 dark:text-rose-400">{t("consumption.modals.printVoided", lang)}</div>
             )}
+            {/* Both stamps can show at once, and the sheet's mark list is
+                built the same way: a permit can be written off and later
+                voided, and printing only one would claim only one happened. */}
+            {writtenOff > 0 && (
+              <div className="mt-1 font-semibold text-amber-600 dark:text-amber-400">{t("consumption.modals.printWrittenOff", lang)}</div>
+            )}
           </div>
         </div>
 
@@ -1383,6 +1713,14 @@ export function PermitPrintView({
         {permit.note && (
           <div className="text-sm">
             <span className="muted">{t("common.note", lang)}{": "}</span>{permit.note}
+          </div>
+        )}
+
+        {/* Between the note and the money, and the sheet repeats it verbatim.
+            Without it the arrow in the qty column reads as "it came back". */}
+        {writtenOff > 0 && (
+          <div className="text-[11px] muted">
+            {fill("consumption.modals.printWrittenOffLine", lang, "{n}", String(writtenOff))}
           </div>
         )}
 

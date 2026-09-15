@@ -17,7 +17,7 @@ import type {
   ConsumptionApproval, ExitPermit, ExitPermitLine,
   WorkOrder, WorkOrderPart, OutsourcedJob, WorkshopPayment,
 } from "./db-types";
-import { permitValueSar } from "./exit-permits";
+import { permitLineOutstanding, permitValueSar } from "./exit-permits";
 import { t, type Lang, type TKey } from "./i18n";
 
 export type ApprovalKind = "exit_permit" | "work_order" | "outsourced_job";
@@ -206,7 +206,11 @@ export function buildApprovalEvents(input: {
       // stamped FIFO cost. Anything returned is back on the shelf and is not
       // consumption to approve.
       parts: lines.map((l) => {
-        const outstanding = Number(l.qty) - Number(l.qty_returned);
+        // Through the helper, NOT spelled out here. This used to be its own
+        // copy of `qty - qty_returned`, and 0200's write-off column would have
+        // sailed straight past it — the value below would have kept billing
+        // for approval stock the company had already written off.
+        const outstanding = permitLineOutstanding(p, l);
         return {
           key: l.id,
           part_id: l.part_id,

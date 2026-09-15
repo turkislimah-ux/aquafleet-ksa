@@ -41,7 +41,9 @@ import type {
 // translates the month NAME on top of that and nothing else.
 import { formatDateLang, formatNum, monthLabel, monthName } from "./utils";
 import { t, plural, type Lang, type TKey } from "./i18n";
-import { EXIT_PERMIT_DESTINATION_TKEY, EXIT_PERMIT_DESTINATION_INLINE_TKEY } from "./exit-permits";
+import {
+  EXIT_PERMIT_DESTINATION_TKEY, EXIT_PERMIT_DESTINATION_INLINE_TKEY, permitLineOutstanding,
+} from "./exit-permits";
 
 export type ConsumptionSource = "maintenance" | "exit_permit";
 
@@ -739,8 +741,13 @@ export function topParts(
  * Deliberately NOT derived from the consumption rows above: those are net of
  * returns, which is the same arithmetic but answers a different question.
  * This one reads exit_permit_lines directly, exactly as the brief defines it:
- * (qty − qty_returned) × unit_price_sar for returnable permits still exited.
- * A permit whose stock is all back contributes zero and is dropped.
+ * outstanding × unit_price_sar for returnable permits still exited. A permit
+ * whose stock is all back contributes zero and is dropped.
+ *
+ * "Outstanding" is `permitLineOutstanding`, NOT a local subtraction. This list
+ * is the chase list — what is still owed back — and 0200 added a third term to
+ * that definition (written-off stock is gone, not owed). Spelling the
+ * arithmetic here again is how this row would have kept chasing it.
  */
 export type OutstandingRow = {
   permitId: string;
@@ -769,7 +776,7 @@ export function outstandingReturnable(input: {
     const lines = linesByPermit.get(p.id) ?? [];
     let qty = 0, valueSar = 0;
     for (const l of lines) {
-      const remaining = Number(l.qty) - Number(l.qty_returned);
+      const remaining = permitLineOutstanding(p, l);
       if (remaining <= 0) continue;
       qty += remaining;
       valueSar += remaining * Number(l.unit_price_sar);

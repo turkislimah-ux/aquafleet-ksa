@@ -17,26 +17,29 @@ import { useRecordFocus } from "@/lib/useRecordFocus";
 import { useRouter } from "next/navigation";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, Printer, Undo2, Ban,
-  RotateCcw, AlertTriangle, FileText, Paperclip,
+  RotateCcw, AlertTriangle, FileText, FileMinus, Paperclip,
 } from "lucide-react";
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
 import { t, arText, type Lang, type TKey } from "@/lib/i18n";
 import {
-  permitLineOutstanding, permitOutstanding, permitValueSar, isOverdue, daysOverdue,
+  permitLineOutstanding, permitOutstanding, permitValueSar, permitWrittenOff,
+  isOverdue, daysOverdue,
   lineUnitCost, EXIT_PERMIT_STATUS_PILL, EXIT_PERMIT_KIND_TKEY,
   EXIT_PERMIT_DESTINATION_TKEY, type LotLite, type ConsumptionLedgerRow,
 } from "@/lib/exit-permits";
 import {
   type ExitPermit, type ExitPermitLine, type ExitPermitReturn,
   type ExitPermitReturnLine, type ExitPermitFile,
+  type ExitPermitWriteOff, type ExitPermitWriteOffLine,
   type ConsumptionApproval, type WorkOrder, type WorkOrderPart,
   type OutsourcedJob, type WorkshopPayment,
 } from "@/lib/db-types";
 import { deleteExitPermitDraft, getExitPermitFileUrls } from "./actions";
 import {
   PermitFormModal, ConfirmExitModal, ReturnModal, VoidModal, PermitPrintView,
+  WriteOffModal, ReverseWriteOffModal,
 } from "./ExitPermitModals";
 import ApprovalsTab from "./ApprovalsTab";
 import PartsUsageTab from "./PartsUsageTab";
@@ -72,7 +75,7 @@ const TABS: { key: Tab; labelKey: TKey }[] = [
 ];
 
 export default function ConsumptionClient({
-  permits, lines, returns, returnLines, files,
+  permits, lines, returns, returnLines, writeOffs, writeOffLines, files,
   warehouses, parts, stations, projects, trucks, customers, staff,
   lots, ledger,
   approvals, workOrders, workOrderParts, outsourcedJobs, workshopPayments,
@@ -83,6 +86,10 @@ export default function ConsumptionClient({
   lines: ExitPermitLine[];
   returns: ExitPermitReturn[];
   returnLines: ExitPermitReturnLine[];
+  // REVERSED ONES INCLUDED. The expansion lists both states, because both
+  // posted real money in real months.
+  writeOffs: ExitPermitWriteOff[];
+  writeOffLines: ExitPermitWriteOffLine[];
   files: ExitPermitFile[];
   warehouses: WarehouseLite[];
   parts: PartLite[];
@@ -142,6 +149,11 @@ export default function ConsumptionClient({
   const [confirmPermit, setConfirmPermit] = useState<ExitPermit | null>(null);
   const [returnPermit, setReturnPermit] = useState<ExitPermit | null>(null);
   const [voidPermit, setVoidPermit] = useState<ExitPermit | null>(null);
+  const [writeOffPermit, setWriteOffPermit] = useState<ExitPermit | null>(null);
+  // The REVERSE popup keys off the write-off, not the permit: a permit can
+  // carry several, each with its own date, amount and reason, and reversing
+  // "the permit's write-off" would be a question with more than one answer.
+  const [reverseWriteOff, setReverseWriteOff] = useState<ExitPermitWriteOff | null>(null);
   const [printPermit, setPrintPermit] = useState<ExitPermit | null>(null);
 
   const linesByPermit = useMemo(() => {
@@ -163,6 +175,16 @@ export default function ConsumptionClient({
     }
     return m;
   }, [returns]);
+
+  const writeOffsByPermit = useMemo(() => {
+    const m = new Map<string, ExitPermitWriteOff[]>();
+    for (const w of writeOffs) {
+      const a = m.get(w.exit_permit_id) ?? [];
+      a.push(w);
+      m.set(w.exit_permit_id, a);
+    }
+    return m;
+  }, [writeOffs]);
 
   const filesByPermit = useMemo(() => {
     const m = new Map<string, ExitPermitFile[]>();
@@ -267,6 +289,7 @@ export default function ConsumptionClient({
   function closeAll() {
     setFormPermit(null); setConfirmPermit(null);
     setReturnPermit(null); setVoidPermit(null);
+    setWriteOffPermit(null); setReverseWriteOff(null);
     router.refresh();
   }
 
@@ -427,10 +450,16 @@ export default function ConsumptionClient({
                   {visible.map((p) => {
                     const pl = linesByPermit.get(p.id) ?? [];
                     const pr = returnsByPermit.get(p.id) ?? [];
+                    const pw = writeOffsByPermit.get(p.id) ?? [];
                     const pf = filesByPermit.get(p.id) ?? [];
                     const open = expanded.has(p.id);
                     const overdue = overdueIds.has(p.id);
                     const outstanding = permitOutstanding(pl);
+                    // From the LINE COLUMNS, not from `pw` — the write-off rows
+                    // are the paperwork, `qty_written_off` is the balance, and
+                    // the RPCs move the two together. Summing reversed and
+                    // un-reversed paperwork would count a cancelled decision.
+                    const writtenOff = permitWrittenOff(pl);
                     return (
                       <Fragment key={p.id}>
                         <tr className={cn(overdue && "bg-rose-500/[0.06]")}>
@@ -509,6 +538,20 @@ export default function ConsumptionClient({
                                   {fill("consumption.client.daysOverdue", lang, "{n}", String(daysOverdue(p.expected_return_on, today)))}
                                 </span>
                               )}
+                              {/* AMBER, NOT ROSE, and the distinction is the
+                                  point: rose on this page means something is
+                                  wrong and wants chasing. A write-off is a
+                                  decision that has already been taken, so it
+                                  states itself without raising an alarm. It is
+                                  a CHIP beside the status rather than a status
+                                  of its own, because the permit is still
+                                  whatever it was — exited, or voided. */}
+                              {writtenOff > 0 && (
+                                <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/25">
+                                  <FileMinus className="h-3 w-3" />
+                                  {fill("consumption.client.writtenOffChip", lang, "{n}", String(writtenOff))}
+                                </span>
+                              )}
                             </div>
                           </TD>
                           <TD>
@@ -535,9 +578,22 @@ export default function ConsumptionClient({
                               {p.status === "exited" && (
                                 <>
                                   {p.kind === "returnable" && outstanding > 0 && (
-                                    <Btn variant="outline" onClick={() => setReturnPermit(p)}>
-                                      <Undo2 className="h-3.5 w-3.5" />{t("consumption.client.returnBtn", lang)}
-                                    </Btn>
+                                    <>
+                                      <Btn variant="outline" onClick={() => setReturnPermit(p)}>
+                                        <Undo2 className="h-3.5 w-3.5" />{t("consumption.client.returnBtn", lang)}
+                                      </Btn>
+                                      {/* SAME GATE AS RETURN — returnable,
+                                          exited, something still out — because
+                                          they are the two answers to the same
+                                          question: it came back, or it is not
+                                          coming back. A permanent permit
+                                          expensed its parts on the way out and
+                                          has nothing left to write off, which
+                                          is also what the RPC says. */}
+                                      <Btn variant="outline" onClick={() => setWriteOffPermit(p)}>
+                                        <FileMinus className="h-3.5 w-3.5" />{t("consumption.client.writeOffBtn", lang)}
+                                      </Btn>
+                                    </>
                                   )}
                                   <button
                                     onClick={() => setVoidPermit(p)}
@@ -583,6 +639,12 @@ export default function ConsumptionClient({
                                       <TH>{t("common.note", lang)}</TH>
                                       <TH>{t("consumption.shared.qtyOut", lang)}</TH>
                                       <TH>{t("consumption.client.colReturned", lang)}</TH>
+                                      {/* ONLY WHEN THERE IS ONE. A permanent
+                                          permit, and every returnable nobody
+                                          has written anything off, gets the
+                                          table it had — a column of dashes is
+                                          a question the reader did not ask. */}
+                                      {writtenOff > 0 && <TH>{t("consumption.client.colWrittenOff", lang)}</TH>}
                                       <TH>{t("consumption.shared.outstanding", lang)}</TH>
                                       <TH>{t("consumption.shared.fifoUnitValue", lang)}</TH>
                                       <TH>{t("consumption.shared.value", lang)}</TH>
@@ -622,7 +684,19 @@ export default function ConsumptionClient({
                                       // 0 outstanding". Which return events fired
                                       // is still on the page — the Returns list
                                       // directly below breaks them down.
-                                      const back = Number(l.qty) - out;
+                                      //
+                                      // WRITTEN-OFF UNITS COME OUT OF THIS, and
+                                      // that is the whole reason the subtraction
+                                      // is spelled here rather than left to
+                                      // widen silently. `out` already excludes
+                                      // them, so leaving them in `back` would
+                                      // file them under Returned — the one
+                                      // column on this page that means the
+                                      // parts are physically on a shelf again.
+                                      // They are not. The three columns still
+                                      // add up, now across four terms.
+                                      const wo = Number(l.qty_written_off);
+                                      const back = Number(l.qty) - out - wo;
                                       return (
                                         <tr key={l.id}>
                                           <TD>
@@ -640,6 +714,13 @@ export default function ConsumptionClient({
                                           </TD>
                                           <TD className="text-xs tabular-nums">{l.qty}</TD>
                                           <TD className="text-xs tabular-nums">{back || <span className="muted">—</span>}</TD>
+                                          {writtenOff > 0 && (
+                                            <TD className="text-xs tabular-nums">
+                                              {wo
+                                                ? <span className="text-amber-700 dark:text-amber-400 font-medium">{wo}</span>
+                                                : <span className="muted">—</span>}
+                                            </TD>
+                                          )}
                                           <TD className="text-xs tabular-nums font-medium">{out}</TD>
                                           <TD className="text-xs tabular-nums">
                                             {(() => {
@@ -698,6 +779,76 @@ export default function ConsumptionClient({
                                             }).join(", ")}
                                             {r.note && <span className="muted"> · {r.note}</span>}
                                             {r.created_by && <span className="muted"> · {r.created_by}</span>}
+                                          </li>
+                                        );
+                                      })}
+                                    </ul>
+                                  </>
+                                )}
+
+                                {/* WRITE-OFFS, reversed ones included. A
+                                    reversed row is struck through rather than
+                                    dropped: it booked a cost in a month that
+                                    has probably closed, and its credit landed
+                                    in another. A list that showed only the live
+                                    ones would leave the Cost report carrying
+                                    two entries this page never mentions. */}
+                                {pw.length > 0 && (
+                                  <>
+                                    <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
+                                      {fill("consumption.client.writeOffsHeading", lang, "{n}", String(pw.length))}
+                                    </div>
+                                    <ul className="space-y-1">
+                                      {pw.map((w) => {
+                                        const wl = writeOffLines.filter((x) => x.exit_permit_write_off_id === w.id);
+                                        const reversed = w.reversed_at !== null;
+                                        return (
+                                          <li
+                                            key={w.id}
+                                            className={cn(
+                                              "text-xs rounded-lg border px-2.5 py-1.5 flex items-start gap-2",
+                                              reversed && "opacity-60",
+                                            )}
+                                            style={{ borderColor: "rgb(var(--border))" }}
+                                          >
+                                            <div className="min-w-0 flex-1">
+                                              <span className={cn("font-medium", reversed && "line-through")}>
+                                                {formatDate(w.write_off_date + "T00:00:00")}
+                                              </span>
+                                              {" — "}
+                                              <span className={cn(reversed && "line-through")}>
+                                                {formatSar(Number(w.amount_sar))}
+                                              </span>
+                                              {" · "}
+                                              {wl.map((x) => {
+                                                const line = pl.find((l) => l.id === x.exit_permit_line_id);
+                                                const part = line ? partsById.get(line.part_id) : null;
+                                                const name = part
+                                                  ? arText(part.name, part.name_ar, lang)
+                                                  : t("consumption.client.unknownShort", lang);
+                                                return t("consumption.client.returnItem", lang)
+                                                  .replace("{q}", () => String(x.qty))
+                                                  .replace("{p}", () => name);
+                                              }).join(", ")}
+                                              <span className="muted"> · {w.reason}</span>
+                                              {w.note && <span className="muted"> · {w.note}</span>}
+                                              {w.written_off_by && <span className="muted"> · {w.written_off_by}</span>}
+                                              {reversed && (
+                                                <div className="mt-0.5 text-[11px] text-amber-700 dark:text-amber-400">
+                                                  {w.reversed_at && fill("consumption.client.reversedOn", lang, "{d}", formatDate(w.reversed_at))}
+                                                  {w.reversal_reason && fill("consumption.client.dashReason", lang, "{reason}", w.reversal_reason)}
+                                                </div>
+                                              )}
+                                            </div>
+                                            {!reversed && (
+                                              <button
+                                                onClick={() => setReverseWriteOff(w)}
+                                                className="shrink-0 h-7 w-7 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
+                                                title={t("consumption.client.reverseWriteOffTitle", lang)}
+                                              >
+                                                <RotateCcw className="h-3.5 w-3.5" />
+                                              </button>
+                                            )}
                                           </li>
                                         );
                                       })}
@@ -813,6 +964,26 @@ export default function ConsumptionClient({
         <VoidModal
           permit={voidPermit}
           lines={linesByPermit.get(voidPermit.id) ?? []}
+          parts={parts}
+          onClose={closeAll}
+        />
+      )}
+
+      {writeOffPermit && (
+        <WriteOffModal
+          permit={writeOffPermit}
+          lines={linesByPermit.get(writeOffPermit.id) ?? []}
+          parts={parts}
+          today={today}
+          onClose={closeAll}
+        />
+      )}
+
+      {reverseWriteOff && (
+        <ReverseWriteOffModal
+          writeOff={reverseWriteOff}
+          writeOffLines={writeOffLines}
+          lines={linesByPermit.get(reverseWriteOff.exit_permit_id) ?? []}
           parts={parts}
           onClose={closeAll}
         />

@@ -1610,7 +1610,8 @@ export type ArchiveDocumentType = {
 // not derivable. "Has stock actually left the building" is an event that
 // happened, not a fact computable from other columns. What IS derived and
 // never stored: whether a returnable is OVERDUE (expected_return_on vs
-// today) and how much is outstanding (qty - qty_returned).
+// today) and how much is outstanding
+// (qty - qty_returned - qty_written_off, since 0200).
 // ---------------------------------------------------------------------------
 
 export type ExitPermitStatus = "draft" | "exited" | "voided";
@@ -1680,6 +1681,15 @@ export type ExitPermitLine = {
   // it to decide what is still outstanding, so a stray write here would make
   // a later void restore stock twice.
   qty_returned: number;
+  // Added by 0200. Written ONLY by write_off_exit_permit_lines (up) and
+  // reverse_exit_permit_write_off (down). Never by the app.
+  //
+  // THIS IS NOT A RETURN. Written-off quantity is stock that left and is now
+  // accepted as gone: the money is expensed at the write-off date, and NO
+  // stock comes back. `qty_returned` still counts RETURN EVENTS only — the
+  // two columns are disjoint, and the database enforces
+  // `qty_returned + qty_written_off <= qty`.
+  qty_written_off: number;
   note: string | null;
   created_at: string;
 };
@@ -1696,6 +1706,44 @@ export type ExitPermitReturn = {
 export type ExitPermitReturnLine = {
   id: string;
   exit_permit_return_id: string;
+  exit_permit_line_id: string;
+  qty: number;
+  created_at: string;
+};
+
+// ---------------------------------------------------------------------------
+// WRITE-OFFS (migration 0200) — the returnable that is never coming back.
+//
+// A returnable permit expenses nothing at exit: the parts are still the
+// company's, sitting somewhere else. When they are lost, scrapped or simply
+// written off after months overdue, SOMEBODY has to expense them, and the
+// month that owns that cost is the month the decision was made — never the
+// month of the exit, which may be closed.
+//
+// `amount_sar` is FROZEN at write-off from the line's own per-lot ledger, so a
+// later FIFO movement cannot restate a decision already booked. A reversal
+// posts MIRROR CREDITS dated at the reversal, rather than deleting the
+// original rows — same reason.
+// ---------------------------------------------------------------------------
+export type ExitPermitWriteOff = {
+  id: string;
+  exit_permit_id: string;
+  // The date the cost lands in Cost / P&L. Defaults to today in Riyadh.
+  write_off_date: string;
+  reason: string;
+  written_off_by: string | null;
+  amount_sar: number;
+  note: string | null;
+  created_at: string;
+  // All three set together or all three null — the database checks the shape.
+  reversed_at: string | null;
+  reversed_by: string | null;
+  reversal_reason: string | null;
+};
+
+export type ExitPermitWriteOffLine = {
+  id: string;
+  exit_permit_write_off_id: string;
   exit_permit_line_id: string;
   qty: number;
   created_at: string;
