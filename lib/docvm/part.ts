@@ -98,11 +98,25 @@
 //   * `spentByConsumption` is a hard 0 while `totalConsumed` is not — see
 //     lib/part-finance.ts's header. A part can honestly report units consumed
 //     beside 0 SAR spent. It reads oddly and it is what the drawer says.
-//   * The movement DATE column is formatDateTime, which is en-US in BOTH
-//     languages. The Arabic sheet therefore carries Latin month abbreviations
-//     in that one column. Mirrored deliberately: translating it here would make
-//     the sheet and the drawer disagree about a value the reader can compare
-//     side by side.
+//   * `spentByConsumption` above is the only one of these left. The movement
+//     DATE column used to be the second: it was `formatDateTime`, en-US in both
+//     languages, mirrored from the drawer on the grounds that a reader comparing
+//     the two side by side should not see one value written two ways.
+//
+//     THAT MIRROR IS NOW BROKEN ON PURPOSE, and the old note here was wrong
+//     about it twice over. It claimed the Arabic sheet carried "Latin month
+//     abbreviations" in that column; it carried no month NAME at all —
+//     `formatDateTime` with no options renders `8/5/2026, 10:37:55 PM`, which
+//     is pure digits. And the comparability it was protecting was already gone,
+//     because the sheet's own footer has always been language-aware: the Arabic
+//     page printed `سبتمبر 14, 2026` at the bottom and `8/5/2026` in the table.
+//     The mirror it kept was with the DRAWER; the disagreement it caused was
+//     with the rest of its own page.
+//
+//     So the column now takes the sheet's language like every other date on it.
+//     The sheet and the drawer write the same instant differently, which is the
+//     accepted cost — a printed page is read on its own, away from the screen
+//     it came from.
 
 import type {
   Part,
@@ -118,12 +132,24 @@ import { formatSarVat, lineVat } from "../inventory-vat";
 import { computePartFinanceStats, partAiTip } from "../part-finance";
 import {
   formatDateLang,
-  formatDateTime,
+  formatDateTimeLang,
   formatNum,
   formatSar,
   monthLabel,
   riyadhDayKey,
 } from "../utils";
+
+// One sheet, one date language — reasoning in lib/docvm/exitPermit.ts's DATE
+// SHAPE header. Seconds are spelled out rather than defaulted so the movement
+// stamp keeps the precision it had.
+const PART_DATETIME = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+} as const;
 
 /** Not DOC_COMPANY. lib/docvm/reportDoc.ts is the REPORTS pack's shared
  *  identity; this sheet mirrors an unrelated screen that happens to print the
@@ -471,8 +497,8 @@ export function buildPartVm(input: PartDocInput): PartDocVm {
         after: String(m.qty_after),
         note: m.note ?? DASH,
         by: m.created_by ?? DASH,
-        // en-US IN BOTH LANGUAGES, which is what the drawer does. See header.
-        date: formatDateTime(m.created_at),
+        // Follows the SHEET's language, not the drawer's. See header.
+        date: formatDateTimeLang(m.created_at, lang, PART_DATETIME),
       })),
       empty: t("inventory.stock.noMovementsYet", lang),
     },

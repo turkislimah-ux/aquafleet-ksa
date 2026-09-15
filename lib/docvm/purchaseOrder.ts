@@ -54,6 +54,34 @@ import { arText, fill, t, type Lang } from "../i18n";
 import { formatDateLang, formatDateTime } from "../utils";
 
 // ---------------------------------------------------------------------------
+// WHY THE APPROVAL STAMPS BELOW STAY NUMERIC WHILE THE PERMIT'S DID NOT
+// ---------------------------------------------------------------------------
+// The one-sheet-one-date-language rule is real and it is stated in
+// lib/docvm/exitPermit.ts. This sheet is its exception, on two grounds that
+// both had to hold:
+//
+//   1. THIS SHEET'S DATES ARE DELIBERATELY NOT LOCALISED. Read the contract on
+//      requestDate / expectedDelivery / receivedDate above: raw "YYYY-MM-DD",
+//      "exactly as the modal's own grid prints them", because localising them
+//      "would make the document say something the screen does not". Giving the
+//      two approval stamps Arabic month names would not make this sheet
+//      consistent — it would put localised stamps beside raw ISO dates and make
+//      it less so. An ISO date is script-neutral and orders correctly in Arabic
+//      on its own; so does a purely numeric stamp. Neither can scramble,
+//      because neither contains a word.
+//
+//   2. THERE IS NO PO FIXTURE IN THE A4 CORPUS. Every other sheet touched by
+//      the date work could be rendered and read at 1:1; this one could not, and
+//      the bug being fixed here is one that only shows up when a human looks at
+//      the page. Shipping an unverifiable change to Arabic bidi is how the
+//      defect got in.
+//
+// When a PO fixture exists, revisit BOTH stamps together — and note that the
+// approval stamp is a `sub` under an approver's NAME, so it needs isolating at
+// the cell rather than the column: `unit` on that column would isolate the name
+// as LTR too, which is the same bug pointing the other way.
+
+// ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
 

@@ -196,7 +196,9 @@ export function buildPartHtml(vm: PartDocVm): string {
       { head: vm.movements.cols.after, num: true, gap: true, width: MOV_AFTER_W },
       { head: vm.movements.cols.note, gap: true },
       { head: vm.movements.cols.by, gap: true, width: MOV_BY_W },
-      { head: vm.movements.cols.date, iso: true, width: MOV_DATE_W },
+      // `unit` rather than `iso`: this column now carries a LOCALISED datetime,
+      // which is one Latin-ordered token and cannot be split at its month name.
+      { head: vm.movements.cols.date, unit: true, width: MOV_DATE_W },
     ],
     rows: vm.movements.rows.map(
       (r): Row => ({

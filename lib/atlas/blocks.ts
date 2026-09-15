@@ -145,7 +145,43 @@ const ltrRun = (t: string): string =>
   `<span class="iso" dir="ltr">${esc(t)}</span>`;
 
 /**
- * One non-RTL fragment: isolate its core, leave its outer whitespace behind.
+ * A BOUNDARY NEUTRAL: punctuation that can sit at the EDGE of a fragment but can
+ * never be part of the value there.
+ *
+ * SEP_RUN above excludes the colon and the comma, and is right to: a colon lives
+ * inside 10:52:31 and a comma inside 6,950.00, so splitting a fragment ON them
+ * would cut times and thousands in half. This is the other question, asked only
+ * at the two ENDS of a fragment, where those defences do not apply — NO value
+ * this app prints begins or ends with a colon, a comma or a semicolon. A time
+ * does not start with ":" and 1,234 does not trail its separator.
+ *
+ * WHY IT MATTERS, measured on the Arabic purchase order. The unit-cost sub-line
+ * composes "(مطلوب: 30.00)". iso() splits it on the Arabic run, leaving ": 30.00)"
+ * as one Latin fragment whose leading colon was swept into the LTR isolate — so
+ * the isolate rendered its own contents left-to-right and put the colon at that
+ * run's far end:
+ *
+ *     :30.00)بولطم(        (x-measured in Chrome, left to right)
+ *
+ * which a reader meets, right to left, as "(مطلوب" then ")" then the figure then
+ * a colon dangling off the end. The separator arrives before the thing it
+ * separates and the bracket closes around nothing — the same defect SEP_RUN was
+ * written for, arriving at the edge instead of the middle.
+ *
+ * Left OUTSIDE the isolate the colon is a plain neutral between an Arabic word
+ * and a neutral object, N1 resolves it to the paragraph's own direction, and it
+ * settles where it was written.
+ *
+ * THE DASHES STAY OUT of this set, for SEP_RUN's own reasons: a leading hyphen
+ * is the sign of a negative figure, and a lone em dash is the empty-cell mark
+ * that 210 cells across the corpus depend on. The stop stays out too — "Co."
+ * ends in one and that period belongs to the name.
+ */
+const EDGE_NEUTRAL = /[\s:,;]/;
+
+/**
+ * One non-RTL fragment: isolate its core, leave its outer whitespace behind —
+ * and its boundary punctuation with it (EDGE_NEUTRAL above).
  *
  * A core of PURE NEUTRALS is left bare. An isolate pins a base direction, and a
  * fragment with no letter and no digit has none to pin - an em dash between two
@@ -155,15 +191,81 @@ const ltrRun = (t: string): string =>
  * which still wraps it, so the 210 empty cells on the sheets are untouched.
  */
 const isoCore = (part: string): string => {
-  const lead = part.length - part.trimStart().length;
-  const trail = part.length - part.trimEnd().length;
-  const core = part.slice(lead, part.length - trail);
+  let lead = 0;
+  let end = part.length;
+  while (lead < end && EDGE_NEUTRAL.test(part[lead])) lead++;
+  while (end > lead && EDGE_NEUTRAL.test(part[end - 1])) end--;
+  const core = part.slice(lead, end);
   if (core === "") return esc(part); // whitespace, or the empty edges of a split
   if (!/[\p{L}\p{N}]/u.test(core)) return esc(part);
-  return (
-    esc(part.slice(0, lead)) + ltrRun(core) + esc(part.slice(part.length - trail))
-  );
+  return esc(part.slice(0, lead)) + ltrRun(core) + esc(part.slice(end));
 };
+
+/**
+ * The WHOLE value as ONE left-to-right unit, Arabic words inside it included.
+ *
+ * THE CASE iso() CANNOT SERVE, and the reason it cannot is worth stating
+ * precisely, because iso() is right about everything else.
+ *
+ * iso() SPLITS at each RTL run and isolates the Latin pieces individually. On
+ * the day-first date that shaped it — "04 أغسطس 2026" — that is exactly correct:
+ * three runs, laid out right-to-left as 04 · أغسطس · 2026, which is the order
+ * they are read in.
+ *
+ * A MONTH-FIRST date has one Latin run and it is all on ONE SIDE of the month
+ * word: "أغسطس 5, 2026, 10:52:31 PM" splits into [أغسطس][5, 2026, 10:52:31 PM].
+ * The isolate renders left-to-right INSIDE itself, so its rightmost character is
+ * the M of PM — and in an RTL line the reader meets the month, then immediately
+ * PM, then the time, then the year, and finally the day, furthest from the month
+ * it belongs to. Every piece is individually correct and the line is unreadable.
+ * A short tail like "1, 2026" survives it because the eye takes the pair as one
+ * token; "15, 2026, 10:52:31 PM" does not.
+ *
+ * So: no split. One isolate, LTR base, month name and figures inside it
+ * together, keeping the order the formatter wrote them in. The Arabic word still
+ * renders its own letters right-to-left — that is the word's business — but it
+ * no longer detaches from its day.
+ *
+ * AND THE OUTER ISOLATE ALONE IS NOT ENOUGH, which cost a round trip to find.
+ * `dir="ltr"` sets the base LEVEL; it does not change any character's bidi CLASS.
+ * An Arabic letter is class AL, and UAX#9 W2 re-types every European number that
+ * follows a strong AL as an ARABIC number (EN -> AN). AN is laid out in
+ * right-to-left GROUPS, so inside a "ltr" isolate "سبتمبر 15, 2026, 10:52:31 PM"
+ * still printed
+ *
+ *     10:52:31 ,2026 ,15 سبتمبر PM        (x-measured in Chrome, left to right)
+ *
+ * — the three figures reversed as blocks, and PM, which is strong L and so the
+ * one token W2 does NOT touch, thrown clear to the other end of the line. That is
+ * the exact shape Turki photographed.
+ *
+ * The month is therefore given an isolate OF ITS OWN. Inside that isolate it is
+ * still strong AL and still reads right-to-left; from outside it is a single
+ * neutral object, so the last strong type the digits can see is the unit's own
+ * left-to-right start. W2 leaves them EN, W7 then makes them L, and the whole
+ * tail — figures, commas, time and PM — lays out in one Latin run in written
+ * order. Two isolates, not one: the inner one is what makes the outer one true.
+ *
+ * NOT A REPLACEMENT FOR iso(). Use this only where the value is a single
+ * composed token whose internal order is Latin-structured: a localised date, and
+ * so far nothing else. Passing a NAME through here is the bug the `num` flag
+ * warns about, in the opposite direction.
+ */
+export function isoUnit(value: string | number): string {
+  const s = String(value);
+  // No Arabic word in it, so nothing can re-type the digits: one isolate is the
+  // whole job, and this is every English document's path.
+  if (!RTL_RUN.test(s)) return ltrRun(s);
+  const inner = s
+    .split(RTL_RUN)
+    .map((part, i) =>
+      // `dir="auto"` rather than "rtl": the run is whatever script it is, and
+      // the only claim being made here is that it is SEALED.
+      i % 2 === 1 ? `<span class="iso" dir="auto">${esc(part)}</span>` : esc(part),
+    )
+    .join("");
+  return `<span class="iso" dir="ltr">${inner}</span>`;
+}
 
 export function iso(value: string | number): string {
   const s = String(value);
@@ -234,6 +336,12 @@ export type MetaPair = {
    *  unset for a name or a word: isolating an Arabic name as LTR is the same
    *  bug in the opposite direction. */
   num?: boolean;
+  /**
+   * The value is ONE composed token in Latin order — a localised date — so it
+   * is isolated WHOLE rather than split run by run. See isoUnit(). Wins over
+   * `num`, which would split it at its month name and strand the day.
+   */
+  unit?: boolean;
   /** Trailing prose after the value, e.g. "per delivered trip". */
   tail?: string;
   /**
@@ -297,7 +405,11 @@ export type Masthead = {
 };
 
 function metaPair(p: MetaPair): string {
-  const v = p.num ? iso(p.value) : `<span>${esc(p.value)}</span>`;
+  const v = p.unit
+    ? isoUnit(p.value)
+    : p.num
+      ? iso(p.value)
+      : `<span>${esc(p.value)}</span>`;
   // A tail that OPENS with punctuation is a continuation of the value, not a
   // new word after it: ", fixed per delivered trip" closes the clause the
   // figure started. Joining with an unconditional space sets the comma adrift -
@@ -579,6 +691,13 @@ export type Col = {
    * setting both is harmless and redundant.
    */
   iso?: boolean;
+  /**
+   * Every cell isolated WHOLE, as one Latin-ordered token, instead of split run
+   * by run. The LOCALISED-DATE column: see isoUnit() for why a month-first date
+   * cannot survive the split that a day-first one needs. Wins over `iso` and
+   * `num`; alignment still follows `num`.
+   */
+  unit?: boolean;
   /** Extra trailing gap, for a table whose columns would otherwise collide. */
   gap?: boolean;
   /** A grouping cell that spans its rows, ruled on its trailing edge. */
@@ -673,7 +792,8 @@ function cellHtml(c: Cell, col: Col | undefined, afterGroup = false): string {
     ("colSpan" in o && o.colSpan ? ` colspan="${o.colSpan}"` : "") +
     ("rowSpan" in o && o.rowSpan ? ` rowspan="${o.rowSpan}"` : "");
   const raw = "raw" in o && o.raw;
-  const text = (s: string) => (col?.num || col?.iso ? iso(s) : esc(s));
+  const text = (s: string) =>
+    col?.unit ? isoUnit(s) : col?.num || col?.iso ? iso(s) : esc(s);
   const body = raw ? o.v : text(o.v);
   const sub =
     !raw && "sub" in o && o.sub ? `<span class="sub-line">${text(o.sub)}</span>` : "";

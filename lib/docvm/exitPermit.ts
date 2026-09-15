@@ -41,7 +41,42 @@ import { DASH, numPlain } from "../docPrimitives";
 import { EXIT_PERMIT_KIND_TKEY } from "../exit-permits";
 import type { ExitPermitKind } from "../db-types";
 import { fill, t, type Lang } from "../i18n";
-import { formatDate, formatDateLang, formatDateTime, formatSar } from "../utils";
+import { formatDateLang, formatDateTimeLang, formatSar } from "../utils";
+
+// ---------------------------------------------------------------------------
+// DATE SHAPE ON A PRINTED SHEET
+// ---------------------------------------------------------------------------
+// One rule, and it is a SHEET rule rather than a field rule: every date printed
+// on a sheet is written in that sheet's language. The Arabic permit had been
+// carrying `سبتمبر 14, 2026` in its footer and `8/31/2026` in its subtitle —
+// two different date languages on one page, which reads as a rendering fault.
+//
+// THE FIX IS THE OPTIONS, NOT THE FUNCTION, and that is the part worth
+// recording. Swapping `formatDate(d)` for `formatDateLang(d, lang)` changes
+// NOTHING: lib/utils.ts routes both languages down the English path whenever
+// the options name no month, because under that ruling a numeric date has
+// nothing to translate — the digits are Latin in Arabic too. A numeric date is
+// therefore not language-aware and cannot be made so while it stays numeric.
+// Naming the month is what gives the language something to act on.
+//
+// WHAT THIS COSTS. These two dates were `formatDate`/`formatDateTime` verbatim
+// from the screen, so the sheet and the modal now write the same instant two
+// ways — `Aug 31, 2026` on paper, `8/31/2026` on screen. That trade is
+// deliberate and it is the narrower one: the screen is read in one language at
+// a time by someone who just set it, while the sheet is printed, handed to a
+// gate and filed, and its own footer is the thing it has to agree with.
+const DOC_DATE = { year: "numeric", month: "short", day: "numeric" } as const;
+
+// The same shape with the clock kept whole. Spelled out rather than left to the
+// default, because `toLocaleString` with no options and `toLocaleString` with
+// some do not agree on which fields exist — dropping to the defaults here would
+// silently lose the seconds off an audit stamp.
+const DOC_DATETIME = {
+  ...DOC_DATE,
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+} as const;
 
 // ---------------------------------------------------------------------------
 // Input
@@ -113,8 +148,9 @@ export type ExitPermitDocInput = {
 // Output — one worded object per ATLAS block
 // ---------------------------------------------------------------------------
 
-/** Mirrors lib/atlas/blocks.ts's `MetaPair`. */
-export type DocPair = { label: string; value: string; num?: boolean };
+/** Mirrors lib/atlas/blocks.ts's `MetaPair`. `unit` is the localised-date
+ *  isolate — see isoUnit() in the kit. */
+export type DocPair = { label: string; value: string; num?: boolean; unit?: boolean };
 
 /** Mirrors lib/atlas/blocks.ts's `IdentItem`. */
 export type DocIdent = { label: string; value: string; num?: boolean };
@@ -209,23 +245,19 @@ export function buildExitPermitVm(input: ExitPermitDocInput): ExitPermitDocVm {
   const { lang } = input;
   const qty = (n: number) => numPlain(n);
 
-  const generated = formatDateLang(input.generatedAt, lang, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  const generated = formatDateLang(input.generatedAt, lang, DOC_DATE);
 
   // --- Masthead ----------------------------------------------------------
   // The screen's own `ep_number ?? DRAFT`, and its own kind-plus-due-back line,
   // composed the same way: the due-back leaf OPENS with its separator
   // (" · due back {d}") so the two concatenate into one clause rather than two
-  // sentences. `formatDate(… + "T00:00:00")` is verbatim from the component —
-  // a bare date string parses as UTC midnight and can print the day before in
-  // Riyadh.
+  // sentences. The `+ "T00:00:00"` is still verbatim from the component and is
+  // still load-bearing — a bare date string parses as UTC midnight and can
+  // print the day before in Riyadh. Only the SHAPE moved; see DOC_DATE above.
   const dueBack =
     input.kind === "returnable" && input.expectedReturnOn
       ? fill(t("consumption.modals.printDueBack", lang), {
-          d: formatDate(input.expectedReturnOn + "T00:00:00"),
+          d: formatDateLang(input.expectedReturnOn + "T00:00:00", lang, DOC_DATE),
         })
       : "";
 
@@ -233,8 +265,14 @@ export function buildExitPermitVm(input: ExitPermitDocInput): ExitPermitDocVm {
     [
       {
         label: t("consumption.modals.printIssued", lang),
-        value: input.exitedAt ? formatDateTime(input.exitedAt) : DASH,
-        num: true,
+        // `unit`, NOT `num`. Turki caught this one on paper: under `num` the
+        // kit split the stamp at its Arabic month and the Arabic sheet printed
+        // the month hard against "PM", with the day stranded at the far end of
+        // the line. isoUnit() keeps the whole stamp in one Latin-ordered
+        // isolate. The empty-cell DASH takes the same path and is unaffected —
+        // a lone dash has no internal order to get wrong.
+        value: input.exitedAt ? formatDateTimeLang(input.exitedAt, lang, DOC_DATETIME) : DASH,
+        unit: true,
       },
     ],
   ];
