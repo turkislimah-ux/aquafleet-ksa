@@ -1,0 +1,130 @@
+[
+  {
+    "_case": "EP-26-0001-voided",
+    "_why": "The voided permit that taught the arrow to key off the GAP rather than off qty_returned: line 1 came back through a return (1 -> 0, arrow) and line 2 came back through the void itself (2, no arrow). Also the only sheet carrying an Arabic warehouse name on the ENGLISH printout, a 35,000 figure, a SKU with spaces in it, and two different units on one permit.",
+    "permit": {
+      "ep_number": "EP-26-0001",
+      "kind": "returnable",
+      "status": "voided",
+      "expected_return_on": "2026-08-31",
+      "exited_at": "2026-08-05T19:37:55.869164+00:00",
+      "exited_by": "turkias.co@hotmail.com",
+      "carrier_name": "Salaam",
+      "destination_kind": "water_station",
+      "note": "Grand Force Engine for well number 2 & 40 Sand filters for RO 5 & 6"
+    },
+    "warehouseName": "مستودع منفوحة",
+    "destination": "Manfuhah Station 2",
+    "receiver": "mahmoud Abu Mazen",
+    "lines": [
+      {
+        "id": "708fb4a1-1bd4-48e0-8b58-99269e2c85a2",
+        "qty": 1,
+        "qty_returned": 1,
+        "qty_written_off": 0,
+        "unit_price_sar": 35000,
+        "part": { "name": "Grand Force Pump", "name_ar": "مكينة جرانت فورس", "sku": "SKU-8573", "unit": "ea" }
+      },
+      {
+        "id": "60a88f01-7eb7-4dbd-93bc-d8a640662367",
+        "qty": 2,
+        "qty_returned": 0,
+        "qty_written_off": 0,
+        "unit_price_sar": 20000,
+        "part": { "name": "Sand Filter - RO", "name_ar": "ساند فلتر - ار او", "sku": "SKU - 2001", "unit": "box" }
+      }
+    ]
+  },
+  {
+    "_case": "EP-26-0003-permanent",
+    "_why": "The permanent permit: no due-back clause in the subtitle, nothing outstanding to chase, and the only case where every line shares one unit — so the unit rides in the COLUMN HEAD (\"Qty (L)\") instead of in each cell. The other half of that branch is exercised by every other fixture here.",
+    "permit": {
+      "ep_number": "EP-26-0003",
+      "kind": "permanent",
+      "status": "exited",
+      "expected_return_on": null,
+      "exited_at": "2026-08-05T20:11:52.293877+00:00",
+      "exited_by": "turkias.co@hotmail.com",
+      "carrier_name": "Islam",
+      "destination_kind": "other",
+      "note": "Test"
+    },
+    "warehouseName": "مستودع سلطانه",
+    "destination": "Mahdia Farm",
+    "receiver": "Nabeel",
+    "lines": [
+      {
+        "id": "3cae39e0-d17d-421e-a37a-e9725e2a3f61",
+        "qty": 2,
+        "qty_returned": 0,
+        "qty_written_off": 0,
+        "unit_price_sar": 25,
+        "part": { "name": "Engine Oil 5W-30", "name_ar": "زيت مكينة 5W-30", "sku": "OIL-5W30", "unit": "L" }
+      }
+    ]
+  },
+  {
+    "_case": "EP-26-0004-live",
+    "_why": "The ordinary live case, and the one Turki verifies write-offs against. A part with NO Arabic name (\"Air Filter Cartridge\", name_ar null) sits beside one that has one, so the Arabic sheet carries a Latin part name mid-table on its own — the fallback arText makes, printed. Partly returned, so one line arrows and one does not.",
+    "permit": {
+      "ep_number": "EP-26-0004",
+      "kind": "returnable",
+      "status": "exited",
+      "expected_return_on": "2026-08-04",
+      "exited_at": "2026-08-05T20:34:11.251715+00:00",
+      "exited_by": "turkias.co@hotmail.com",
+      "carrier_name": "dawod",
+      "destination_kind": "water_station",
+      "note": "test"
+    },
+    "warehouseName": "مستودع سلطانه",
+    "destination": "Olaya Filling Point",
+    "receiver": "Saleh Saleh",
+    "lines": [
+      {
+        "id": "90506265-f2a2-4efe-9d26-c8bb06351c21",
+        "qty": 2,
+        "qty_returned": 1,
+        "qty_written_off": 0,
+        "unit_price_sar": 165,
+        "part": { "name": "Air Filter Cartridge", "name_ar": null, "sku": "SKU-1002", "unit": "ea" }
+      },
+      {
+        "id": "bef60fe8-fc73-4989-b7d4-2668e4c35450",
+        "qty": 1,
+        "qty_returned": 0,
+        "qty_written_off": 0,
+        "unit_price_sar": 25,
+        "part": { "name": "Engine Oil 5W-30", "name_ar": "زيت مكينة 5W-30", "sku": "OIL-5W30", "unit": "L" }
+      }
+    ]
+  },
+  {
+    "_case": "EP-26-0006-arabic",
+    "_why": "The most Arabic row in production: an Arabic receiver, an Arabic carrier and an Arabic note, on a permit whose SKU and unit are Latin. Nothing invented reaches this mix — it is what the screen actually collected.",
+    "permit": {
+      "ep_number": "EP-26-0006",
+      "kind": "returnable",
+      "status": "exited",
+      "expected_return_on": "2026-09-30",
+      "exited_at": "2026-09-10T10:12:25.494663+00:00",
+      "exited_by": "turkias.co@hotmail.com",
+      "carrier_name": "سلام",
+      "destination_kind": "water_station",
+      "note": "قرلهسزلهعسزبهشزه"
+    },
+    "warehouseName": "مستودع منفوحة",
+    "destination": "Manfuhah Station 2",
+    "receiver": "امتياز",
+    "lines": [
+      {
+        "id": "0d65be3c-8668-4a8b-a221-35a93c70a7e8",
+        "qty": 1,
+        "qty_returned": 1,
+        "qty_written_off": 0,
+        "unit_price_sar": 35000,
+        "part": { "name": "Grand Force Pump", "name_ar": "مكينة جرانت فورس", "sku": "SKU-8573", "unit": "ea" }
+      }
+    ]
+  }
+]

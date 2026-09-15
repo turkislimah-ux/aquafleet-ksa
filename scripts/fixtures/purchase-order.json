@@ -1,0 +1,297 @@
+{
+  "_what": "PINNED READS from the production database, for scripts/doc-render-po.ts. Database COLUMNS, not sentences: every string the sheet prints is resolved by the same helper the screen uses, so a change to arText, STATUS_LABEL or the 0056 money rule moves these sheets. Nothing here is written back.",
+
+  "_company": {
+    "_why": "company_settings is read LIVE by the screen (getCompanySettings()), so the corpus has to carry a snapshot of it or the letterhead cannot be drawn. ONLY THE SEVEN FIELDS THE SHEET ACTUALLY PRINTS are real; bank_accounts is pinned EMPTY on purpose. lib/docvm/purchaseOrder.ts never reads it — a purchase order is not an invoice and has no Transfer Details block — so copying three real IBANs into a committed file would put bank identifiers in the repo to render nothing.",
+    "id": true,
+    "legal_name": "Bin Slimah Group for transportation & Water Services",
+    "legal_name_ar": "مجموعة بن سلمة للنقليات و خدمات المياه",
+    "vat_number": "3000476892842",
+    "cr_number": "70183882",
+    "address": "Postal code 11223 - Sultana district, 1122 - 1122",
+    "email": "info@binsalmah.com.sa",
+    "description": "For Water Transportation & Logistics",
+    "telephone": "+96600000000",
+    "phone": "+96601000011",
+    "updated_at": "2026-09-05T14:06:25.207+00:00",
+    "standard_working_days_per_month": 27,
+    "bank_accounts": []
+  },
+
+  "cases": [
+    {
+      "_case": "PO-2026-0004-draft",
+      "_why": "The quietest sheet the document can print, and the one most likely to be got wrong: a DRAFT, nothing received, no approvals block at all (showApprovals is false below pending_approval), and a pre-0056 header that stores 0.00 honestly rather than back-computing. The quantity column stays COLLAPSED here because no line has a received figure — the split-column branch is exercised by the four cases below, and this is the only one that proves the collapse.",
+      "po": {
+        "po_number": "PO-2026-0004",
+        "status": "draft",
+        "ai_generated": false,
+        "request_date": "2026-07-24",
+        "expected_delivery": "2026-07-31",
+        "received_date": null,
+        "requested_by": "turkias.co@hotmail.com",
+        "received_by": null,
+        "note": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "rejection_reason": null,
+        "subtotal_sar": 0,
+        "vat_sar": 0,
+        "received_subtotal_sar": null,
+        "received_vat_sar": null
+      },
+      "supplier": {
+        "name": "Al-Khaleej heavy trucks Co.",
+        "contact_person": "Ahmed",
+        "phone": "+96649256493",
+        "email": "info@alkhaleej.com"
+      },
+      "warehouseName": "مستودع سلطانه",
+      "lines": [
+        {
+          "id": "2dcb9e66-3602-4b60-a648-fa2cf9cc9a54",
+          "qty": 40,
+          "received_qty": null,
+          "unit_price_sar": 35,
+          "received_unit_price_sar": null,
+          "line_vat_sar": 0,
+          "received_line_vat_sar": null,
+          "part": { "name": "Engine Oil 5W-30", "name_ar": "زيت مكينة 5W-30", "sku": "OIL-5W30" }
+        }
+      ],
+      "approvals": []
+    },
+
+    {
+      "_case": "PO-2026-0003-ai-pending",
+      "_why": "THE AI PILL, which no other fixture carries, on the only machine-drafted order in production. It is also the only real PO with three lines, one of them a part whose name IS its SKU and whose name_ar is null — so the Arabic sheet prints a Latin part name mid-table, the fallback arText makes. Received quantities exceed ordered on one line (5 ordered, 7 arrived), which is legal and is what the split quantity column exists to show.",
+      "po": {
+        "po_number": "PO-2026-0003",
+        "status": "pending_approval",
+        "ai_generated": true,
+        "request_date": "2026-07-24",
+        "expected_delivery": "2026-07-31",
+        "received_date": "2026-07-25",
+        "requested_by": "turkias.co@hotmail.com",
+        "received_by": "turkias.co@hotmail.com",
+        "note": "AI suggestion · 2 parts at/below reorder level.",
+        "rejected_by": null,
+        "rejected_at": null,
+        "rejection_reason": null,
+        "subtotal_sar": 0,
+        "vat_sar": 0,
+        "received_subtotal_sar": null,
+        "received_vat_sar": null
+      },
+      "supplier": {
+        "name": "Al-Jazira Parts",
+        "contact_person": "Mahmud",
+        "phone": "0328174221",
+        "email": "info@aljazira.com"
+      },
+      "warehouseName": "مستودع سلطانه",
+      "lines": [
+        {
+          "id": "691ce27d-3bc5-45d3-bb43-ca626c599c45",
+          "qty": 5,
+          "received_qty": 5,
+          "unit_price_sar": 42,
+          "received_unit_price_sar": 42,
+          "line_vat_sar": 0,
+          "received_line_vat_sar": null,
+          "part": { "name": "Air Filter", "name_ar": "فلتر هواء", "sku": "FLT-001" }
+        },
+        {
+          "id": "a91c6d10-4032-43b3-9cd9-839d73fd5f4b",
+          "qty": 1,
+          "received_qty": 1,
+          "unit_price_sar": 0,
+          "received_unit_price_sar": 0,
+          "line_vat_sar": 0,
+          "received_line_vat_sar": null,
+          "part": { "name": "SKU-1004", "name_ar": null, "sku": "SKU-1004-MRY0" }
+        },
+        {
+          "id": "e1dd2d56-998b-4f63-9d72-b7a15eb6884a",
+          "qty": 5,
+          "received_qty": 7,
+          "unit_price_sar": 620,
+          "received_unit_price_sar": 620,
+          "line_vat_sar": 0,
+          "received_line_vat_sar": null,
+          "part": { "name": "Brake Pad Set (Front)", "name_ar": "طقم تيل فرامل أمامي", "sku": "SKU-1004" }
+        }
+      ],
+      "approvals": []
+    },
+
+    {
+      "_case": "PO-2026-0013-approved",
+      "_why": "THE APPROVAL STAMPS, which is why this sheet is in the corpus at all. Two approvers, seconds apart, and the second one left a COMMENT — so this is the one fixture that renders the concatenation at lib/docvm/purchaseOrder.ts's approval row: a localisable datetime joined to a quoted sentence, under an approver's email. Two reverted date changes are waiting on exactly this sheet being readable.",
+      "po": {
+        "po_number": "PO-2026-0013",
+        "status": "approved",
+        "ai_generated": false,
+        "request_date": "2026-07-29",
+        "expected_delivery": "2026-08-05",
+        "received_date": "2026-07-29",
+        "requested_by": "aaa@aaa.aaa",
+        "received_by": "aaa@aaa.aaa",
+        "note": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "rejection_reason": null,
+        "subtotal_sar": 840,
+        "vat_sar": 126,
+        "received_subtotal_sar": 840,
+        "received_vat_sar": 126
+      },
+      "supplier": {
+        "name": "Masa Al-Masahahir Trading Co.",
+        "contact_person": "Khaled",
+        "phone": "0550495221",
+        "email": "info@masa.com"
+      },
+      "warehouseName": "مستودع سلطانه",
+      "lines": [
+        {
+          "id": "b27ce090-16c0-4c10-8b91-c558b560d286",
+          "qty": 20,
+          "received_qty": 20,
+          "unit_price_sar": 42,
+          "received_unit_price_sar": 42,
+          "line_vat_sar": 126,
+          "received_line_vat_sar": 126,
+          "part": { "name": "Air Filter", "name_ar": "فلتر هواء", "sku": "FLT-001" }
+        }
+      ],
+      "approvals": [
+        {
+          "id": "88693a5a-69f3-4f3d-8f19-8f01bb99e2c3",
+          "approver_email": "aaa@aaa.aaa",
+          "approved_at": "2026-07-29T20:08:57.772512+00:00",
+          "comment": null
+        },
+        {
+          "id": "8d741395-387e-45f8-8be9-e28a3f77173c",
+          "approver_email": "turkias.co@hotmail.com",
+          "approved_at": "2026-07-29T20:08:57.935149+00:00",
+          "comment": "Replenishing check"
+        }
+      ]
+    },
+
+    {
+      "_case": "PO-2026-0008-received-repriced",
+      "_why": "THE PRICE THAT MOVED BETWEEN ORDERING AND ARRIVAL: 30 SAR ordered, 35 SAR invoiced, which is the only condition under which the unit-cost cell prints its muted \"(ordered: ...)\" suffix. It is also the only fixture where BOTH stored VAT columns are populated and DIFFER, so the 0056 rule's received-side-wins branch is visible in the total rather than asserted. One approval, no comment — the plainer half of the stamp.",
+      "po": {
+        "po_number": "PO-2026-0008",
+        "status": "pending_approval",
+        "ai_generated": false,
+        "request_date": "2026-07-26",
+        "expected_delivery": "2026-08-02",
+        "received_date": "2026-07-26",
+        "requested_by": "turkias.co@hotmail.com",
+        "received_by": "turkias.co@hotmail.com",
+        "note": "VAT test",
+        "rejected_by": null,
+        "rejected_at": null,
+        "rejection_reason": null,
+        "subtotal_sar": 1200,
+        "vat_sar": 180,
+        "received_subtotal_sar": 1400,
+        "received_vat_sar": 210
+      },
+      "supplier": {
+        "name": "Al-Khaleej heavy trucks Co.",
+        "contact_person": "Ahmed",
+        "phone": "+96649256493",
+        "email": "info@alkhaleej.com"
+      },
+      "warehouseName": "مستودع سلطانه",
+      "lines": [
+        {
+          "id": "fda67cca-848d-4e62-aad4-ebc91f1398bf",
+          "qty": 40,
+          "received_qty": 40,
+          "unit_price_sar": 30,
+          "received_unit_price_sar": 35,
+          "line_vat_sar": 180,
+          "received_line_vat_sar": 210,
+          "part": { "name": "Engine Oil 5W-30", "name_ar": "زيت مكينة 5W-30", "sku": "OIL-5W30" }
+        }
+      ],
+      "approvals": [
+        {
+          "id": "d29b35df-6c82-4364-a098-ad8066e14f02",
+          "approver_email": "turkias.co@hotmail.com",
+          "approved_at": "2026-07-26T09:51:43.080152+00:00",
+          "comment": null
+        }
+      ]
+    },
+
+    {
+      "_case": "PO-2026-0012-rejected-arabic",
+      "_why": "THE REJECTION STAMP, and the most Arabic purchase order in production: an Arabic note in the buyer's own words on an order whose SKUs and part codes are Latin, so the Arabic sheet has to hold both scripts on one line. Its supplier is the literal row named \"other\" with a null contact, phone and email, which is the letterhead's empty branch. Three lines, a short-shipped one (12 ordered, 10 arrived) and a repriced one, and a rejection that carries a reason.",
+      "po": {
+        "po_number": "PO-2026-0012",
+        "status": "rejected",
+        "ai_generated": false,
+        "request_date": "2026-07-27",
+        "expected_delivery": "2026-08-03",
+        "received_date": "2026-07-27",
+        "requested_by": "turkias.co@hotmail.com",
+        "received_by": "turkias.co@hotmail.com",
+        "note": "طالب عالي على الكفرات بسبب موسم الصيف",
+        "rejected_by": "aaa@aaa.aaa",
+        "rejected_at": "2026-07-27T11:24:47.27601+00:00",
+        "rejection_reason": "test",
+        "subtotal_sar": 16950,
+        "vat_sar": 2542.5,
+        "received_subtotal_sar": 14600,
+        "received_vat_sar": 2190
+      },
+      "supplier": {
+        "name": "other",
+        "contact_person": null,
+        "phone": null,
+        "email": null
+      },
+      "warehouseName": "مستودع سلطانه",
+      "lines": [
+        {
+          "id": "499bb0c0-4f14-4a46-838e-c6e5bccd31f7",
+          "qty": 15,
+          "received_qty": 15,
+          "unit_price_sar": 90,
+          "received_unit_price_sar": 95,
+          "line_vat_sar": 202.5,
+          "received_line_vat_sar": 213.75,
+          "part": { "name": "Thermostat Valve", "name_ar": "بلف حرارة", "sku": "TVA-5823" }
+        },
+        {
+          "id": "b9047a73-a587-4cc6-84ab-941936be1cb1",
+          "qty": 5,
+          "received_qty": 5,
+          "unit_price_sar": 35,
+          "received_unit_price_sar": 35,
+          "line_vat_sar": 26.25,
+          "received_line_vat_sar": 26.25,
+          "part": { "name": "Engine Oil 5W-30", "name_ar": "زيت مكينة 5W-30", "sku": "OIL-5W30" }
+        },
+        {
+          "id": "d8e85a13-a565-438e-a028-cd99f00cf434",
+          "qty": 12,
+          "received_qty": 10,
+          "unit_price_sar": 1300,
+          "received_unit_price_sar": 1300,
+          "line_vat_sar": 2340,
+          "received_line_vat_sar": 1950,
+          "part": { "name": "Tire 12R22.5 (Steer)", "name_ar": "طار 12R22.5 (توجيه)", "sku": "SKU-1007" }
+        }
+      ],
+      "approvals": []
+    }
+  ]
+}
