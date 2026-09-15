@@ -1,12 +1,18 @@
 # SESSION HANDOFF
 
 ## State
-- DB at 0199. `ls supabase/migrations/ | tail -5`. `git log --oneline -10`.
-- **0198 APPLIED (2a0b9ca)** — notification_thresholds read-only to authenticated.
-- **0199 SECTION 1 APPLIED (0a20682)** — 50 views SELECT-only for authenticated;
-  committed == applied. Default-ACL half DEFERRED to post-deploy RBAC, parked
-  outside migrations at `.planning/post-deploy/0199b-default-acl-revoke.sql`.
-- Tree clean, nothing in flight.
+- DB at 0200. `ls supabase/migrations/ | tail -5`. `git log --oneline -10`.
+- **0200 APPLIED TO PROD + VERIFIED (ef45248)** — exit-permit write-offs, DB
+  half. Applied 2026-09-15 via `.planning/post-deploy/apply-0200-prod.mjs`
+  (archive, NOT a test — never put a prod socket in `npm test`). Part B verify
+  self-rolls-back: 11/11 claims, zero residue, August P&L unchanged at 3589,
+  dashboard overdue 2→1, security 50/50/0, restated RPCs still secdef+pinned.
+- **0199 §1 APPLIED (0a20682)** — 50 views SELECT-only. Default-ACL half
+  DEFERRED at `.planning/post-deploy/0199b-default-acl-revoke.sql`.
+- **PENDING — ledger reconcile.** Prod = 133 timestamp rows, local dir =
+  0001-style. `supabase db push` at prod would replay history. Do not run it.
+- **CARRIED, not blocking:** leaked-password protection OFF in Supabase Auth;
+  prod has `reconcile_0193_trigger_fn_text` with no local file.
 
 ## Rules
 - CLAUDE.md = rules. Read it, NEVER append.
@@ -16,20 +22,14 @@
 - This file stays under 2KB. If larger, Code is appending diary. Cut it.
 
 ## Current work
-- ATLAS printable reports COMPLETE. 88 sheets; a moved page count FAILS until
-  `doc-a4-proof.mjs --update`.
-- **Notifications + Settings COMPLETE**, audited live 2026-09-14; 12 alerts,
-  every kind formatted and routed.
-- **0197 APPLIED.** Returnable and voided permits no longer reach the P&L.
-- **EP-26-0001 CLOSED (07b1655) — never corrupt data.** `qty_returned` counts
-  what came back through a RETURN EVENT, and 0093:820 deliberately leaves it
-  alone on a void, a void being a cancellation. The readers were wrong, not the
-  rows. Five ungated `qty - qty_returned` readers now treat voided AND draft
-  permits as nothing-outstanding, via `permitLineOutstanding`/`permitValueSar`
-  in lib/exit-permits.ts — both take the permit, so the compiler finds callers.
-  Remember: the expanded row's **Returned** column means "back by ANY route", so
-  a voided permit shows the void-restored qty while the counter stays 0.
-- **CARRIED FORWARD — one, not blocking:** no written-off status, so a
-  returnable permit whose parts never return is never expensed. No screen shows
-  the AMOUNT; the permit DOES surface, as `permit_overdue`. EP-26-0004 live:
-  190 SAR, due 2026-08-04.
+- **NEXT AND LAST BUILD — write-off UI** (0200's app half). Write off /
+  reverse on an EXITED returnable permit, written-off chip, EN+AR RTL, printed
+  permit shows it. `outstanding = qty − qty_returned − qty_written_off` goes in
+  ONE place in lib/exit-permits.ts; the compiler finds the rest (07b1655
+  proved it). Turki verifies on EP-26-0004 (190 SAR, due 2026-08-04): write
+  off, see 190 land in this month's Cost/P&L, reverse, confirm credit back.
+- ATLAS reports COMPLETE. 88 sheets; a moved page count FAILS until
+  `doc-a4-proof.mjs --update`. Notifications + Settings COMPLETE.
+- **07b1655 — never correct data to suit a reader.** `qty_returned` counts
+  RETURN EVENTS; 0093:820 leaves it alone on a void. Readers were wrong, not
+  rows. The expanded row's **Returned** column means "back by ANY route".
