@@ -134,7 +134,7 @@ begin
     raise exception 'Live ledger contains repo-gap version(s) %. ABORTING.', v_gap;
   end if;
 
-  raise notice 'GUARD PASSED — live ledger is 198 rows, 0001..0200, gaps intact, no duplicates, no timestamp versions. The snapshot is genuinely redundant for everything except the seven bodies named in the header.';
+  raise notice 'GUARD PASSED — live ledger is 198 rows, 0001..0200, gaps intact, no duplicates, no timestamp versions. The snapshot is now redundant in full: the seven bodies that once lived only here are preserved md5-exact in ledger-orphan-bodies-2026-09-16.sql (580d42b).';
 end $guard$;
 
 
