@@ -1,22 +1,30 @@
 # SESSION HANDOFF
 
 ## State
-- DB at 0200.
-- **0200 APPLIED TO PROD + VERIFIED (ef45248)** — write-offs, DB half, via
-  `apply-0200-prod.mjs` (archive, NOT a test — no prod socket in `npm test`).
-  Verify exits 0 (NOTICE not raise), SKIPPED on empty data.
-- **0199 §1 APPLIED (0a20682)** — 50 views SELECT-only. Half 2 DEFERRED at
-  `0199b-default-acl-revoke.sql`.
-- **LEDGER RECONCILE DONE (f2e6938).** Prod AND test 198 rows, 0001..0200
-  (0135/0136 absent), 1:1 with files, verified live. Files = source of truth;
-  `db push`/`db diff`/rebuild valid once linked. Repo UNLINKED = no push.
-- **SNAPSHOT DROP DRAFTED, NOT RUN (fb900fe, notice 9eed78d).** Undo = prod
-  `schema_migrations_backup_20260916`, 133 rows.
-  `drop-ledger-snapshot-2026-09-16.sql`: STEP 1 ran GREEN on prod and is proven
-  able to RAISE; STEP 2 = Turki drops it, SQL Editor. The 7 bodies that lived
-  ONLY there are md5-exact in `ledger-orphan-bodies-2026-09-16.sql` (580d42b)
-  — drop costs only the undo.
-- **CARRIED:** leaked-password protection OFF in Supabase Auth.
+- **DB at 0201, PROD + TEST.** Applied 2026-09-16 via Supabase MCP at Turki's
+  instruction (the one exception to the draft-and-stop gate). Ledger stamped
+  0201 on both; earlier reconcile rows condensed away — the migration FILES
+  are the source of truth. Repo UNLINKED = no `db push`.
+- **OPERATION VEHICLES + TYPED CAPACITY: BUILT, VERIFIED IN-BROWSER.** aca7486
+  (truck write path onto typed capacity) + 366bb2f (operation vehicles
+  surfaced, grouped, type-labelled).
+  - Grouping = `lib/vehicle-groups.ts` ONLY. Naming = `lib/vehicle-types.ts`.
+    Capacity triple = `lib/capacity.ts`. Fleet tabs = `lib/fleet-tabs.ts`.
+    Never re-derive at a call site.
+- **`npm run test:guards` (in `npm test`)** — `capacity-single-writer-check` +
+  `trucks-write-surface-check`. Text-level: they fail if a new write path
+  reaches `trucks` or builds capacity columns outside the files that own them.
+- **`v_fleet_state_now` INCLUDES operation vehicles ON PURPOSE.** Utilization
+  excludes them via `v_truck_day_state`, truck-only. Do not "fix" either
+  to match.
+- **PARKED:** snapshot-drop STEP 2 (`drop-ledger-snapshot-2026-09-16.sql`) —
+  STEP 1 green on prod, proven able to RAISE; STEP 2 is Turki's, SQL Editor.
+  Undo = prod `schema_migrations_backup_20260916`; the 7 orphan bodies are
+  md5-exact in `ledger-orphan-bodies-2026-09-16.sql` (580d42b).
+- **PARKED:** leaked-password protection OFF in Supabase Auth.
+- **CARRIED:** `web-design-guidelines` + `vercel-composition-patterns` are NOT
+  installed here. CLAUDE.md §4 names both — use `preview/` + `frontend-design`,
+  and say so rather than pretend to have read them.
 
 ## Rules
 - CLAUDE.md = rules. Read it, NEVER append.
@@ -24,15 +32,4 @@
 - Money/migration gate: draft, STOP, architect reviews.
 - Session cap: 15 turns. First compaction = wrap up.
 - This file stays under 2KB. If larger, Code is appending diary. Cut it.
-
-## Current work
-- **ALL BUILDS COMPLETE** — write-off UI (bb44c90), Notifications, Settings,
-  ATLAS, `--clearance` (0d0a655). Corpus = 114 sheets; a moved page count
-  FAILS until `doc-a4-proof.mjs --update`.
-- **ARABIC DATES (1bb97ae).** UAX#9 W2: an Arabic month (AL) re-types EN
-  digits to AN, so one isolate scrambles. Cure = TWO isolates
-  (`isoUnit`). Measure per-character (`Range` x), never by screenshot.
-- **SHEETS (374825e, 2f3c031), argued at code sites:** isolate at the CELL not
-  the column; `.mast` margin COLLAPSES; spacing scoped `extraCss`.
-- **07b1655 — never correct data to suit a reader.** `qty_returned` counts
-  RETURN EVENTS; the readers were wrong.
+- ATLAS: 114 sheets; a moved page count fails `npm test` until `--update`.
