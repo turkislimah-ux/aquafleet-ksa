@@ -41,9 +41,17 @@ export default async function ProjectsPage() {
         .order("name", { ascending: true }),
       // Terminated trucks vanish from the roster pickers (0020); frees their
       // driver via the truckDriverIds set below (model A: no truck = off_duty).
+      //
+      // WATER TRUCKS ONLY (0201). A project's roster is drivers and the trucks
+      // they drive; an operation vehicle has no driver by constraint, so it can
+      // carry no roster row. Filtering at the fetch also keeps the
+      // truckDriverIds set below honest without a second predicate — that set
+      // decides who reads as on_duty, and one operation row leaking into it
+      // would put a driver on duty on a vehicle nobody can be assigned to.
       supabase
         .from("trucks")
         .select("id, plate, assigned_driver_id, last_service_date")
+        .eq("vehicle_class", "truck")
         .is("terminated_at", null)
         .order("plate", { ascending: true }),
       supabase.from("project_drivers").select("project_id, driver_id"),

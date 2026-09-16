@@ -171,9 +171,18 @@ export default async function TripsPage() {
       // Terminated trucks are filtered out (0020) — this is also THE set that
       // resolves the no-truck blur + plate-strip rules in ProjectsBoard, so a
       // terminated truck's plate/driver-link disappear from active cards.
+      //
+      // WATER TRUCKS ONLY (0201). A trip is a water delivery driven by an
+      // assigned driver, and 0201's shape check leaves an operation vehicle no
+      // assigned_driver_id at all — so an operation row could never be a
+      // truthful answer on this board. Filtered at the FETCH, not at each
+      // render: this one array feeds the Kanban cards, the truck picker and
+      // the driver-state derivation below, and filtering it three times is
+      // three chances to filter it twice.
       supabase
         .from("trucks")
         .select("id, plate, capacity_m3, assigned_driver_id, last_service_date")
+        .eq("vehicle_class", "truck")
         .is("terminated_at", null)
         .order("plate", { ascending: true }),
       // Terminated drivers must never reach buildDriverStateMap or the

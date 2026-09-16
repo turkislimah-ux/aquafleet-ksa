@@ -110,6 +110,27 @@ async function assignDriverToTruck(
   if (clearErr) return clearErr.message;
 
   if (truckId) {
+    // AN OPERATION VEHICLE CANNOT HOLD A DRIVER (0201). This is the SECOND
+    // write path into assigned_driver_id — app/fleet/actions.ts assignDriver
+    // is the first, and it refuses the same thing for the same reason. The
+    // constraint (trucks_vehicle_class_shape_check) would refuse it anyway,
+    // but as a bare 23514 that this function returns verbatim to the form.
+    //
+    // The driver form's picker is already narrowed to `vehicle_class =
+    // 'truck'`, so no UI path arrives here with an operation id. A picker is a
+    // courtesy; the action is the boundary. Cheap: one row, by primary key,
+    // and only when a truck was actually chosen.
+    const { data: target, error: classErr } = await supabase
+      .from("trucks")
+      .select("plate, vehicle_class")
+      .eq("id", truckId)
+      .maybeSingle();
+    if (classErr) return classErr.message;
+    if (!target) return "That truck no longer exists.";
+    if (target.vehicle_class === "operation") {
+      return `${target.plate} is an operation vehicle and is not driven by an assigned driver.`;
+    }
+
     const { error: setErr } = await supabase
       .from("trucks")
       .update({ assigned_driver_id: driverId })

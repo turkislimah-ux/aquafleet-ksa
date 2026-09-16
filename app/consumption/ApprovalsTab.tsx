@@ -33,7 +33,9 @@ import { LEDGER_LOCK_DAYS } from "@/lib/approvals-ledger";
 import type {
   ConsumptionApproval, ExitPermit, ExitPermitLine,
   WorkOrder, WorkOrderPart, OutsourcedJob, WorkshopPayment,
+  VehicleClass, VehicleType,
 } from "@/lib/db-types";
+import { vehicleLabel } from "@/lib/vehicle-types";
 import { decideConsumptionApproval } from "./actions";
 import ScrollLock from "@/components/ScrollLock";
 
@@ -41,7 +43,9 @@ import ScrollLock from "@/components/ScrollLock";
 // nullable and arText() returns the base untouched when it is null, so a part
 // with no Arabic name still renders its English one rather than a blank.
 type PartNameLite = { id: string; name: string; name_ar: string | null; sku: string; unit: string | null };
-type TruckLite = { id: string; plate: string };
+// 0201 — both classes reach this list, so the row carries what it takes to name
+// an operation vehicle rather than leave it as a bare plate.
+type TruckLite = { id: string; plate: string; vehicle_class: VehicleClass; vehicle_type_id: string | null };
 
 // The vote that is ALREADY on the event — the one a second voter has to match.
 // `approvals` is newest-first, so the last element is the first vote cast.
@@ -102,7 +106,7 @@ const DETAIL_HEAD_TKEY: Record<ApprovalKind, TKey> = {
 export default function ApprovalsTab({
   permits, permitLines, workOrders, workOrderParts, outsourcedJobs,
   workshopPayments, repairerNameById, jobRepairerIds, approvals,
-  partNames, trucks, destinationLabel, viewer,
+  partNames, trucks, vehicleTypeById, destinationLabel, viewer,
 }: {
   permits: ExitPermit[];
   permitLines: ExitPermitLine[];
@@ -115,6 +119,8 @@ export default function ApprovalsTab({
   approvals: ConsumptionApproval[];
   partNames: PartNameLite[];
   trucks: TruckLite[];
+  // Names the operation half of `trucks`. Built once in ConsumptionClient.
+  vehicleTypeById: ReadonlyMap<string, VehicleType>;
   destinationLabel: (p: ExitPermit) => string;
   // The signed-in user. Their own row decides what the buttons offer, so a
   // person changes their decision rather than stacking a second one.
@@ -351,7 +357,7 @@ export default function ApprovalsTab({
                       <TD className="whitespace-normal max-w-[280px]">
                         <span className="text-sm line-clamp-1" title={e.title}>{e.title}</span>
                         <div className="text-[11px] muted line-clamp-1">
-                          {truck ? truck.plate : null}
+                          {truck ? vehicleLabel(truck, vehicleTypeById, lang) : null}
                           {truck && e.where ? " · " : null}
                           {e.where}
                         </div>

@@ -35,7 +35,9 @@ import {
   type ExitPermitWriteOff, type ExitPermitWriteOffLine,
   type ConsumptionApproval, type WorkOrder, type WorkOrderPart,
   type OutsourcedJob, type WorkshopPayment,
+  type VehicleClass, type VehicleType,
 } from "@/lib/db-types";
+import { vehicleLabel } from "@/lib/vehicle-types";
 import { deleteExitPermitDraft, getExitPermitFileUrls } from "./actions";
 import {
   PermitFormModal, ConfirmExitModal, ReturnModal, VoidModal, PermitPrintView,
@@ -49,7 +51,16 @@ const CONSUMPTION_TABS = ["usage", "permits", "approvals"] as const;
 
 export type WarehouseLite = { id: string; name: string };
 export type NamedLite = { id: string; name: string };
-export type TruckLite = { id: string; plate: string };
+// 0201 — `trucks` is a table of VEHICLES now, and this page lists both classes
+// (a permit's destination can be a pickup). The class drives the grouping in the
+// destination picker; `vehicle_type_id` resolves, through `vehicleTypes` below,
+// to the word that says which vehicle a plate is.
+export type TruckLite = {
+  id: string;
+  plate: string;
+  vehicle_class: VehicleClass;
+  vehicle_type_id: string | null;
+};
 export type StaffLite = { id: string; name: string };
 // `name_ar` rides on the PART types only. Warehouses, water stations, projects
 // and trucks have no Arabic column in the schema, so `NamedLite` deliberately
@@ -79,7 +90,7 @@ export default function ConsumptionClient({
   warehouses, parts, stations, projects, trucks, customers, staff,
   lots, ledger,
   approvals, workOrders, workOrderParts, outsourcedJobs, workshopPayments,
-  repairers, jobRepairers, allParts, allTrucks, viewer, woLedger,
+  repairers, jobRepairers, allParts, allTrucks, vehicleTypes, viewer, woLedger,
   today, error,
 }: {
   permits: ExitPermit[];
@@ -112,6 +123,9 @@ export default function ConsumptionClient({
   // terminated truck, and it must still render its name.
   allParts: { id: string; name: string; name_ar: string | null; sku: string; unit: string | null; warehouse_id: string }[];
   allTrucks: TruckLite[];
+  // The lookup behind an operation vehicle's name. ALL rows, active and
+  // retired: this page only ever names a type, it never offers one to pick.
+  vehicleTypes: VehicleType[];
   // Signed-in user's email — the approvals tab compares it to decided_by.
   viewer: string | null;
   // The MAINTENANCE per-lot ledger, for Parts Usage.
@@ -196,6 +210,14 @@ export default function ConsumptionClient({
     return m;
   }, [files]);
 
+  // Built once here and passed to every child that names a vehicle — the
+  // destination resolver below, the exit-permit form's picker, the approvals
+  // list and the parts-usage tables.
+  const vehicleTypeById = useMemo(
+    () => new Map(vehicleTypes.map((vt) => [vt.id, vt])),
+    [vehicleTypes],
+  );
+
   const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
   const warehousesById = useMemo(() => new Map(warehouses.map((w) => [w.id, w])), [warehouses]);
 
@@ -204,7 +226,10 @@ export default function ConsumptionClient({
   const destinationLabel = useMemo(() => {
     const st = new Map(stations.map((s) => [s.id, s.name]));
     const pr = new Map(projects.map((p) => [p.id, p.name]));
-    const tr = new Map(trucks.map((t) => [t.id, t.plate]));
+    // The vehicle's NAME, not its bare plate: an operation vehicle carries its
+    // type, so a permit sent to a crane says so on the row, in the detail and
+    // on the printed permit — all three read this one map.
+    const tr = new Map(trucks.map((t) => [t.id, vehicleLabel(t, vehicleTypeById, lang)]));
     const cu = new Map(customers.map((c) => [c.id, c.name]));
     return (p: ExitPermit): string => {
       switch (p.destination_kind) {
@@ -215,7 +240,7 @@ export default function ConsumptionClient({
         default: return p.destination_other_text ?? "—";
       }
     };
-  }, [stations, projects, trucks, customers]);
+  }, [stations, projects, trucks, customers, vehicleTypeById, lang]);
 
   const receiverLabel = useMemo(() => {
     const s = new Map(staff.map((x) => [x.id, x.name]));
@@ -347,6 +372,7 @@ export default function ConsumptionClient({
           parts={allParts}
           warehouses={warehouses}
           trucks={allTrucks}
+          vehicleTypeById={vehicleTypeById}
           // The SAME resolver every other tab uses, so one permit is never
           // described three different ways.
           destinationLabel={destinationLabel}
@@ -364,6 +390,7 @@ export default function ConsumptionClient({
           approvals={approvals}
           partNames={allParts}
           trucks={allTrucks}
+          vehicleTypeById={vehicleTypeById}
           viewer={viewer}
           // The SAME resolver the permits tab and the printable permit use, so
           // one permit can never be described three different ways.
@@ -933,6 +960,7 @@ export default function ConsumptionClient({
           stations={stations}
           projects={projects}
           trucks={trucks}
+          vehicleTypeById={vehicleTypeById}
           customers={customers}
           staff={staff}
           onClose={closeAll}

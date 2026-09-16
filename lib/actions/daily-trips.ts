@@ -55,6 +55,7 @@ import { validateDeferred } from "@/lib/daily-trips";
 import type {
   ReportProject, ReportDriver, ReportTruck, ReportAssignment, ReportTrip, DeferredRow,
 } from "@/lib/daily-trips";
+import type { VehicleType } from "@/lib/db-types";
 
 function msg(e: unknown, fallback: string): string {
   if (e instanceof Error && e.message) return e.message;
@@ -77,6 +78,10 @@ export type DailyTripsData = {
   assignments: ReportAssignment[];
   drivers: ReportDriver[];
   trucks: ReportTruck[];
+  // The lookup behind an operation vehicle's name (0201). ALL rows, active and
+  // retired: a vehicle filed under a type that was retired last year still has
+  // to render as what it is, and nothing here OFFERS a type to pick.
+  vehicleTypes: VehicleType[];
   trips: ReportTrip[];
   deferred: DeferredRow[];
 };
@@ -101,12 +106,22 @@ export async function fetchDailyTrips(
     if (!from || !to) return { data: null, error: "Missing date range." };
     const supabase = createClient();
 
-    const [projRes, assignRes, drvRes, trkRes, tripRes, defRes] = await Promise.all([
+    const [projRes, assignRes, drvRes, trkRes, vtRes, tripRes, defRes] = await Promise.all([
       supabase.from("projects").select("id, name")
         .eq("status", "active").is("archived_at", null).order("name"),
       supabase.from("project_drivers").select("project_id, driver_id"),
       supabase.from("drivers").select("id, name").is("terminated_at", null).order("name"),
-      supabase.from("trucks").select("id, plate").is("terminated_at", null).order("plate"),
+      // BOTH VEHICLE CLASSES, deliberately unfiltered. This read feeds the
+      // manual side-log's picker, and that log exists for work the project
+      // tables cannot hold — diesel transport, a yard machine's day. Filtering
+      // to `vehicle_class = 'truck'` here would make the one surface that is
+      // supposed to catch the leftovers unable to name half the fleet.
+      // Ordered by plate WITHIN each class by the component, not here.
+      supabase.from("trucks").select("id, plate, vehicle_class, vehicle_type_id")
+        .is("terminated_at", null).order("plate"),
+      supabase.from("vehicle_types")
+        .select("id, key, label, label_ar, sort_order, active, created_at")
+        .order("sort_order", { ascending: true }),
       supabase.from("trips").select("project_id, driver_id, truck_id, rate_sar, commission_sar")
         .eq("stage", "delivered").gte("trip_date", from).lte("trip_date", to),
       supabase.from("deferred_deliveries")
@@ -115,11 +130,12 @@ export async function fetchDailyTrips(
         .order("delivery_date", { ascending: false }),
     ]);
 
-    // Name WHICH read failed. With six in one Promise.all a bare "permission
+    // Name WHICH read failed. With seven in one Promise.all a bare "permission
     // denied" does not say which table to look at.
     for (const [label, res] of [
       ["Projects", projRes], ["Assignments", assignRes], ["Drivers", drvRes],
-      ["Trucks", trkRes], ["Trips", tripRes], ["Manual entries", defRes],
+      ["Trucks", trkRes], ["Vehicle types", vtRes], ["Trips", tripRes],
+      ["Manual entries", defRes],
     ] as const) {
       if (res.error) {
         console.error(`[daily-trips] ${label} read failed`, res.error);
@@ -133,6 +149,7 @@ export async function fetchDailyTrips(
         assignments: (assignRes.data ?? []) as ReportAssignment[],
         drivers: (drvRes.data ?? []) as ReportDriver[],
         trucks: (trkRes.data ?? []) as ReportTruck[],
+        vehicleTypes: (vtRes.data ?? []) as VehicleType[],
         trips: (tripRes.data ?? []) as ReportTrip[],
         deferred: (defRes.data ?? []) as DeferredRow[],
       },

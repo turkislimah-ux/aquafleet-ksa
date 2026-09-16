@@ -22,6 +22,7 @@
 // A collapsed group is invisible on a printout, and this is meant to be filed.
 
 import { addDaysToKey } from "@/lib/utils";
+import type { VehicleClass } from "@/lib/db-types";
 
 // --------------------------------------------------------------------------
 // PERIOD
@@ -99,7 +100,24 @@ export function periodRange(anchor: string, period: DailyPeriod): { from: string
 // --------------------------------------------------------------------------
 export type ReportProject = { id: string; name: string };
 export type ReportDriver = { id: string; name: string };
-export type ReportTruck = { id: string; plate: string };
+// `vehicle_class` is carried for the PICKER, not for the tables. The project
+// tables below only ever resolve a plate for a trip, and an operation vehicle
+// cannot have a trip (0201's shape check leaves it no driver), so nothing in
+// the report's maths branches on this. The manual side-log is the one surface
+// where a crane or a loader is a legitimate answer, and its select groups on
+// this field. Required, not optional: every caller reads it from the row.
+//
+// `vehicle_type_id` rides along for the same two surfaces and no others: NULL
+// on every truck by trucks_vehicle_class_shape_check, and on an operation
+// vehicle it resolves — against DailyTripsData.vehicleTypes, never against a
+// name stored here — to the word that tells a reader which vehicle "4312 ABC"
+// is. The printed sheet does not use it; see buildProjectTables.
+export type ReportTruck = {
+  id: string;
+  plate: string;
+  vehicle_class: VehicleClass;
+  vehicle_type_id: string | null;
+};
 export type ReportAssignment = { project_id: string; driver_id: string };
 
 /** One delivered trip in the window. rate_sar is null for an UNPRICED trip. */

@@ -45,6 +45,7 @@ import { formatSarVat } from "@/lib/inventory-vat";
 import { computeWorkshopPaymentTotals } from "@/lib/outsourced-vat";
 import type {
   Truck,
+  VehicleType,
   Staff,
   Repairer,
   RepairerType,
@@ -53,6 +54,7 @@ import type {
   WorkshopPayment,
   WorkshopPaymentFile,
 } from "@/lib/db-types";
+import { vehicleLabel } from "@/lib/vehicle-types";
 import {
   dispatchOutsourcedJob,
   completeOutsourcedJob,
@@ -112,6 +114,7 @@ export default function OutsourcedJobDetailModal({
   payments,
   paymentFiles,
   truck,
+  vehicleTypeById,
   mechanic,
   mechanicOnLeave,
   onClose,
@@ -125,6 +128,9 @@ export default function OutsourcedJobDetailModal({
   payments: WorkshopPayment[];
   paymentFiles: WorkshopPaymentFile[];
   truck: Truck | null;
+  // Same vehicle naming as the in-house detail modal — one helper, so the two
+  // headers cannot describe the same crane differently.
+  vehicleTypeById: ReadonlyMap<string, VehicleType>;
   mechanic: Staff | null;
   // Polish item 3 (on-leave-today, UI display only) — whether `mechanic`
   // above is on leave today (lib/leave.ts, resolved by the caller).
@@ -367,7 +373,11 @@ export default function OutsourcedJobDetailModal({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div>
               <div className="muted mb-0.5">{t("common.truck", lang)}</div>
-              <div className="font-medium">{truck ? `${truck.plate} · ${truck.model ?? ""}` : "—"}</div>
+              <div className="font-medium">
+                {truck
+                  ? [vehicleLabel(truck, vehicleTypeById, lang), truck.model].filter(Boolean).join(" · ")
+                  : "—"}
+              </div>
             </div>
             <div>
               <div className="muted mb-0.5">{t("common.status", lang)}</div>

@@ -1420,7 +1420,24 @@ export type ArchiveTruckRow = {
   plate: string;
   model: string | null;
   year: number | null;
-  capacity_m3: number | null;
+  // THE PAIR, not `capacity_m3` (0201). The Archive's Truck matrix holds BOTH
+  // vehicle classes, and an operation vehicle rated in litres carries NULL in
+  // `capacity_m3` by `trucks_capacity_m3_consistent_check` — so the old column
+  // would have printed an em dash for a vehicle whose capacity is recorded.
+  // `capacity_m3` is gone from this row rather than kept alongside: nothing
+  // here sums capacities, and a second spelling of the same fact is how one
+  // render site keeps reading the wrong one.
+  capacity_value: number | null;
+  capacity_unit: CapacityUnit;
+  // WHICH CLASS, and which type inside it (0201). The Truck tab lists both in
+  // one matrix, so the row has to carry enough to say what it is looking at:
+  // `vehicle_class` splits the matrix into its two groups, and
+  // `vehicle_type_id` resolves — against the page's `vehicle_types` fetch,
+  // never against a name stored here — to the word that tells a reader which
+  // vehicle "4312 ABC" is. NULL on every truck by
+  // `trucks_vehicle_class_shape_check`.
+  vehicle_class: VehicleClass;
+  vehicle_type_id: string | null;
   vin: string | null;
   vehicle_registration: string | null;
   registration_expiry: string | null;

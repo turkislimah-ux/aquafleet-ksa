@@ -48,7 +48,13 @@ eq("year", periodRange("2026-08-24", "year"), { from: "2026-01-01", to: "2026-12
 const base = {
   projects: [{ id: "P1", name: "Alpha" }, { id: "P2", name: "Empty" }],
   drivers: [{ id: "D1", name: "Ali" }, { id: "D2", name: "Bilal" }, { id: "D3", name: "Idle" }],
-  trucks: [{ id: "T1", plate: "ABC 1234" }, { id: "T2", plate: "XYZ 9999" }],
+  // Both water trucks. buildProjectTables never branches on the class — it
+  // reaches a truck only to resolve a plate — so a mixed fixture here would
+  // assert nothing. The class is grouped in the PICKER, which is a component.
+  trucks: [
+    { id: "T1", plate: "ABC 1234", vehicle_class: "truck" as const, vehicle_type_id: null },
+    { id: "T2", plate: "XYZ 9999", vehicle_class: "truck" as const, vehicle_type_id: null },
+  ],
   assignments: [
     { project_id: "P1", driver_id: "D1" },
     { project_id: "P1", driver_id: "D3" },

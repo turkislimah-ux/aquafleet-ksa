@@ -32,7 +32,8 @@ import { t, arText } from "@/lib/i18n";
 import { cn, formatDate, formatSar } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
-import type { Truck, Staff, Part, WorkOrder, WorkOrderTask, WorkOrderPart, WorkOrderPartPhoto } from "@/lib/db-types";
+import type { Truck, Staff, Part, WorkOrder, WorkOrderTask, WorkOrderPart, WorkOrderPartPhoto, VehicleType } from "@/lib/db-types";
+import { vehicleLabel } from "@/lib/vehicle-types";
 import {
   startWorkOrder,
   completeWorkOrder,
@@ -81,6 +82,7 @@ export default function WorkOrderDetailModal({
   lines,
   photos,
   truck,
+  vehicleTypeById,
   mechanic,
   mechanicOnLeave,
   parts,
@@ -93,6 +95,9 @@ export default function WorkOrderDetailModal({
   lines: WorkOrderPart[];
   photos: WorkOrderPartPhoto[];
   truck: Truck | null;
+  // Names the vehicle the same way every other Maintenance surface does; see
+  // lib/vehicle-types.ts. Built once in MaintenanceClient.
+  vehicleTypeById: ReadonlyMap<string, VehicleType>;
   mechanic: Staff | null;
   // Polish item 3 (on-leave-today, UI display only) — whether `mechanic`
   // above is on leave today (lib/leave.ts, resolved by the caller).
@@ -342,7 +347,17 @@ export default function WorkOrderDetailModal({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div>
               <div className="muted mb-0.5">{t("common.truck", lang)}</div>
-              <div className="font-medium">{truck ? `${truck.plate} · ${truck.model ?? ""}` : "—"}</div>
+              {/* Plate, the TYPE for an operation vehicle, then the model —
+                  `vehicleLabel` decides whether the middle segment exists, so
+                  this header cannot disagree with the pickers and tables that
+                  named the same vehicle a moment ago. The model is appended
+                  only when there is one; the old interpolation printed a
+                  trailing " · " for every vehicle without one. */}
+              <div className="font-medium">
+                {truck
+                  ? [vehicleLabel(truck, vehicleTypeById, lang), truck.model].filter(Boolean).join(" · ")
+                  : "—"}
+              </div>
             </div>
             <div>
               <div className="muted mb-0.5">{t("common.status", lang)}</div>

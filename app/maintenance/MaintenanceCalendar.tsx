@@ -28,7 +28,8 @@ import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import { t, arText } from "@/lib/i18n";
 import { cn, todayKey as todayKeyUtil, riyadhDayKey, monthName } from "@/lib/utils";
-import type { Truck, WorkOrder, OutsourcedJob } from "@/lib/db-types";
+import type { Truck, WorkOrder, OutsourcedJob, VehicleType } from "@/lib/db-types";
+import { vehicleLabel } from "@/lib/vehicle-types";
 
 // EXPORTED — MaintenanceClient's own day-filter (Phase-5 fix) must bucket
 // a WO by the exact same key the calendar uses to place it, or clicking a
@@ -118,6 +119,7 @@ const WEEKDAY_KEYS = ["0", "1", "2", "3", "4", "5", "6"] as const;
 export default function MaintenanceCalendar({
   lang,
   track,
+  vehicleTypeById,
   workOrders,
   outsourcedJobs,
   trucks,
@@ -132,6 +134,11 @@ export default function MaintenanceCalendar({
   workOrders: WorkOrder[];
   outsourcedJobs: OutsourcedJob[];
   trucks: Truck[];
+  // Names an operation vehicle inside a chip (0201). The chips TRUNCATE, and
+  // that is why the type is appended rather than prefixed: the plate is the
+  // identifier and must survive a narrow day cell, so it goes first and the
+  // type is what gets cut if anything does.
+  vehicleTypeById: ReadonlyMap<string, VehicleType>;
   truckFilter: string; // "all" | truck id
   selectedDate: string | null;
   onSelectDate: (iso: string | null) => void;
@@ -342,7 +349,7 @@ export default function MaintenanceCalendar({
                         className={cn("text-[10px] rounded px-1.5 py-1 truncate cursor-pointer border-s-[3px]", tone)}
                         title={arText(w.title, w.title_ar, lang)}
                       >
-                        {truck?.plate ?? w.truck_id}
+                        {truck ? vehicleLabel(truck, vehicleTypeById, lang) : w.truck_id}
                       </div>
                     );
                   }
@@ -363,7 +370,7 @@ export default function MaintenanceCalendar({
                           .os-badge is a small solid violet pill before the
                           truck info, not bare bold text like this app had. */}
                       <span className="inline-block align-middle text-[9px] font-bold bg-violet-600 text-white px-1 rounded-sm me-1">OS</span>
-                      {truck?.plate ?? j.truck_id}
+                      {truck ? vehicleLabel(truck, vehicleTypeById, lang) : j.truck_id}
                     </div>
                   );
                 })}

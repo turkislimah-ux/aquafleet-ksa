@@ -61,9 +61,17 @@ export default async function DriversPage() {
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       // Terminated trucks vanish from the driver-detail "Current Assignment"
       // resolution (0020) — a driver on a just-terminated truck reads unassigned.
+      //
+      // WATER TRUCKS ONLY (0201). This array is both the assignment picker and
+      // the input to the derived driver state, and a driver cannot be assigned
+      // to an operation vehicle — 0201's shape check forbids the column. An
+      // operation row here would offer a choice the server action refuses, and
+      // the two expressions of driver state (lib/driver-state.ts and
+      // v_driver_state_now) would be reading different fleets.
       supabase
         .from("trucks")
         .select("id, plate, model, status, home_station, assigned_driver_id")
+        .eq("vehicle_class", "truck")
         .is("terminated_at", null)
         .order("plate", { ascending: true }),
       supabase

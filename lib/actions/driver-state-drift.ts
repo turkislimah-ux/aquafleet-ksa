@@ -67,7 +67,16 @@ export async function checkDriverStateDrift(): Promise<DriverStateDrift> {
     const [sqlRes, driversRes, trucksRes, memberRes, leaveRes] = await Promise.all([
       supabase.from("v_driver_state_now").select("driver_id, name, state"),
       supabase.from("drivers").select("id, name").is("terminated_at", null),
-      supabase.from("trucks").select("assigned_driver_id").is("terminated_at", null),
+      // WATER TRUCKS ONLY (0201), because the CALL SITES filter this way —
+      // app/drivers, app/projects and app/trips all narrow to
+      // `vehicle_class = 'truck'` before building this set. Reproducing the
+      // helper's real inputs is this check's whole method, so it narrows too.
+      // Today the filter changes nothing (the shape check forces an operation
+      // vehicle's assigned_driver_id to NULL, and a NULL never enters the set);
+      // it earns its place by making that a stated assumption rather than a
+      // coincidence, so the day the constraint moves, this file moves with it.
+      supabase.from("trucks").select("assigned_driver_id")
+        .eq("vehicle_class", "truck").is("terminated_at", null),
       supabase.from("project_drivers").select("driver_id, project:projects(archived_at)"),
       // select("*") rather than the three columns actually used: a narrowed
       // select would need a cast to LeavePeriod, and a cast that claims a

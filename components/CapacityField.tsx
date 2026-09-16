@@ -38,21 +38,60 @@
 //      the muted role, not the absolute size. At .65rem beside .875rem the
 //      token stops reading as part of the value and starts reading as debris.
 //
-// SCOPE — TRUCKS ONLY, ON PURPOSE. This renders the unit LOCKED. Operation
-// vehicles may be stated in either unit, and the switch that lets them is not
-// here yet because there is no screen to verify it on until the Operation
-// Vehicles tab exists. A branch nobody can open in a browser is not a feature,
-// it is unreviewed code. It arrives with its tab.
+// SCOPE — BOTH CLASSES NOW, AND THE CLASS DECIDES TWO THINGS
+// -----------------------------------------------------------------------------
+// This file used to end "TRUCKS ONLY, ON PURPOSE … it arrives with its tab."
+// The tab is here, so it has arrived. What the class decides:
+//
+// A TRUCK: capacity is REQUIRED, and the unit is a static m³ token. Not a
+// disabled `<select>` — a control you may not use is worse than no control, and
+// the unit is not a truck decision at all (trucks_vehicle_class_shape_check
+// refuses anything else, and lib/capacity.ts forces m³ server-side whatever
+// this form sends).
+//
+// AN OPERATION VEHICLE: capacity is OPTIONAL — a crane has no tank, and 0201
+// lets that column be NULL for this class alone — and the unit is a real choice,
+// so the token becomes a `<select>` wearing the token's own typography. It stays
+// INSIDE the same bordered shell rather than moving beside it, because changing
+// "33 m³" to "33 L" is a change to one fact, not the answering of a second
+// question. That was this file's founding argument and it did not weaken when
+// the unit became editable.
+//
+// The option list is CAPACITY_UNITS, never two literals: lib/capacity.ts owns
+// which units exist (it mirrors trucks_capacity_unit_check), so a third unit
+// reaches this control by a migration and an array entry, not by editing JSX.
 
+import { useState } from "react";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
+import { CAPACITY_UNITS, DEFAULT_CAPACITY_UNIT } from "@/lib/capacity";
+import type { CapacityUnit, VehicleClass } from "@/lib/db-types";
 
-export default function CapacityField({ defaultValue }: { defaultValue: number | null }) {
+export default function CapacityField({
+  vehicleClass,
+  defaultValue,
+  defaultUnit,
+}: {
+  vehicleClass: VehicleClass;
+  defaultValue: number | null;
+  // Absent when adding, and on every truck. Its absence is not "no unit" — the
+  // column has a DEFAULT and a CHECK so a row always has one; this only means
+  // the caller has no stored row to read it from.
+  defaultUnit?: CapacityUnit | null;
+}) {
   const { lang } = useApp();
+  const isTruck = vehicleClass === "truck";
+  // Controlled, so the posted value and the visible token can never disagree.
+  // A truck never reads it: its unit is the literal below.
+  const [unit, setUnit] = useState<CapacityUnit>(defaultUnit ?? DEFAULT_CAPACITY_UNIT);
 
   return (
     <label className="flex flex-col gap-1 text-sm">
-      <span className="muted">{t("common.capacity", lang)}</span>
+      {/* The label carries the "(optional)" rather than a separate hint line —
+          it is the field's own name for this class, and a hint under a
+          single-row grid cell would push this box out of level with Model and
+          Year beside it. */}
+      <span className="muted">{t(isTruck ? "common.capacity" : "fleet.form.capacityOptional", lang)}</span>
       <div
         // `px-3 py-2` — the sibling inputs' own padding, not a new number, so
         // this box is the same height as Model and Year beside it and the grid
@@ -76,7 +115,11 @@ export default function CapacityField({ defaultValue }: { defaultValue: number |
           // trucks are integers, but a tank is not obliged to be.
           min="0"
           step="any"
-          required
+          // REQUIRED FOR A TRUCK ONLY. Not taste — 0201's shape check makes a
+          // truck's capacity mandatory and an operation vehicle's optional, and
+          // lib/capacity.ts reads a blank as NULL rather than 0 for exactly the
+          // vehicles allowed to leave it blank.
+          required={isTruck}
           defaultValue={defaultValue ?? ""}
           // NO `dir` ATTRIBUTE, AND ITS ABSENCE IS THE POINT. An earlier draft
           // pinned this to `dir="ltr"` on the reasoning that a quantity is
@@ -110,21 +153,53 @@ export default function CapacityField({ defaultValue }: { defaultValue: number |
           // them, so there is nothing to compete with.
           className="flex-1 min-w-0 bg-transparent outline-none border-0 p-0 text-sm tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
         />
-        {/* THIS `dir="ltr"` STAYS, and is not the one that was wrong. It
-            isolates a two-character unit SYMBOL so "m³" cannot be re-ordered by
-            the surrounding Arabic paragraph — the bidi failure lib/i18n.ts
+        {/* THE `dir="ltr"` ON BOTH BRANCHES STAYS, and is not the one that was
+            wrong. It isolates a unit SYMBOL so "m³" cannot be re-ordered by the
+            surrounding Arabic paragraph — the bidi failure lib/i18n.ts
             documents at length. It does not decide which side of the box the
             token sits on; flex does that, from `html[dir]`. Removing it by
             symmetry with the input above would be undoing a different fix. */}
-        <span className="shrink-0 text-xs font-medium muted select-none" dir="ltr">
-          {t("common.capacityUnit.m3", lang)}
-        </span>
+        {isTruck ? (
+          <span className="shrink-0 text-xs font-medium muted select-none" dir="ltr">
+            {t("common.capacityUnit.m3", lang)}
+          </span>
+        ) : (
+          <select
+            // The TOKEN'S typography verbatim — `text-xs font-medium muted` —
+            // so the unit still reads as an annotation of the number rather
+            // than as a second field that happens to be adjacent. What it adds
+            // over the span is the native disclosure arrow, which is the whole
+            // signal that this one is changeable; nothing else in the box says
+            // so, and inventing a caret would be inventing an affordance the
+            // platform already draws.
+            //
+            // `ps-0 pe-1` rather than symmetric padding: the arrow needs room
+            // on the trailing side and none on the leading one, and the LOGICAL
+            // properties keep that true when Arabic flips the box.
+            name="capacity_unit"
+            value={unit}
+            onChange={(e) => setUnit(e.target.value as CapacityUnit)}
+            aria-label={t("fleet.form.capacityUnitAria", lang)}
+            dir="ltr"
+            className="shrink-0 bg-transparent outline-none border-0 ps-0 pe-1 text-xs font-medium muted cursor-pointer focus:ring-2 focus:ring-brand-500/30 rounded"
+          >
+            {CAPACITY_UNITS.map((u) => (
+              <option key={u} value={u}>
+                {t(`common.capacityUnit.${u}`, lang)}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
-      {/* The unit is a real posted value, not an assumption the server makes.
-          It is ALSO overridden server-side for a truck (lib/capacity.ts forces
-          m³ regardless of what arrives) — the input states the fact, the helper
-          enforces it, and neither one trusts the other. */}
-      <input type="hidden" name="capacity_unit" value="m3" />
+      {/* A TRUCK'S UNIT IS A REAL POSTED VALUE, not an assumption the server
+          makes — and it is ALSO overridden server-side (lib/capacity.ts forces
+          m³ regardless of what arrives). The input states the fact, the helper
+          enforces it, and neither one trusts the other.
+
+          The operation branch does NOT render this: its `<select>` above
+          already carries `name="capacity_unit"`, and a second control with the
+          same name would post two values for one column. */}
+      {isTruck && <input type="hidden" name="capacity_unit" value="m3" />}
     </label>
   );
 }

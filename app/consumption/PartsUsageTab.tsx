@@ -39,8 +39,9 @@ import {
   type PeriodKind, type TrendKind, type TruckUsage, type SummaryBullet,
 } from "@/lib/parts-usage";
 import type {
-  ExitPermit, ExitPermitLine, WorkOrder, WorkOrderPart,
+  ExitPermit, ExitPermitLine, WorkOrder, WorkOrderPart, VehicleClass, VehicleType,
 } from "@/lib/db-types";
+import { vehicleLabel } from "@/lib/vehicle-types";
 import ScrollLock from "@/components/ScrollLock";
 
 // `name_ar` rides along so a part name can go through arText(). It is nullable
@@ -51,12 +52,12 @@ import ScrollLock from "@/components/ScrollLock";
 // the schema, and a plate is a registration string, not prose.
 type PartLite = { id: string; name: string; name_ar: string | null; sku: string; unit: string | null; warehouse_id: string };
 type WarehouseLite = { id: string; name: string };
-type TruckLite = { id: string; plate: string };
+type TruckLite = { id: string; plate: string; vehicle_class: VehicleClass; vehicle_type_id: string | null };
 
 export default function PartsUsageTab({
   workOrders, workOrderParts, woLedger,
   permits, permitLines, epLedger,
-  parts, warehouses, trucks, destinationLabel,
+  parts, warehouses, trucks, vehicleTypeById, destinationLabel,
 }: {
   workOrders: WorkOrder[];
   workOrderParts: WorkOrderPart[];
@@ -67,6 +68,8 @@ export default function PartsUsageTab({
   parts: PartLite[];
   warehouses: WarehouseLite[];
   trucks: TruckLite[];
+  // Names the operation half of `trucks`. Built once in ConsumptionClient.
+  vehicleTypeById: ReadonlyMap<string, VehicleType>;
   destinationLabel: (p: ExitPermit) => string;
 }) {
   const { lang } = useApp();
@@ -80,10 +83,13 @@ export default function PartsUsageTab({
     const m = new Map(warehouses.map((w) => [w.id, w.name]));
     return (id: string) => m.get(id) ?? null;
   }, [warehouses]);
+  // NAME, not plate — an operation vehicle carries its type here too. Every
+  // truck-keyed figure on this tab (the table, the chart, the weekly summary
+  // sentence) runs through this one resolver, so they all gained it together.
   const plateOf = useMemo(() => {
-    const m = new Map(trucks.map((t) => [t.id, t.plate]));
+    const m = new Map(trucks.map((t) => [t.id, vehicleLabel(t, vehicleTypeById, lang)]));
     return (id: string) => m.get(id) ?? null;
-  }, [trucks]);
+  }, [trucks, vehicleTypeById, lang]);
   // DISPLAY name, so arText() decides which column is shown. The map is rebuilt
   // when the language changes because that is what the label on a bar reads.
   const partName = useMemo(() => {

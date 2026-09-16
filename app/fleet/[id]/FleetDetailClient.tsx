@@ -20,7 +20,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Card, Stat, StatusPill, Section, Btn, Table, TH, TD } from "@/components/ui";
-import { type OperationStation, type WorkOrder, type WorkOrderPart, type OutsourcedJob, type OutsourcedJobRepairer, type WorkshopPayment } from "@/lib/db-types";
+import { type OperationStation, type VehicleType, type WorkOrder, type WorkOrderPart, type OutsourcedJob, type OutsourcedJobRepairer, type WorkshopPayment } from "@/lib/db-types";
 import { type TruckOpsState } from "@/lib/truck-status";
 import type { TruckRow, DriverLite } from "../page";
 import { type DriverState } from "@/lib/driver-state";
@@ -28,6 +28,12 @@ import { assignDriver, unassignDriver, terminateTruck } from "../actions";
 import TruckFormModal from "../TruckFormModal";
 import { cn, formatDate, formatDateLangLocale, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { toLatinDigits } from "@/lib/digits";
+// 0201 — the unit travels with the number. Three sites on this page printed
+// `${capacity_m3} m³`; a litre-rated operation vehicle carries NULL there by
+// construction, so all three would have shown an em dash for a stated capacity.
+import { formatCapacity } from "@/lib/capacity";
+import { vehicleTypeLabel } from "@/lib/vehicle-types";
+import { fleetHrefForClass } from "@/lib/fleet-tabs";
 import { ArrowLeft, Users, X, Activity, Pencil, Eye, Wrench, Package } from "lucide-react";
 import MtStatusPill, { type MtPillKind } from "@/app/maintenance/MtStatusPill";
 import {
@@ -200,6 +206,7 @@ export default function FleetDetailClient({
   onLeaveDriverIds,
   driverStateById,
   operationStations,
+  vehicleTypes,
   workOrders,
   workOrderParts,
   outsourcedJobs,
@@ -221,6 +228,9 @@ export default function FleetDetailClient({
   onLeaveDriverIds: string[];
   driverStateById: Record<string, DriverState>;
   operationStations: OperationStation[];
+  // ALL rows, active and retired — this page RESOLVES one vehicle's type name
+  // and the edit modal's picker needs the rest. See lib/vehicle-types.ts.
+  vehicleTypes: VehicleType[];
   workOrders: WorkOrder[];
   workOrderParts: WorkOrderPart[];
   outsourcedJobs: OutsourcedJob[];
@@ -322,6 +332,18 @@ export default function FleetDetailClient({
   // narrowing from the early return above into a callback body.
   const plate = truck.plate;
 
+  // THE PAGE IS THE SAME PAGE, MINUS TWO SECTIONS. 0201 made `trucks` a table
+  // of two classes, and an operation vehicle genuinely has no driver
+  // (trucks_vehicle_class_shape_check forbids one) and no utilization (it runs
+  // no trips, so v_truck_utilization has nothing to measure). Everything else
+  // on this page — identity, odometer, service history, both maintenance
+  // tracks, the danger zone — is shared, which is why this is a branch and not
+  // a second route.
+  const isOperation = truck.vehicle_class === "operation";
+  const vehicleType = truck.vehicle_type_id
+    ? vehicleTypes.find((vt) => vt.id === truck.vehicle_type_id) ?? null
+    : null;
+
   const driver = truck.assigned_driver_id
     ? drivers.find((d) => d.id === truck.assigned_driver_id) ?? null
     : null;
@@ -344,10 +366,20 @@ export default function FleetDetailClient({
       : null;
 
   // Subtitle = the non-empty descriptive bits joined, honest-empty otherwise.
+  //
+  // THE TYPE LEADS, and only for an operation vehicle. "Crane · Hyundai · 2019"
+  // answers "what am I looking at" in the first word; a water truck needs no
+  // such word, because the page it came from said so and its capacity says so
+  // again two segments later.
+  //
+  // formatCapacity RETURNS NULL rather than "—" precisely so this line can drop
+  // the segment — a literal em dash inside a comma-joined sentence reads as a
+  // rendering bug. See lib/capacity.ts.
   const subParts = [
+    isOperation ? vehicleTypeLabel(vehicleType, lang) : null,
     truck.model,
     truck.year ? String(truck.year) : null,
-    truck.capacity_m3 != null ? `${truck.capacity_m3} m³` : null,
+    formatCapacity(truck, lang),
     truck.home_station ? stationNameById.get(truck.home_station) ?? null : null,
   ].filter(Boolean);
 
@@ -417,14 +449,22 @@ export default function FleetDetailClient({
       setTermError(res.error);
       return;
     }
-    router.push("/fleet");
+    // Back to the tab this vehicle was ON, not to the default one — a
+    // terminated crane leaves from the Operation Vehicles list, so that is the
+    // list the reader lands back in.
+    router.push(fleetHrefForClass(truck.vehicle_class));
     router.refresh();
   }
 
   return (
     <div className="space-y-5">
       <Link
-        href="/fleet"
+        // DERIVED FROM THE VEHICLE, not from how the reader arrived. This page
+        // is a real destination — global search links to it, so does a
+        // bookmark and so does a refresh — so there is often no arrival tab to
+        // hand back. The tab an operation vehicle belongs to is a fact about
+        // the vehicle, so it is read off the row. lib/fleet-tabs.ts.
+        href={fleetHrefForClass(truck.vehicle_class)}
         className="inline-flex items-center gap-2 text-sm font-medium muted hover:opacity-80"
       >
         <ArrowLeft className="h-4 w-4 rtl:-scale-x-100" /> {t("fleet.detail.back", lang)}
@@ -436,11 +476,17 @@ export default function FleetDetailClient({
         actions={
           <>
             {truckStatus && <StatusPill status={truckStatus} label={t(`fleet.truckState.${truckStatus}`, lang)} />}
-            <Btn variant="outline" onClick={openAssign}>
-              <Users className="h-4 w-4" /> {t(truck.driverName ? "fleet.assign.changeDriver" : "fleet.assign.assignDriver", lang)}
-            </Btn>
+            {/* ABSENT, NOT DISABLED, for an operation vehicle — the same ruling
+                TruckFormModal makes about its driver select. A greyed-out
+                "Assign Driver" advertises a capability the constraint forbids
+                and assignDriver refuses. */}
+            {!isOperation && (
+              <Btn variant="outline" onClick={openAssign}>
+                <Users className="h-4 w-4" /> {t(truck.driverName ? "fleet.assign.changeDriver" : "fleet.assign.assignDriver", lang)}
+              </Btn>
+            )}
             <Btn variant="outline" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-4 w-4" /> {t("fleet.form.editTitle", lang)}
+              <Pencil className="h-4 w-4" /> {t(isOperation ? "fleet.op.editTitle" : "fleet.form.editTitle", lang)}
             </Btn>
           </>
         }
@@ -459,11 +505,18 @@ export default function FleetDetailClient({
           Health and Fuel Eff. stay out on the original reasoning: health_score,
           fuel_efficiency_km_per_l and engine_hours have no source. A stat that
           can only ever read "—" is furniture. Health returns with IoT. */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label={t("common.capacity", lang)} value={truck.capacity_m3 != null ? `${truck.capacity_m3} m³` : "—"} tone="info" />
+      {/* FOUR STATS, OR THREE. An operation vehicle drops UtilizationStat by
+          the same rule that kept Health and Fuel Eff. out: a stat that can only
+          ever read "—" is furniture. It runs no trips, so
+          v_truck_utilization_rolling30 has nothing to measure and returns no
+          row — the stat would render an em dash on every yard vehicle forever.
+          The grid narrows with it so three cards fill the row rather than
+          leaving a hole where the fourth used to be. */}
+      <div className={cn("grid grid-cols-2 gap-3", isOperation ? "md:grid-cols-3" : "md:grid-cols-4")}>
+        <Stat label={t("common.capacity", lang)} value={formatCapacity(truck, lang) ?? "—"} tone="info" />
         <Stat label={t("common.odometer", lang)} value={truck.odometer_km != null ? `${formatNum(truck.odometer_km)} km` : "—"} />
         <Stat label={t("fleet.cols.lastService", lang)} value={lastServiceLabel(truck.last_service_date, lang)} tone="ok" />
-        <UtilizationStat row={utilization} lang={lang} />
+        {!isOperation && <UtilizationStat row={utilization} lang={lang} />}
       </div>
 
       {/* GENERAL INFO — the same fields the Add-Truck form collects, shown
@@ -482,11 +535,18 @@ export default function FleetDetailClient({
             the name is shown as entered, the same way the list page does. */}
         <div className="p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           <InfoField label={t("common.plate", lang)} value={truck.plate} mono />
+          {/* Second field, right after the plate, for an operation vehicle
+              only: a water truck's vehicle_type_id is NULL by constraint, so
+              rendering it for both classes would put a permanent em dash in
+              the identity block of every truck. */}
+          {isOperation && (
+            <InfoField label={t("fleet.vtype.label", lang)} value={vehicleTypeLabel(vehicleType, lang)} />
+          )}
           <InfoField label={t("fleet.cols.model", lang)} value={truck.model ?? "—"} />
           <InfoField label={t("fleet.form.year", lang)} value={truck.year != null ? String(truck.year) : "—"} />
           <InfoField
             label={t("common.capacity", lang)}
-            value={truck.capacity_m3 != null ? `${truck.capacity_m3} m³` : "—"}
+            value={formatCapacity(truck, lang) ?? "—"}
           />
           <InfoField
             label={t("fleet.cols.station", lang)}
@@ -531,7 +591,11 @@ export default function FleetDetailClient({
         </div>
 
         <div className="space-y-4">
-          {/* Driver — REAL */}
+          {/* Driver — REAL, and WATER TRUCKS ONLY. The whole card goes, not
+              just its button: with no driver possible, "No driver assigned"
+              would be the permanent content of a card whose title promises
+              one. The note below says so once, in words, instead. */}
+          {!isOperation && (
           <Section
             title={t("common.driver", lang)}
             action={
@@ -587,6 +651,18 @@ export default function FleetDetailClient({
               <p className="text-sm muted">{t("fleet.detail.noDriverAssigned", lang)}</p>
             )}
           </Section>
+          )}
+
+          {/* WHY TWO CARDS ARE MISSING, said once. An absence nobody notices is
+              an absence nobody trusts, and "where is the driver card" is the
+              first question this page raises for a yard vehicle. Same sentence
+              the Operation Vehicles tab prints under its table, from the same
+              key, so the two surfaces cannot come to disagree. */}
+          {isOperation && (
+            <Section title={t("fleet.tabs.operation", lang)}>
+              <p className="text-sm muted">{t("fleet.op.noDriverNote", lang)}</p>
+            </Section>
+          )}
 
           {/* Predictive AI — honest-empty until Predictive lands */}
           <Section title={t("fleet.detail.predictiveAi", lang)}>
@@ -821,6 +897,9 @@ export default function FleetDetailClient({
       {editOpen && (
         <TruckFormModal
           mode="edit"
+          // The ROW'S class, which is the only class this page has.
+          vehicleClass={truck.vehicle_class}
+          vehicleTypes={vehicleTypes}
           truck={truck}
           drivers={drivers}
           operationStations={operationStations}

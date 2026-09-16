@@ -17,6 +17,7 @@ import type { LeavePeriod } from "@/lib/leave";
 import { todayKey } from "@/lib/utils";
 import { toLatinDigits } from "@/lib/digits";
 import { capacityColumns } from "@/lib/capacity";
+import type { VehicleClass } from "@/lib/db-types";
 
 export type ActionResult = { error: string | null };
 
@@ -65,13 +66,25 @@ function idText(v: FormDataEntryValue | null) {
 // Neither is expected in normal use — lib/capacity.ts derives the triple and
 // the form marks capacity required — so seeing one means a form and a
 // constraint have drifted apart, and the message has to be enough to say which.
-function capacityConstraintMessage(error: { code?: string; message: string }): string | null {
+//
+// THE SHAPE CHECK GUARDS TWO DIFFERENT SHAPES, so it needs the class to say
+// which one was broken. `trucks_vehicle_class_shape_check` is one constraint
+// with two arms — a truck must state an m³ capacity and carry NO type, an
+// operation vehicle must carry a type and NO driver — and telling a yard
+// manager who was adding a crane that "capacity must be in cubic metres" would
+// point at the wrong field entirely.
+function capacityConstraintMessage(
+  error: { code?: string; message: string },
+  vehicleClass: VehicleClass,
+): string | null {
   if (error.code !== "23514") return null;
   if (error.message.includes("trucks_capacity_m3_consistent_check")) {
     return "Capacity could not be saved: the value and its unit disagree. Reload the page and try again.";
   }
   if (error.message.includes("trucks_vehicle_class_shape_check")) {
-    return "Capacity is required for a truck, and must be in cubic metres.";
+    return vehicleClass === "operation"
+      ? "An operation vehicle needs a vehicle type, and cannot be given a driver."
+      : "Capacity is required for a truck, and must be in cubic metres.";
   }
   return null;
 }
@@ -93,30 +106,67 @@ async function freeDriverFromOtherTrucks(
   return error ? error.message : null;
 }
 
+/**
+ * The class a create is for, read from the form and NARROWED HERE.
+ *
+ * DEFAULTS TO "truck", which is the conservative answer and not an arbitrary
+ * one: "truck" is the STRICTER arm of `trucks_vehicle_class_shape_check` (an m³
+ * capacity is mandatory and no vehicle type may be attached), so a form that
+ * forgot to post the field gets refused loudly rather than filing an operation
+ * vehicle as a water truck — a mistake that would put it in the trips picker,
+ * the projects roster and the dashboard's capacity figures.
+ *
+ * Only `createTruck` reads a posted class. `updateTruck` reads the STORED one:
+ * the class is fixed at creation and the edit form does not offer it.
+ */
+function postedVehicleClass(formData: FormData): VehicleClass {
+  return str(formData.get("vehicle_class")) === "operation" ? "operation" : "truck";
+}
+
 export async function createTruck(formData: FormData): Promise<ActionResult> {
   const plate = str(formData.get("plate"));
   if (!plate) return { error: "Plate is required." };
+
+  const vehicleClass = postedVehicleClass(formData);
+  const isOperation = vehicleClass === "operation";
+
+  // REQUIRED FOR AN OPERATION VEHICLE, FORBIDDEN FOR A TRUCK — both halves of
+  // the constraint, checked here so the operator gets a sentence about the
+  // field they left empty instead of a 23514 about a constraint name. The
+  // truck half is not merely "not sent": a truck form that grew a type field by
+  // accident would still write NULL, because the column belongs to the other
+  // class.
+  const vehicleTypeId = isOperation ? nullable(formData.get("vehicle_type_id")) : null;
+  if (isOperation && !vehicleTypeId) return { error: "Vehicle type is required." };
 
   const row = {
     plate,
     model: nullable(formData.get("model")),
     year: numOrNull(formData.get("year")),
-    // CAPACITY IS THREE COLUMNS AND THEY ARE BUILT IN ONE PLACE (0201). This
-    // form is the water-truck form, so the class is the literal "truck" rather
-    // than a posted field — which is also what forces the unit to m³ inside the
-    // helper, whatever the form sent. The Operation Vehicles tab passes
-    // "operation" here instead; nothing else about this call changes.
+    // CAPACITY IS THREE COLUMNS AND THEY ARE BUILT IN ONE PLACE (0201). The
+    // class decides the unit: the helper FORCES m³ for a truck whatever the
+    // form sent, and honours the posted unit only for an operation vehicle.
     ...capacityColumns({
-      vehicleClass: "truck",
+      vehicleClass,
       rawValue: formData.get("capacity_value"),
       rawUnit: formData.get("capacity_unit"),
     }),
+    vehicle_class: vehicleClass,
+    vehicle_type_id: vehicleTypeId,
     // status is a fixed literal, not read from the form — Auto Truck-Status
     // Phase 2a removed the manual status control entirely (lib/truck-
     // status.ts derives it fresh at every read instead). This column is
-    // still NOT NULL at the schema level, so a new row needs SOME value;
-    // "active" is a harmless seed since nothing displays it anymore.
-    status: "active",
+    // still NOT NULL at the schema level, so a new row needs SOME value.
+    //
+    // THE TWO CLASSES SEED IT DIFFERENTLY, and the difference is not cosmetic.
+    // A truck's derived status turns on whether a driver is assigned, so
+    // "active" is a harmless seed that the deriver immediately overwrites. An
+    // operation vehicle can NEVER hold a driver (the constraint refuses it), so
+    // nothing will ever derive it "active" — seeding it that way would leave a
+    // permanent lie in the column. "idle" is what a vehicle sitting in the yard
+    // with no driver actually is, and it is what the Operation Vehicles tab
+    // renders as "In Yard".
+    status: isOperation ? "idle" : "active",
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
     vin: idText(formData.get("vin")),
@@ -126,7 +176,13 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
     // submit), so an edit leaves the existing values untouched.
     vehicle_registration: idText(formData.get("vehicle_registration")),
     registration_expiry: nullable(formData.get("registration_expiry")),
-    assigned_driver_id: nullable(formData.get("assigned_driver_id")),
+    // NULL FOR AN OPERATION VEHICLE, AT THE BOUNDARY. The operation form does
+    // not render the driver select at all, so in practice nothing is posted —
+    // but "the form does not send it" is a courtesy and this is the boundary,
+    // the same reasoning `idText` above is written on. There is no driver
+    // assignment for this class anywhere: no picker, no Assign modal, and
+    // `assignDriver` refuses one outright.
+    assigned_driver_id: isOperation ? null : nullable(formData.get("assigned_driver_id")),
     // Phase-5 iteration B: Last Service is now a create-only field (the
     // pre-purchase fix/inspection date — no work order behind it). Wasn't
     // captured here before since the form only ever rendered this input in
@@ -146,7 +202,14 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
   if (error) {
     // 23505 = unique_violation — the case-insensitive plate index (0005).
     if (error.code === "23505") return { error: `Plate "${plate}" already exists.` };
-    const capacityMsg = capacityConstraintMessage(error);
+    // 23503 = foreign_key_violation. The only FK a create can break from the
+    // form is vehicle_type_id, and it breaks when the type was retired AND
+    // deleted from another tab — which no UI path allows, so the sentence says
+    // "reload" rather than pretending the operator did something wrong.
+    if (error.code === "23503") {
+      return { error: "That vehicle type is no longer available. Reload the page and pick another." };
+    }
+    const capacityMsg = capacityConstraintMessage(error, vehicleClass);
     if (capacityMsg) return { error: capacityMsg };
     return { error: error.message };
   }
@@ -185,7 +248,14 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
   const classRes = await supabase.from("trucks").select("vehicle_class").eq("id", id).maybeSingle();
   if (classRes.error) return { error: "Could not read this vehicle. Nothing was changed — please try again." };
   if (!classRes.data) return { error: "That vehicle no longer exists." };
-  const vehicleClass = classRes.data.vehicle_class === "operation" ? "operation" : "truck";
+  const vehicleClass: VehicleClass = classRes.data.vehicle_class === "operation" ? "operation" : "truck";
+  const isOperation = vehicleClass === "operation";
+
+  // The TYPE is editable for the life of an operation vehicle — a pickup that
+  // turns out to be a tractor is a correction, not a new row. The CLASS is not,
+  // which is why one is read from the form and the other from the row above.
+  const vehicleTypeId = isOperation ? nullable(formData.get("vehicle_type_id")) : null;
+  if (isOperation && !vehicleTypeId) return { error: "Vehicle type is required." };
 
   const row = {
     plate,
@@ -196,6 +266,12 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
       rawValue: formData.get("capacity_value"),
       rawUnit: formData.get("capacity_unit"),
     }),
+    // WRITTEN ONLY FOR AN OPERATION VEHICLE. Spreading a `{ vehicle_type_id:
+    // null }` onto a truck's update would be harmless today (the column is
+    // already NULL by constraint) and is still omitted: a truck edit has no
+    // business naming a column that belongs to the other class, and the
+    // omission is what makes the column's owner obvious from the diff.
+    ...(isOperation ? { vehicle_type_id: vehicleTypeId } : {}),
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
     vin: idText(formData.get("vin")),
@@ -212,7 +288,10 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
   const { error } = await supabase.from("trucks").update(row).eq("id", id);
   if (error) {
     if (error.code === "23505") return { error: `Plate "${plate}" already exists.` };
-    const capacityMsg = capacityConstraintMessage(error);
+    if (error.code === "23503") {
+      return { error: "That vehicle type is no longer available. Reload the page and pick another." };
+    }
+    const capacityMsg = capacityConstraintMessage(error, vehicleClass);
     if (capacityMsg) return { error: capacityMsg };
     return { error: error.message };
   }
@@ -256,7 +335,13 @@ export async function assignDriver(truckId: string, driverId: string): Promise<A
   const today = todayKey();
 
   const [truckRes, driverRes, otherTruckRes, leaveRes] = await Promise.all([
-    supabase.from("trucks").select("id, plate, assigned_driver_id, terminated_at").eq("id", truckId).maybeSingle(),
+    // `vehicle_class` is selected for the refusal below — see the guard after
+    // the error checks, not for anything in driverAvailability().
+    supabase
+      .from("trucks")
+      .select("id, plate, assigned_driver_id, terminated_at, vehicle_class")
+      .eq("id", truckId)
+      .maybeSingle(),
     supabase.from("drivers").select("id, name, terminated_at").eq("id", driverId).maybeSingle(),
     // A DIFFERENT truck already holding this driver. Terminated trucks are
     // excluded for the same reason the page excludes them: a terminated truck
@@ -286,6 +371,20 @@ export async function assignDriver(truckId: string, driverId: string): Promise<A
   }
   if (!truckRes.data) return { error: "That truck no longer exists." };
   if (truckRes.data.terminated_at) return { error: `Truck ${truckRes.data.plate} has been terminated and cannot take a driver.` };
+
+  // AN OPERATION VEHICLE CANNOT HOLD A DRIVER, and this refuses it BEFORE the
+  // write rather than letting Postgres do it. The constraint
+  // (trucks_vehicle_class_shape_check) would catch it either way, but it
+  // arrives as a bare 23514 that this action has no branch for — it would be
+  // shown to a yard manager verbatim, constraint name and all.
+  //
+  // No UI path reaches here: the Operation Vehicles tab renders no Assign
+  // action and the detail page renders no driver section. That is exactly why
+  // the guard belongs here — the two surfaces that forbid it are courtesies,
+  // and this is the boundary. Same reasoning as `idText` above.
+  if (truckRes.data.vehicle_class === "operation") {
+    return { error: `${truckRes.data.plate} is an operation vehicle and is not driven by an assigned driver.` };
+  }
 
   const driver = driverRes.data;
   const availability = driverAvailability({

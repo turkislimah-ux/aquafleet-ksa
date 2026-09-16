@@ -39,6 +39,7 @@ import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 import { cn, formatAmount, formatDate } from "@/lib/utils";
 import { toLatinDigits } from "@/lib/digits";
+import { formatCapacity } from "@/lib/capacity";
 import {
   docStatus, ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
   groupAccent, groupDot, linkedFieldFor, linkedFieldForDoc, readPersonLink,
@@ -51,7 +52,11 @@ import type {
   ArchiveDocumentRenewal,
   ArchiveDocumentType,
   ArchiveTruckRow,
+  VehicleType,
 } from "@/lib/db-types";
+import { groupVehiclesByClass } from "@/lib/vehicle-groups";
+import { operationTypeName, vehicleLabel } from "@/lib/vehicle-types";
+import VehicleOptGroups from "@/components/VehicleOptGroups";
 import ScrollLock from "@/components/ScrollLock";
 
 // Narrow shapes matching EXACTLY what app/archive/page.tsx selects. Not the
@@ -109,11 +114,70 @@ function fmtDate(iso: string | null): string {
 // and rendered Arabic-Indic digits on an Arabic device.
 const fmtMoney = (n: number): string => formatAmount(n);
 
-// Param is `truck`, not `t` — `t` is the translator everywhere in this file
-// now, and a shadow here would be the kind of bug that only shows up in the
-// one branch that happens to translate.
-function truckLabel(truck: ArchiveTruckRow): string {
-  return truck.plate;
+// How a vehicle is NAMED in a table cell: the plate, and — for an operation
+// vehicle only — its type beside it (0201).
+//
+// TWO ELEMENTS, NOT ONE STRING. The plate is a registration identifier and the
+// type is prose that follows the language, so joining them would put «ونش»
+// inside the same run as `4312 ABC`. The type takes the same `text-[11px]
+// muted` the model line below already uses, which is what makes it read as
+// what-this-is rather than as part of the plate.
+//
+// A TRUCK RENDERS EXACTLY AS BEFORE: operationTypeName returns null for one,
+// so no separator and no second span appear. Every truck row in this file is
+// byte-identical to what it was.
+//
+// Param is `truck`, not `t` — `t` is the translator everywhere in this file,
+// and a shadow here would be the kind of bug that only shows up in the one
+// branch that happens to translate.
+function TruckName({
+  truck,
+  typeById,
+  lang,
+}: {
+  truck: ArchiveTruckRow;
+  typeById: ReadonlyMap<string, VehicleType>;
+  lang: Lang;
+}) {
+  const type = operationTypeName(truck, typeById, lang);
+  return (
+    <>
+      <span className="font-medium">{truck.plate}</span>
+      {type && <span className="ms-1.5 text-[11px] muted">{type}</span>}
+    </>
+  );
+}
+
+// The boundary between the two vehicle classes inside one table body.
+//
+// PULLED FROM preview/app.css, not eyeballed: `.tbl th` (line 296) is uppercase
+// .7rem / letter-spacing .05em / muted on a `rgba(0,0,0,.02)` wash, and `.tbl
+// td` (298) carries a 1px `--border` top rule. This row is that same heading
+// vocabulary — which is why it reads as a heading and not as a truck with
+// blank columns — over a DOUBLED top rule, so the eye lands on it as a
+// division rather than as one more row.
+//
+// A `<th scope="colgroup">`, not a styled `<td>`: a screen reader then
+// announces the group name for the rows beneath it. A `<td>` that merely looks
+// like a heading is a lookalike that reads as an empty cell.
+//
+// THERE IS NO HEADING OVER THE TRUCKS. The column header already says Truck and
+// the tab is the Truck tab, so the trucks are the page's default population and
+// only the point where it stops needs naming. Labelling both would push every
+// existing row down by one and change a list nobody asked to change.
+function VehicleGroupSeparator({ label, span }: { label: string; span: number }) {
+  return (
+    <tr>
+      <th
+        scope="colgroup"
+        colSpan={span}
+        className="text-start font-medium muted px-3 pt-3 pb-1.5 text-xs uppercase tracking-wide border-t-2 bg-black/[0.02] dark:bg-white/[0.02]"
+        style={{ borderColor: "rgb(var(--border))" }}
+      >
+        {label}
+      </th>
+    </tr>
+  );
 }
 
 export default function ArchiveTruckTab({
@@ -123,6 +187,7 @@ export default function ArchiveTruckTab({
   filesByDoc,
   renewalsByDoc,
   trucks,
+  vehicleTypes,
   types,
   workOrders,
   outsourcedJobs,
@@ -144,6 +209,10 @@ export default function ArchiveTruckTab({
   filesByDoc: Map<string, ArchiveDocumentFile[]>;
   renewalsByDoc: Map<string, ArchiveDocumentRenewal[]>;
   trucks: ArchiveTruckRow[];
+  // The lookup behind an operation vehicle's name — ALL rows, active and
+  // retired. This tab only ever NAMES a type, it never offers one to pick, and
+  // a vehicle filed under a retired type still has to read as what it is.
+  vehicleTypes: VehicleType[];
   types: ArchiveDocumentType[];
   // READ-ONLY feeds for the maintenance sub-tab. The archive DISPLAYS this
   // history; it never copies it into a table of its own.
@@ -163,6 +232,13 @@ export default function ArchiveTruckTab({
 }) {
   const { lang } = useApp();
   const typesByKey = useMemo(() => new Map(types.map((ty) => [ty.key, ty])), [types]);
+  // Built ONCE for the whole tab — the matrix, the maintenance picker and its
+  // table, the soft-deleted list and the detail popup all read this one Map, so
+  // they cannot name the same vehicle differently.
+  const vehicleTypeById = useMemo(
+    () => new Map(vehicleTypes.map((vt) => [vt.id, vt])),
+    [vehicleTypes],
+  );
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [historyDocId, setHistoryDocId] = useState<string | null>(null);
   const [detailTruck, setDetailTruck] = useState<ArchiveTruckRow | null>(null);
@@ -196,6 +272,16 @@ export default function ArchiveTruckTab({
         .sort((a, b) => a.plate.localeCompare(b.plate)),
     [trucks],
   );
+
+  // TRUCKS FIRST, OPERATION VEHICLES AFTER — the same shared split the three
+  // vehicle pickers use (lib/vehicle-groups.ts), so the order here and the
+  // order in a `<select>` cannot drift apart. The plate sort above survives it:
+  // groupVehiclesByClass preserves input order inside each group.
+  //
+  // Empty groups are dropped by the helper, so a fleet with no operation
+  // vehicles gets ONE group and the matrix below renders no separator at all —
+  // byte-identical to what it was before 0201.
+  const truckGroups = useMemo(() => groupVehiclesByClass(activeTrucks), [activeTrucks]);
 
   const terminatedTrucks = useMemo(
     () => trucks.filter((truck) => truck.terminated_at || !truck.active),
@@ -252,6 +338,12 @@ export default function ArchiveTruckTab({
             truck,
             docs: documents.filter((d) => d.group_id === g.id && d.truck_id === truck.id),
           }));
+          // The same join, keyed — the body below walks `truckGroups` (which
+          // carries vehicles, not rows) and looks the documents back up. Built
+          // from `rows` rather than re-filtering `documents`, so the counts in
+          // the header and the rows under it cannot come from two different
+          // passes.
+          const rowDocs = new Map(rows.map((r) => [r.truck.id, r.docs]));
 
           const missing = rows.filter((r) => r.docs.length === 0).length;
           // Expiry comes from the TRUCK for a linked group — same source the
@@ -342,7 +434,16 @@ export default function ArchiveTruckTab({
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map(({ truck, docs }) => {
+                    {truckGroups.map((tg, gi) => (
+                    <Fragment key={tg.cls}>
+                    {/* The boundary, not a heading over every group — see
+                        VehicleGroupSeparator. `gi > 0` is what keeps the first
+                        group (the trucks) rendering exactly as it always did. */}
+                    {gi > 0 && (
+                      <VehicleGroupSeparator label={t(tg.labelKey, lang)} span={8} />
+                    )}
+                    {tg.rows.map((truck) => {
+                      const docs = rowDocs.get(truck.id) ?? [];
                       if (docs.length === 0) {
                         return (
                           <tr
@@ -354,7 +455,7 @@ export default function ArchiveTruckTab({
                             )}
                           >
                             <TD>
-                              <span className="font-medium">{truckLabel(truck)}</span>
+                              <TruckName truck={truck} typeById={vehicleTypeById} lang={lang} />
                               {truck.model && <div className="text-[11px] muted">{truck.model}</div>}
                             </TD>
                             <TD className="text-xs muted">—</TD>
@@ -406,7 +507,7 @@ export default function ArchiveTruckTab({
                                   <TD>
                                     {i === 0 ? (
                                       <>
-                                        <span className="font-medium">{truckLabel(truck)}</span>
+                                        <TruckName truck={truck} typeById={vehicleTypeById} lang={lang} />
                                         {truck.model && <div className="text-[11px] muted">{truck.model}</div>}
                                         {docs.length > 1 && (
                                           <div className="text-[11px] muted mt-0.5">
@@ -572,6 +673,8 @@ export default function ArchiveTruckTab({
                         </Fragment>
                       );
                     })}
+                    </Fragment>
+                    ))}
                   </tbody>
                 </Table>
               )}
@@ -663,10 +766,10 @@ export default function ArchiveTruckTab({
             >
               <option value="all">{t("archive.truck.allTrucks", lang)}</option>
               {/* Every truck, terminated included — a terminated truck's
-                  history is exactly the kind of thing an archive is for. */}
-              {trucks.map((truck) => (
-                <option key={truck.id} value={truck.id}>{truck.plate}</option>
-              ))}
+                  history is exactly the kind of thing an archive is for.
+                  Grouped trucks-first through the shared mechanism; the "all"
+                  option sits OUTSIDE the groups because it is not a vehicle. */}
+              <VehicleOptGroups rows={trucks} typeById={vehicleTypeById} lang={lang} />
             </select>
           </div>
         </div>
@@ -707,7 +810,16 @@ export default function ArchiveTruckTab({
                   )}
                 >
                   <TD className="font-mono text-xs">{r.ref}</TD>
-                  <TD className="text-xs">{trucksById.get(r.truckId)?.plate ?? "—"}</TD>
+                  <TD className="text-xs">
+                    {/* NAME, not plate: this table mixes both classes and the
+                        row above it may be a crane. One string here, not the
+                        two-element TruckName — the cell is already `text-xs`
+                        muted-weight prose, so there is no mono run to protect. */}
+                    {(() => {
+                      const truck = trucksById.get(r.truckId);
+                      return truck ? vehicleLabel(truck, vehicleTypeById, lang) : "—";
+                    })()}
+                  </TD>
                   <TD className="text-xs font-medium">{r.title}</TD>
                   <TD>
                     <span
@@ -784,7 +896,7 @@ export default function ArchiveTruckTab({
               {terminatedTrucks.map((truck) => (
                 <tr key={truck.id}>
                   <TD>
-                    <span className="font-medium">{truck.plate}</span>
+                    <TruckName truck={truck} typeById={vehicleTypeById} lang={lang} />
                     {truck.model && <div className="text-[11px] muted">{truck.model}</div>}
                   </TD>
                   <TD className="text-xs">
@@ -823,6 +935,7 @@ export default function ArchiveTruckTab({
       {detailTruck && (
         <TerminatedTruckDetail
           truck={detailTruck}
+          typeById={vehicleTypeById}
           documents={documents}
           groups={groups}
           workOrders={workOrders}
@@ -846,6 +959,7 @@ function TerminatedTruckDetail({
   truck,
   documents,
   groups,
+  typeById,
   workOrders,
   outsourcedJobs,
   today,
@@ -853,6 +967,9 @@ function TerminatedTruckDetail({
   onClose,
 }: {
   truck: ArchiveTruckRow;
+  // Names the vehicle in the header. Handed down rather than rebuilt: this
+  // popup must call a crane what the row behind it called it.
+  typeById: ReadonlyMap<string, VehicleType>;
   documents: ArchiveDocument[];
   groups: ArchiveDocumentGroup[];
   workOrders: ArchiveTruckTabWorkOrder[];
@@ -895,7 +1012,7 @@ function TerminatedTruckDetail({
           style={{ borderColor: "rgb(var(--border))" }}
         >
           <div>
-            <h2 className="font-semibold">{truck.plate}</h2>
+            <h2 className="font-semibold">{vehicleLabel(truck, typeById, lang)}</h2>
             <p className="text-[11px] muted">{t("archive.truck.detailSubtitle", lang)}</p>
           </div>
           <button
@@ -911,7 +1028,15 @@ function TerminatedTruckDetail({
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <TruckField label={t("archive.truck.fModel", lang)} value={dash(truck.model)} />
             <TruckField label={t("archive.truck.fYear", lang)} value={dash(truck.year)} />
-            <TruckField label={t("archive.truck.fCapacity", lang)} value={dash(truck.capacity_m3)} />
+            {/* formatCapacity, not `dash(capacity_m3)`. This matrix lists
+                operation vehicles beside water trucks (0201), and a vehicle
+                rated in litres has no `capacity_m3` at all — the old call
+                printed an em dash over a capacity that IS on the row. The
+                number now carries the unit it was stated in. */}
+            <TruckField
+              label={t("archive.truck.fCapacity", lang)}
+              value={formatCapacity(truck, lang) ?? "—"}
+            />
             <TruckField label={t("archive.truck.fVin", lang)} value={idDash(truck.vin)} mono />
             {/* Same words as the LINKED-field label for a truck, in both
                 languages — the column this field shows IS what a linked

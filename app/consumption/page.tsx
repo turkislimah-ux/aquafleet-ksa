@@ -11,6 +11,7 @@ import type {
   ExitPermit, ExitPermitLine, ExitPermitReturn, ExitPermitReturnLine, ExitPermitFile,
   ExitPermitWriteOff, ExitPermitWriteOffLine,
   ConsumptionApproval, WorkOrder, WorkOrderPart, OutsourcedJob, WorkshopPayment,
+  VehicleType,
 } from "@/lib/db-types";
 import type { LotLite, ConsumptionLedgerRow } from "@/lib/exit-permits";
 import type { WoLedgerRow } from "@/lib/parts-usage";
@@ -36,6 +37,7 @@ export default async function ConsumptionPage() {
     lotsRes, ledgerRes,
     approvalsRes, workOrdersRes, workOrderPartsRes, osJobsRes, paymentsRes,
     repairersRes, jobRepairersRes, allPartsRes, allTrucksRes, woLedgerRes,
+    vehicleTypesRes,
   ] = await Promise.all([
     supabase.from("exit_permits").select("*").order("created_at", { ascending: false }),
     supabase.from("exit_permit_lines").select("*").order("created_at", { ascending: true }),
@@ -59,7 +61,12 @@ export default async function ConsumptionPage() {
       .order("name"),
     supabase.from("water_stations").select("id, name").order("name"),
     supabase.from("projects").select("id, name").order("name"),
-    supabase.from("trucks").select("id, plate").is("terminated_at", null).order("plate"),
+    // BOTH VEHICLE CLASSES (0201), unfiltered on purpose: a permit's parts can
+    // leave the yard on a pickup as easily as on a water truck, so the
+    // destination picker must be able to name either. `vehicle_class` drives
+    // the grouping and `vehicle_type_id` the label — see lib/vehicle-groups.ts.
+    supabase.from("trucks").select("id, plate, vehicle_class, vehicle_type_id")
+      .is("terminated_at", null).order("plate"),
     supabase.from("customers").select("id, name").is("archived_at", null).order("name"),
     supabase.from("staff").select("id, name").is("terminated_at", null).order("name"),
     // Open FIFO lots — feeds the DRAFT cost preview only. Ordered exactly as
@@ -109,12 +116,19 @@ export default async function ConsumptionPage() {
     // warehouse_id rides along because Parts Usage attributes a MAINTENANCE
     // draw to the part's own warehouse — a work order has none of its own.
     supabase.from("parts").select("id, name, name_ar, sku, unit, warehouse_id"),
-    supabase.from("trucks").select("id, plate"),
+    supabase.from("trucks").select("id, plate, vehicle_class, vehicle_type_id"),
     // The MAINTENANCE per-lot ledger — the twin of exit_permit_line_consumptions
     // fetched above. Read only; Parts Usage nets consume against return.
     supabase
       .from("work_order_part_consumptions")
       .select("work_order_part_id, direction, qty, unit_price_sar, created_at"),
+    // vehicle_types (0201) — ALL rows, active AND retired. This page only NAMES
+    // a type; a permit whose destination was a vehicle filed under a type
+    // retired since still has to read as what it was sent to.
+    supabase
+      .from("vehicle_types")
+      .select("id, key, label, label_ar, sort_order, active, created_at")
+      .order("sort_order", { ascending: true }),
   ]);
 
   const error =
@@ -128,7 +142,8 @@ export default async function ConsumptionPage() {
     workOrderPartsRes.error?.message ?? osJobsRes.error?.message ??
     paymentsRes.error?.message ?? repairersRes.error?.message ??
     jobRepairersRes.error?.message ?? allPartsRes.error?.message ??
-    allTrucksRes.error?.message ?? woLedgerRes.error?.message ?? null;
+    allTrucksRes.error?.message ?? woLedgerRes.error?.message ??
+    vehicleTypesRes.error?.message ?? null;
 
   return (
     <ConsumptionClient
@@ -158,6 +173,7 @@ export default async function ConsumptionPage() {
       allParts={(allPartsRes.data ?? []) as { id: string; name: string; name_ar: string | null; sku: string; unit: string | null; warehouse_id: string }[]}
       allTrucks={(allTrucksRes.data ?? []) as TruckLite[]}
       woLedger={(woLedgerRes.data ?? []) as WoLedgerRow[]}
+      vehicleTypes={(vehicleTypesRes.data ?? []) as VehicleType[]}
       viewer={viewer}
       today={today}
       error={error}

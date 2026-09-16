@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Truck, OperationStation } from "@/lib/db-types";
+import type { Truck, OperationStation, VehicleType } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { buildActiveJobTruckIds, buildTruckStatusMap, type TruckOpsState } from "@/lib/truck-status";
@@ -48,6 +48,7 @@ export default async function FleetPage() {
     activeWorkOrdersRes,
     activeOutsourcedJobsRes,
     utilizationRes,
+    vehicleTypesRes,
   ] = await Promise.all([
     // Terminated trucks vanish from the fleet list entirely (0020) — restorable
     // later from Archive. Filtering here also frees their driver: the
@@ -101,6 +102,14 @@ export default async function FleetPage() {
       .from("v_truck_utilization_monthly")
       .select("*")
       .eq("month", monthStart),
+    // vehicle_types (0201) — ALL rows, active AND retired, for the same reason
+    // operation_stations above is unfiltered: the form's picker must resolve a
+    // vehicle whose type has since been retired, and the table's name lookup
+    // must too. lib/vehicle-types.ts decides which of them a picker OFFERS.
+    supabase
+      .from("vehicle_types")
+      .select("id, key, label, label_ar, sort_order, active, created_at")
+      .order("sort_order", { ascending: true }),
   ]);
 
   const drivers = (driversRes.data ?? []) as DriverLite[];
@@ -109,13 +118,23 @@ export default async function FleetPage() {
   // still pointing at a terminated driver would otherwise keep showing their
   // name. Gate display against the active-driver id set instead.
   const activeDriverIds = new Set(drivers.map((d) => d.id));
-  const trucks: TruckRow[] = ((trucksRes.data ?? []) as JoinedTruck[]).map((t) => ({
+  // EVERY vehicle, both classes. One fetch, split below — `trucks` is one table
+  // and the two tabs are two views of it, so a second query filtered by class
+  // would be a second round trip for rows this one already has.
+  const vehicles: TruckRow[] = ((trucksRes.data ?? []) as JoinedTruck[]).map((t) => ({
     ...t,
     driverName:
       t.assigned_driver_id && activeDriverIds.has(t.assigned_driver_id)
         ? t.driver?.name ?? null
         : null,
   }));
+
+  // THE SPLIT. Everything below that says "truck" now means a WATER TRUCK — the
+  // KPI strip, the capacity total, the driver-state input — because those are
+  // the figures the business means by "the fleet". An operation vehicle hauls
+  // nothing and is counted separately, on its own tab.
+  const trucks = vehicles.filter((t) => t.vehicle_class !== "operation");
+  const operationVehicles = vehicles.filter((t) => t.vehicle_class === "operation");
 
   // ---- Utilization, current month, per truck (0130) --------------------
   // COERCED AT THE BOUNDARY. Postgres `numeric` has no exact JS equivalent, so
@@ -153,6 +172,12 @@ export default async function FleetPage() {
   const activeProjects = (activeProjectsRes.data ?? []) as { id: string; name: string }[];
   const activeProjectIds = new Set(activeProjects.map((p) => p.id));
   const activeProjectNameById = new Map(activeProjects.map((p) => [p.id, p.name] as const));
+  // WATER TRUCKS ONLY, EXPLICITLY. An operation vehicle cannot hold a driver
+  // (trucks_vehicle_class_shape_check), so reading the full list would give the
+  // same set today — and would stop doing so the moment that constraint were
+  // relaxed, silently promoting a yard driver to "on duty". `trucks` is already
+  // the filtered list; this comment records that the filtering is the POINT,
+  // not a side effect of where the split happens to sit.
   const truckDriverIds = new Set(
     trucks.map((t) => t.assigned_driver_id).filter((id): id is string => id != null)
   );
@@ -178,11 +203,12 @@ export default async function FleetPage() {
   }
 
   const operationStations = (operationStationsRes.data ?? []) as OperationStation[];
+  const vehicleTypes = (vehicleTypesRes.data ?? []) as VehicleType[];
 
   const error =
     trucksRes.error || driversRes.error || tripsRes.error || leavePeriodsRes.error ||
     activeProjectsRes.error || projectDriversRes.error || operationStationsRes.error ||
-    activeWorkOrdersRes.error || activeOutsourcedJobsRes.error;
+    activeWorkOrdersRes.error || activeOutsourcedJobsRes.error || vehicleTypesRes.error;
 
   // ---- Derived truck status (lib/truck-status) — Auto Truck-Status Phase
   // 2a. REPLACES the demo's stored/health-score-based trucks.status for
@@ -191,9 +217,18 @@ export default async function FleetPage() {
     activeWorkOrdersRes.data as { truck_id: string }[] | null,
     activeOutsourcedJobsRes.data as { truck_id: string }[] | null,
   );
-  const truckStatusById: Record<string, TruckOpsState> = buildTruckStatusMap(trucks, activeJobTruckIds);
+  //
+  // BUILT OVER `vehicles`, NOT `trucks` — both tabs read this one map, and an
+  // operation vehicle in the workshop must show "In Maintenance" like anything
+  // else. The deriver needs no class branch to get it right: it reads "a driver
+  // is assigned" as active, and an operation vehicle can never have one, so it
+  // can only ever come out maintenance or idle.
+  const truckStatusById: Record<string, TruckOpsState> = buildTruckStatusMap(vehicles, activeJobTruckIds);
 
   // ---- KPI strip (6) — all REAL, nulls skipped, no division-by-zero ----
+  // WATER TRUCKS ONLY. "Total Trucks" and "Total Capacity" are the water
+  // fleet's figures; folding in a crane would change what the number MEANS
+  // while leaving its label alone. The operation tab counts its own, below.
   const total = trucks.length;
   const active = trucks.filter((t) => truckStatusById[t.id] === "active").length;
   const maint = trucks.filter((t) => truckStatusById[t.id] === "maintenance").length;
@@ -211,9 +246,24 @@ export default async function FleetPage() {
     capHasData: capVals.length > 0,
   };
 
+  // The operation tab's own strip. THREE FIGURES, NOT SIX, and the omissions
+  // are the statement: there is no "Active" because nothing dispatches these,
+  // and no "Total Capacity" because summing a crane's zero with a water
+  // bowser's litres answers no question anyone asks. A KPI that can only ever
+  // read 0 or "—" is furniture, which is the same reasoning that removed the
+  // detail page's utilization stat.
+  const opKpis = {
+    total: operationVehicles.length,
+    maint: operationVehicles.filter((t) => truckStatusById[t.id] === "maintenance").length,
+    idle: operationVehicles.filter((t) => truckStatusById[t.id] !== "maintenance").length,
+  };
+
   return (
     <FleetClient
       trucks={trucks}
+      operationVehicles={operationVehicles}
+      vehicleTypes={vehicleTypes}
+      opKpis={opKpis}
       drivers={drivers}
       trips30d={trips30d}
       onLeaveDriverIds={onLeaveDriverIds}

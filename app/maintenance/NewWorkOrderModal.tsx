@@ -44,7 +44,8 @@ import { Plus, Minus, X } from "lucide-react";
 import { t, arText, fill, plural } from "@/lib/i18n";
 import { cn, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
-import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings, Warehouse } from "@/lib/db-types";
+import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings, Warehouse, VehicleType } from "@/lib/db-types";
+import VehicleOptGroups from "@/components/VehicleOptGroups";
 import { createWorkOrder, editWorkOrder, saveWorkOrderTitle, addRepairDescription } from "./actions";
 import { hourlyLaborCost } from "./laborCost";
 import { MechanicPicker } from "./MechanicPicker";
@@ -78,6 +79,7 @@ const PRIORITIES = ["low", "medium", "high", "critical"] as const;
 export default function NewWorkOrderModal({
   lang,
   trucks,
+  vehicleTypeById,
   mechanics,
   onLeaveMechanicIds,
   parts,
@@ -92,7 +94,12 @@ export default function NewWorkOrderModal({
   onEdited,
 }: {
   lang: "en" | "ar";
+  // BOTH VEHICLE CLASSES (0201) — a crane needs a work order like a water truck
+  // does. The picker below groups them; `vehicleTypeById` names the operation
+  // half, and is passed in rather than fetched because MaintenanceClient builds
+  // it once for every list on the page.
   trucks: Truck[];
+  vehicleTypeById: ReadonlyMap<string, VehicleType>;
   mechanics: Staff[];
   // Polish item 3 (on-leave-today mechanics, UI-only) — the mechanic
   // picker below disables/grays these, it never touches create_work_order/
@@ -120,7 +127,17 @@ export default function NewWorkOrderModal({
   const isEdit = !!editingWorkOrder;
   const editableStatus = editingWorkOrder?.status ?? "open";
 
-  const [truckId, setTruckId] = useState(editingWorkOrder?.truck_id ?? trucks[0]?.id ?? "");
+  // THE FIRST OPTION THE PICKER OFFERS, not the first row of the array. The
+  // array is plate-ordered across both classes, while the picker lists trucks
+  // first — so `trucks[0]` could pre-select a crane sitting under a heading the
+  // reader has to scroll to. Falls back to `trucks[0]` for an operation-only
+  // fleet, which is the same row the picker shows first in that case.
+  const [truckId, setTruckId] = useState(
+    editingWorkOrder?.truck_id ??
+      trucks.find((tr) => tr.vehicle_class === "truck")?.id ??
+      trucks[0]?.id ??
+      "",
+  );
   // Polish item 1 (manual title) — one optional field, EN or AR, shown on
   // BOTH create and edit (moved out of a separate detail-view inline
   // editor per Turki's correction — this IS the only place title editing
@@ -415,11 +432,17 @@ export default function NewWorkOrderModal({
             <div>
               <label className="text-xs muted block mb-1">{t("common.truck", lang)} *</label>
               <select value={truckId} onChange={(e) => setTruckId(e.target.value)} className={INPUT} style={INPUT_STYLE} disabled={isEdit}>
-                {trucks.map((tr) => (
-                  <option key={tr.id} value={tr.id}>
-                    {tr.plate} · {tr.model ?? ""}
-                  </option>
-                ))}
+                {/* Trucks first, operation vehicles under their own heading —
+                    the shared partition, on its default order. `suffix` carries
+                    the model, which used to be interpolated as
+                    `{plate} · {model ?? ""}` and left a trailing separator on
+                    every vehicle with no model recorded. */}
+                <VehicleOptGroups
+                  rows={trucks}
+                  typeById={vehicleTypeById}
+                  lang={lang}
+                  suffix={(tr) => tr.model}
+                />
               </select>
             </div>
             <div>

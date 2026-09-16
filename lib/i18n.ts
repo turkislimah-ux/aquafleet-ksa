@@ -192,6 +192,26 @@ export const dict = {
       m3: { en: "m³", ar: "m³" },
       l: { en: "L", ar: "L" },
     },
+    // The headings that separate the two vehicle classes wherever both are
+    // listed together — the Maintenance pickers, the Consumption exit-permit
+    // destination, the Archive Truck tab and the daily-trips deferred-location
+    // picker. FOUR ROUTES READ THESE, which is what puts them in `common`
+    // rather than in any one of those namespaces.
+    //
+    // `trucks` and `operation` repeat the words `fleet.tabs.*` uses, and that
+    // repetition is deliberate: a tab strip names a PAGE and a group heading
+    // names a SET OF ROWS. They read the same today; the day one of them is
+    // reworded the other must not follow by accident.
+    //
+    // `other` is the deferred-location picker's name for the same class. There
+    // the list answers "where did the water go", and a crane is one of several
+    // non-truck answers rather than a vehicle being chosen as a vehicle. See
+    // lib/vehicle-groups.ts, which owns which set a call site gets.
+    vehicleGroup: {
+      trucks: { en: "Trucks", ar: "الشاحنات" },
+      operation: { en: "Operation Vehicles", ar: "مركبات التشغيل" },
+      other: { en: "Other", ar: "أخرى" },
+    },
     // Counted noun, so it cannot be one bare word: Arabic inflects across four
     // buckets and English still needs the singular. Both consumers pass a
     // number, so there is no caller that wants the uncounted word.
@@ -426,6 +446,32 @@ export const dict = {
       "4": { en: "Thu", ar: "خميس" },
       "5": { en: "Fri", ar: "جمعة" },
       "6": { en: "Sat", ar: "سبت" },
+    },
+
+    /**
+     * MANAGED-LOOKUP CHROME — the three sentences every inline "add a new type"
+     * control prints, whatever table it writes to.
+     *
+     * PROMOTED FROM `drivers.lookup`, on this namespace's standing test: a
+     * string earns `common` when a SECOND route reads it. These three were
+     * minted when app/drivers/ held the only two such controls (LookupSelect
+     * and ViolationTypeSelect). The Fleet route now has a third — vehicle_types
+     * behind the operation-vehicle form — and a fleet file reaching for a
+     * `drivers.*` key would be a namespace lying about who reads it.
+     *
+     * The REST of `drivers.lookup` stays where it is: `addCustomType`,
+     * `addCustom`, `newName` and `nameRequired` still have only drivers-route
+     * callers, and moving a key no second route reads buys nothing.
+     *
+     * `savedAs` names the IMMUTABLE key a label slugifies into — the one piece
+     * of a lookup row that a later rename can never change (CLAUDE.md §6). It
+     * is shown BEFORE the add, because afterwards it is too late to pick a
+     * different one.
+     */
+    lookup: {
+      savedAs: { en: "Will be saved as:", ar: "سيُحفظ باسم:" },
+      mustStartWithLetter: { en: "Label must start with a letter.", ar: "يجب أن يبدأ الاسم بحرف." },
+      couldNotAdd: { en: "Could not add.", ar: "تعذّرت الإضافة." },
     },
   },
   mt: {
@@ -2059,6 +2105,58 @@ export const dict = {
     loadFailed: { en: "Failed to load fleet:", ar: "تعذّر تحميل الأسطول:" },
     openDetailAria: { en: "{plate} — open truck detail", ar: "{plate} — فتح تفاصيل الشاحنة" },
 
+    // ---- the two sections of the fleet ------------------------------------
+    // 0201 made `trucks` a table of VEHICLES. These name the two halves.
+    //
+    // "Operation vehicles" is the business's own term for the yard/support
+    // fleet — the pickups, tractors and cranes that never haul water. The
+    // Arabic «مركبات التشغيل» matches `operation_stations`' own wording
+    // (محطات التشغيل), so the vehicle and the base it sits at are named from
+    // the same root rather than by two unrelated translations.
+    tabs: {
+      trucks: { en: "Trucks", ar: "الشاحنات" },
+      operation: { en: "Operation Vehicles", ar: "مركبات التشغيل" },
+    },
+
+    // ---- operation-vehicle half -------------------------------------------
+    // Separate sentences, not the truck ones with a word swapped: Arabic
+    // inflects around the noun (شاحنة is feminine, مركبة is feminine too but
+    // the definite forms differ), and an operation vehicle is described by its
+    // TYPE where a truck is described by its capacity.
+    op: {
+      add: { en: "Add Vehicle", ar: "إضافة مركبة" },
+      addTitle: { en: "Add Operation Vehicle", ar: "إضافة مركبة تشغيل" },
+      editTitle: { en: "Edit Operation Vehicle", ar: "تعديل مركبة التشغيل" },
+      addSubtitle: {
+        en: "Register a yard or support vehicle. Plate and type are required.",
+        ar: "سجّل مركبة موقع أو إسناد. رقم اللوحة والنوع مطلوبان.",
+      },
+      editSubtitle: { en: "Update vehicle details · {plate}", ar: "تحديث بيانات المركبة · {plate}" },
+      // The page subtitle on this tab. It does NOT reuse `fleet.subtitle`
+      // ("{n} trucks · Riyadh · 3 stations"): the city and the station count
+      // describe the WATER operation — the three stations are where water is
+      // loaded — and a forklift sitting in a yard is not based at one of them
+      // in the sense that line means. So this says what the roster IS instead.
+      subtitle: { en: "{n} vehicles · yard and support fleet", ar: "{n} مركبة · أسطول المواقع والإسناد" },
+      openDetailAria: { en: "{plate} — open vehicle detail", ar: "{plate} — فتح تفاصيل المركبة" },
+      searchPlaceholder: { en: "Search plate, model…", ar: "ابحث برقم اللوحة أو الطراز…" },
+      noneFiltered: { en: "No vehicles match the filters.", ar: "لا توجد مركبات مطابقة للتصفية." },
+      noneYet: { en: "No operation vehicles yet.", ar: "لا توجد مركبات تشغيل بعد." },
+      total: { en: "Total Vehicles", ar: "إجمالي المركبات" },
+      // An operation vehicle is never "active" the way a truck is — it hauls
+      // nothing, carries no driver and appears in no trip. It is in the yard or
+      // it is in the workshop, and those are the only two states
+      // buildTruckStatusMap can derive for it.
+      inMaintenance: { en: "In Maintenance", ar: "في الصيانة" },
+      idle: { en: "In Yard", ar: "في الموقف" },
+      // Why the detail page shows no driver and no utilization, said once on
+      // the page rather than left as an absence the reader has to notice.
+      noDriverNote: {
+        en: "Operation vehicles carry no assigned driver and are not counted in utilization.",
+        ar: "مركبات التشغيل لا تُسند إلى سائق ولا تُحتسب في معدل الاستخدام.",
+      },
+    },
+
     kpi: {
       totalTrucks: { en: "Total Trucks", ar: "إجمالي الشاحنات" },
       // Trucks are feminine in Arabic, so these do NOT reuse `status.active` /
@@ -2256,6 +2354,63 @@ export const dict = {
       // The model is a manufacturer's name, so the example stays Latin.
       modelPlaceholder: { en: "e.g. Mercedes-Benz Actros 3340", ar: "مثال: Mercedes-Benz Actros 3340" },
       editTruckTitle: { en: "Edit truck", ar: "تعديل الشاحنة" },
+      editVehicleTitle: { en: "Edit vehicle", ar: "تعديل المركبة" },
+      // The unit picker on an operation vehicle's capacity. A truck never
+      // renders it — its unit is m³ by constraint, not by choice — so this is
+      // the accessible name of a control only half the form ever shows.
+      capacityUnitAria: { en: "Capacity unit", ar: "وحدة السعة" },
+      // A truck MUST state its capacity (trucks_vehicle_class_shape_check); an
+      // operation vehicle need not, and the field says so rather than leaving
+      // the operator to discover it by pressing Save.
+      capacityOptional: { en: "Capacity (optional)", ar: "السعة (اختياري)" },
+    },
+
+    // ---- vehicle_types, the managed lookup --------------------------------
+    // 0201's bilingual lookup behind `trucks.vehicle_type_id`. The LABELS are
+    // never in this file — they live on the row, in both languages, and
+    // scripts/i18n-lookup-single-source-check.mjs fails the build if a lookup
+    // label is ever copied into the dictionary. Everything here is CHROME
+    // around those labels.
+    vtype: {
+      label: { en: "Vehicle type", ar: "نوع المركبة" },
+      hint: {
+        en: "What kind of vehicle this is. Add or rename types here — renaming changes the name everywhere, it never re-files existing vehicles.",
+        ar: "نوع هذه المركبة. أضِف الأنواع أو أعِد تسميتها من هنا — وإعادة التسمية تغيّر الاسم في كل مكان ولا تُعيد تصنيف المركبات القائمة.",
+      },
+      addOption: { en: "+ Add a new type…", ar: "+ إضافة نوع جديد…" },
+      addHeading: { en: "New vehicle type", ar: "نوع مركبة جديد" },
+      renameHeading: { en: "Rename vehicle type", ar: "إعادة تسمية نوع المركبة" },
+      rename: { en: "Rename", ar: "إعادة تسمية" },
+      // Both names, for violation_types' reason: label_ar is NOT NULL and this
+      // name is read on the Arabic screen. Copying the English across would
+      // satisfy the column and put English on an Arabic page.
+      bothNames: {
+        en: "Give the type a name in both languages — the Arabic name is what Arabic screens show.",
+        ar: "اكتب اسم النوع باللغتين — الاسم العربي هو ما تعرضه الشاشات العربية.",
+      },
+      // NOT keyed `en` / `ar`. A node whose children are literally named `en`
+      // and `ar` is indistinguishable from a LEAF to LeafPaths, which is what
+      // types every t() call in this repo — `vtype.en` would resolve to the
+      // wrong shape and take the whole dictionary's key type with it.
+      nameEn: { en: "English name", ar: "الاسم بالإنجليزية" },
+      nameAr: { en: "Arabic name", ar: "الاسم بالعربية" },
+      required: { en: "Pick a vehicle type.", ar: "اختر نوع المركبة." },
+      // Shown beside a rename field. The key is what every existing vehicle
+      // points at, and a rename deliberately leaves it alone.
+      keyUnchanged: { en: "Saved under the same key:", ar: "يُحفظ تحت المفتاح نفسه:" },
+      couldNotRename: { en: "Could not rename.", ar: "تعذّرت إعادة التسمية." },
+      retired: { en: "(retired)", ar: "(متوقف)" },
+      none: { en: "No vehicle types yet.", ar: "لا توجد أنواع مركبات بعد." },
+      // RETIRE, NOT DELETE — the word on the button says so, and the confirm
+      // line says what it does and does not do. The FK is `on delete restrict`,
+      // so a real delete would be refused the moment one vehicle used the type
+      // and would succeed, destructively, on the day none did.
+      retire: { en: "Retire", ar: "إيقاف" },
+      retireConfirm: {
+        en: "Hide this type from the picker? Vehicles already using it keep it, and typing the same name again brings it back.",
+        ar: "إخفاء هذا النوع من القائمة؟ المركبات التي تستخدمه تحتفظ به، وكتابة الاسم نفسه مرة أخرى تعيده.",
+      },
+      couldNotRetire: { en: "Could not retire.", ar: "تعذّر الإيقاف." },
     },
 
     // ---- detail page ------------------------------------------------------
@@ -5830,6 +5985,12 @@ export const dict = {
       // "Choose…", not common.selectPlaceholder's "Select…" — same Arabic,
       // different English, and byte-identity is per key.
       choose: { en: "Choose…", ar: "اختر…" },
+      // The vehicle picker's two <optgroup> labels USED TO LIVE HERE. They are
+      // now `common.vehicleGroup.*` — three more routes grew the same pair of
+      // headings, and the namespace rule is that a string earns `common` by
+      // being read by more than one route. The picker's ORDER (operation
+      // vehicles first, under "Other") is unchanged and is now stated as
+      // LOCATION_GROUP_LABELS + "operation-first" in lib/vehicle-groups.ts.
       description: { en: "Description", ar: "الوصف" },
       // An EXAMPLE of what to type, not one of a fixed list — the same shape as
       // the expenses modal's category placeholder.
@@ -6704,12 +6865,11 @@ export const dict = {
       // is exactly when a translated default is worth having.
       addCustom: { en: "+ Add custom…", ar: "+ إضافة مخصّصة…" },
       newName: { en: "New name", ar: "اسم جديد" },
-      savedAs: { en: "Will be saved as:", ar: "سيُحفظ باسم:" },
-      // Rendered twice — as the inline preview's error and as the submit guard's.
-      // One string, so the two can never drift apart.
-      mustStartWithLetter: { en: "Label must start with a letter.", ar: "يجب أن يبدأ الاسم بحرف." },
       nameRequired: { en: "Name is required.", ar: "الاسم مطلوب." },
-      couldNotAdd: { en: "Could not add.", ar: "تعذّرت الإضافة." },
+      // `savedAs`, `mustStartWithLetter` and `couldNotAdd` MOVED UP to
+      // `common.lookup` when the Fleet route grew a third managed-lookup
+      // control (vehicle_types). See the note there. The four leaves above are
+      // still drivers-only and stay.
     },
 
     // PersonIdLink — the Iqama/licence number that deep-links into the Archive.

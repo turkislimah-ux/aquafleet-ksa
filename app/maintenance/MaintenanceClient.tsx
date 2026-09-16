@@ -52,7 +52,10 @@ import type {
   WorkshopPayment,
   WorkshopPaymentFile,
   Warehouse,
+  VehicleType,
 } from "@/lib/db-types";
+import VehicleOptGroups from "@/components/VehicleOptGroups";
+import { operationTypeName } from "@/lib/vehicle-types";
 import MaintenanceCalendar, { woCalendarKey } from "./MaintenanceCalendar";
 import NewWorkOrderModal from "./NewWorkOrderModal";
 import WorkOrderDetailModal from "./WorkOrderDetailModal";
@@ -227,9 +230,15 @@ export default function MaintenanceClient({
   outsourcedJobTasks,
   workshopPayments,
   workshopPaymentFiles,
+  vehicleTypes,
   error,
 }: {
   trucks: Truck[];
+  // 0201 — `trucks` above holds BOTH classes here (a crane breaks down like a
+  // water truck does), so every list on this page names two kinds of thing in
+  // one column. These resolve the operation half's type into a word; nothing on
+  // this page offers a type to pick, so the retired ones are wanted too.
+  vehicleTypes: VehicleType[];
   mechanics: Staff[];
   onLeaveMechanicIds: string[];
   parts: Part[];
@@ -281,6 +290,14 @@ export default function MaintenanceClient({
   const [editingOsId, setEditingOsId] = useState<string | null>(null);
 
   const trucksById = useMemo(() => new Map(trucks.map((tr) => [tr.id, tr])), [trucks]);
+  // Built ONCE here and passed down rather than rebuilt in each child: the
+  // filter, the two tables, the calendar, the two forms and the two detail
+  // modals all name the same vehicles, and six copies of one Map is six chances
+  // for one of them to be built from a narrower list.
+  const vehicleTypeById = useMemo(
+    () => new Map(vehicleTypes.map((vt) => [vt.id, vt])),
+    [vehicleTypes],
+  );
   const mechanicsById = useMemo(() => new Map(mechanics.map((m) => [m.id, m])), [mechanics]);
   const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
   // Polish item 3 — on-leave-today mechanics (UI-only display/block, no DB
@@ -430,7 +447,16 @@ export default function MaintenanceClient({
       <tr key={w.id} className={cn(outOfPart ? "bg-rose-500/5" : "")} title={outOfPart ? t("mt.outOfPartRow", lang) : undefined}>
         <TD className="font-mono text-xs">{w.wo_number}</TD>
         {!groups && (
-          <TD className="font-mono text-xs">{truck ? `${truck.plate}` : w.truck_id}</TD>
+          // The plate stays mono; the type does not — it is a word, and a word
+          // set in a plate's typeface reads as part of the plate.
+          <TD className="font-mono text-xs">
+            {truck ? truck.plate : w.truck_id}
+            {truck && operationTypeName(truck, vehicleTypeById, lang) && (
+              <span className="ms-1.5 font-sans text-[11px] muted">
+                {operationTypeName(truck, vehicleTypeById, lang)}
+              </span>
+            )}
+          </TD>
         )}
         <TD>
           <span className="font-medium">{arText(w.title, w.title_ar, lang)}</span>
@@ -554,6 +580,7 @@ export default function MaintenanceClient({
         workOrders={workOrders}
         outsourcedJobs={outsourcedJobs}
         trucks={trucks}
+        vehicleTypeById={vehicleTypeById}
         truckFilter={truckFilter}
         selectedDate={selectedDate}
         onSelectDate={setSelectedDate}
@@ -565,6 +592,7 @@ export default function MaintenanceClient({
         <OutsourcedTrack
           lang={lang}
           trucks={trucks}
+          vehicleTypeById={vehicleTypeById}
           truckFilter={truckFilter}
           onTruckFilterChange={setTruckFilter}
           selectedDate={selectedDate}
@@ -620,9 +648,11 @@ export default function MaintenanceClient({
                   style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
                 >
                   <option value="all">{t("common.all", lang)}</option>
-                  {trucks.map((tr) => (
-                    <option key={tr.id} value={tr.id}>{tr.plate}</option>
-                  ))}
+                  {/* TRUCKS FIRST, operation vehicles under their own heading —
+                      the shared partition, on its default order. The question
+                      this filter answers is about the water fleet; a crane is
+                      the unusual answer and reads as one by sitting second. */}
+                  <VehicleOptGroups rows={trucks} typeById={vehicleTypeById} lang={lang} />
                 </select>
               </div>
             </div>
@@ -663,6 +693,9 @@ export default function MaintenanceClient({
                               <div className="flex items-center gap-2 flex-wrap font-medium">
                                 {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="rtl:-scale-x-100 h-4 w-4" />}
                                 <span className="font-mono text-xs">{truck?.plate ?? truckId}</span>
+                                {truck && operationTypeName(truck, vehicleTypeById, lang) && (
+                                  <span className="text-sm muted">{operationTypeName(truck, vehicleTypeById, lang)}</span>
+                                )}
                                 <span className="text-sm">{truck?.model ?? ""}</span>
                                 <span className="ms-auto text-[11px] font-normal muted">{rows.length} {t("mt.jobCount", lang)}</span>
                               </div>
@@ -704,6 +737,7 @@ export default function MaintenanceClient({
         <NewWorkOrderModal
           lang={lang}
           trucks={trucks}
+          vehicleTypeById={vehicleTypeById}
           mechanics={mechanics}
           onLeaveMechanicIds={onLeaveMechanicIdSet}
           parts={parts}
@@ -722,6 +756,7 @@ export default function MaintenanceClient({
         <NewWorkOrderModal
           lang={lang}
           trucks={trucks}
+          vehicleTypeById={vehicleTypeById}
           mechanics={mechanics}
           onLeaveMechanicIds={onLeaveMechanicIdSet}
           parts={parts}
@@ -751,6 +786,7 @@ export default function MaintenanceClient({
             lines={viewingLines}
             photos={workOrderPartPhotos.filter((p) => viewingLineIds.has(p.work_order_part_id))}
             truck={trucksById.get(viewingWo.truck_id) ?? null}
+            vehicleTypeById={vehicleTypeById}
             mechanic={mechanicsById.get(viewingWo.assigned_mechanic_id) ?? null}
             mechanicOnLeave={onLeaveMechanicIdSet.has(viewingWo.assigned_mechanic_id)}
             parts={parts}
@@ -764,6 +800,7 @@ export default function MaintenanceClient({
         <NewOutsourcedJobModal
           lang={lang}
           trucks={trucks}
+          vehicleTypeById={vehicleTypeById}
           mechanics={mechanics}
           onLeaveMechanicIds={onLeaveMechanicIdSet}
           repairerTypes={repairerTypes}
@@ -781,6 +818,7 @@ export default function MaintenanceClient({
         <NewOutsourcedJobModal
           lang={lang}
           trucks={trucks}
+          vehicleTypeById={vehicleTypeById}
           mechanics={mechanics}
           onLeaveMechanicIds={onLeaveMechanicIdSet}
           repairerTypes={repairerTypes}
@@ -810,6 +848,7 @@ export default function MaintenanceClient({
             workshopPayments.some((p) => p.outsourced_job_id === viewingOs.id && p.id === f.payment_id),
           )}
           truck={trucksById.get(viewingOs.truck_id) ?? null}
+          vehicleTypeById={vehicleTypeById}
           mechanic={mechanicsById.get(viewingOs.responsible_mechanic_id) ?? null}
           mechanicOnLeave={onLeaveMechanicIdSet.has(viewingOs.responsible_mechanic_id)}
           onClose={() => setViewingOsId(null)}

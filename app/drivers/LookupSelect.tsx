@@ -105,7 +105,7 @@ export default function LookupSelect({
     const res = await onAdd(clean);
     setBusy(false);
     if (res.error || !res.key) {
-      setErr(res.error ?? t("drivers.lookup.couldNotAdd", lang));
+      setErr(res.error ?? t("common.lookup.couldNotAdd", lang));
       return;
     }
     setExtra((x) => [...x, { key: res.key!, label: clean }]);
@@ -199,7 +199,7 @@ export default function LookupSelect({
           name this component refuses. */}
       {adding && readableKey && (
         <p className="text-xs muted">
-          {t("drivers.lookup.savedAs", lang)} <span dir="ltr">{previewKey}</span>
+          {t("common.lookup.savedAs", lang)} <span dir="ltr">{previewKey}</span>
         </p>
       )}
       {err && <p className="text-xs text-rose-600 dark:text-rose-400">{err}</p>}

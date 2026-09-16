@@ -557,7 +557,7 @@ function ViolationTypeSelect({
     const res = await addViolationType(en.trim(), ar.trim());
     setBusy(false);
     if (res.error || !res.key) {
-      setErr(res.error ?? t("drivers.lookup.couldNotAdd", lang));
+      setErr(res.error ?? t("common.lookup.couldNotAdd", lang));
       return;
     }
     // The action returns the KEY, not the id — the id is what this form
@@ -599,8 +599,8 @@ function ViolationTypeSelect({
         />
         {en.trim() !== "" && (
           isValidSlug(slug)
-            ? <p className="text-xs muted">{t("drivers.lookup.savedAs", lang)} <span dir="ltr">{slug}</span></p>
-            : <p className="text-xs text-rose-600 dark:text-rose-400">{t("drivers.lookup.mustStartWithLetter", lang)}</p>
+            ? <p className="text-xs muted">{t("common.lookup.savedAs", lang)} <span dir="ltr">{slug}</span></p>
+            : <p className="text-xs text-rose-600 dark:text-rose-400">{t("common.lookup.mustStartWithLetter", lang)}</p>
         )}
         {err && <p className="text-xs text-rose-600 dark:text-rose-400">{err}</p>}
         <div className="flex gap-2">

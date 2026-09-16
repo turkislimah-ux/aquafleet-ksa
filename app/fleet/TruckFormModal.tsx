@@ -17,13 +17,38 @@
 // ACTIVE if a driver is assigned, else IDLE), computed fresh at render time
 // everywhere it's shown. Never hand-set again, in either mode — there's no
 // manual override path left to produce a stored status at all.
+//
+// ONE FORM, TWO CLASSES (0201) — AND FOUR DIFFERENCES, NOT A SECOND FILE
+// -----------------------------------------------------------------------------
+// A water truck and an operation vehicle share a plate, a model, a year, an
+// odometer, a station, a VIN and a registration. They differ in four places:
+//
+//   1. VEHICLE TYPE — required for an operation vehicle, forbidden for a truck
+//      (trucks_vehicle_class_shape_check). Rendered only for the former.
+//   2. CAPACITY — mandatory m³ for a truck, optional either-unit for an
+//      operation vehicle. CapacityField takes the class and decides.
+//   3. ASSIGNED DRIVER — an operation vehicle can never hold one, so the Add
+//      form does not offer the select at all. `createTruck` nulls it anyway.
+//   4. WORDING — separate sentences per class, never the truck's with a noun
+//      swapped, because Arabic inflects around the noun.
+//
+// A second component would have copied seven identical fields to vary four
+// lines, and the two copies would then drift — the registration fields in
+// particular carry the 0091 create-only rule, which is exactly the kind of
+// rule that gets fixed in one copy.
+//
+// `vehicleClass` is FIXED at creation and never editable: on Add it comes from
+// whichever Fleet tab you pressed the button on, on Edit it comes from the row.
+// The server does not trust either — `updateTruck` re-reads the class from the
+// database rather than from this form.
 
 import { useState } from "react";
 import { Btn } from "@/components/ui";
-import { type OperationStation } from "@/lib/db-types";
+import { type OperationStation, type VehicleClass, type VehicleType } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "./page";
 import { createTruck, updateTruck } from "./actions";
 import OperationStationField from "@/components/OperationStationField";
+import VehicleTypeField from "@/components/VehicleTypeField";
 import CapacityField from "@/components/CapacityField";
 import LinkedIdField from "@/components/LinkedIdField";
 import PlateInput from "@/components/PlateInput";
@@ -48,16 +73,25 @@ function dateInputValue(iso: string | null | undefined): string {
 
 export default function TruckFormModal({
   mode,
+  vehicleClass,
   truck,
   drivers,
   operationStations,
+  vehicleTypes,
   onClose,
   onSaved,
 }: {
   mode: "add" | "edit";
+  // Which class this form is FOR. Not a default: a wrong guess here files a
+  // vehicle into the wrong half of the fleet, and every caller knows the answer
+  // (the tab it was opened from, or the row it is editing).
+  vehicleClass: VehicleClass;
   truck?: TruckRow | null;
   drivers: DriverLite[];
   operationStations: OperationStation[];
+  // ALL rows, active and retired — lib/vehicle-types.ts decides which of them
+  // the picker offers. Unread on the truck branch, where the field is absent.
+  vehicleTypes: VehicleType[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -66,6 +100,7 @@ export default function TruckFormModal({
   const [saving, setSaving] = useState(false);
 
   const isEdit = mode === "edit";
+  const isOperation = vehicleClass === "operation";
   // Renamed from `t`: that name now belongs to the translator imported
   // above, and a shadow here would silently resolve every t("…") in this
   // component to a TruckRow.
@@ -92,13 +127,28 @@ export default function TruckFormModal({
         className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-semibold mb-1">{t(isEdit ? "fleet.form.editTitle" : "fleet.form.addTitle", lang)}</h2>
+        <h2 className="text-lg font-semibold mb-1">
+          {t(
+            isOperation
+              ? isEdit ? "fleet.op.editTitle" : "fleet.op.addTitle"
+              : isEdit ? "fleet.form.editTitle" : "fleet.form.addTitle",
+            lang,
+          )}
+        </h2>
         <p className="text-sm muted mb-4">
           {isEdit
-            ? t("fleet.form.editSubtitle", lang).replace("{plate}", () => row?.plate ?? "")
-            : t("fleet.form.addSubtitle", lang)}
+            ? t(isOperation ? "fleet.op.editSubtitle" : "fleet.form.editSubtitle", lang).replace(
+                "{plate}",
+                () => row?.plate ?? "",
+              )
+            : t(isOperation ? "fleet.op.addSubtitle" : "fleet.form.addSubtitle", lang)}
         </p>
         <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* The class rides along as a posted field so `createTruck` reads it
+              from ONE place. `updateTruck` ignores it entirely and re-reads the
+              stored class — the class is fixed at creation, and a form that
+              could restate it is a form that could change it. */}
+          <input type="hidden" name="vehicle_class" value={vehicleClass} />
           <PlateInput name="plate" defaultValue={row?.plate ?? null} />
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">{t("fleet.cols.model", lang)}</span>
@@ -122,7 +172,11 @@ export default function TruckFormModal({
               style={INPUT_STYLE}
             />
           </label>
-          <CapacityField defaultValue={row?.capacity_value ?? null} />
+          <CapacityField
+            vehicleClass={vehicleClass}
+            defaultValue={row?.capacity_value ?? null}
+            defaultUnit={row?.capacity_unit ?? null}
+          />
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">{t("fleet.form.odometerKm", lang)}</span>
             <input
@@ -134,6 +188,22 @@ export default function TruckFormModal({
               style={INPUT_STYLE}
             />
           </label>
+          {/* TWO FULL-WIDTH SECTIONS, STACKED, AND IN THIS ORDER: what kind of
+              thing this is, then where it is based. Both are picker-plus-manage
+              controls built on the same box, so they read as a pair; putting
+              the type between Capacity and Odometer instead would have broken
+              the two-column rhythm the paired number fields depend on.
+
+              Truck branch renders neither this nor its hidden input — a truck's
+              vehicle_type_id is NULL by constraint, and a field that must post
+              nothing is better absent than present-and-empty. */}
+          {isOperation && (
+            <VehicleTypeField
+              name="vehicle_type_id"
+              types={vehicleTypes}
+              defaultValue={row?.vehicle_type_id ?? null}
+            />
+          )}
           <OperationStationField
             name="home_station"
             stations={operationStations}
@@ -193,17 +263,25 @@ export default function TruckFormModal({
                   style={INPUT_STYLE}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">{t("fleet.form.assignedDriver", lang)}</span>
-                <select name="assigned_driver_id" defaultValue="" className={INPUT} style={INPUT_STYLE}>
-                  <option value="">{t("fleet.form.unassigned", lang)}</option>
-                  {drivers.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {/* NOT RENDERED FOR AN OPERATION VEHICLE, AND NOT DISABLED
+                  EITHER. It cannot hold a driver at all — the constraint
+                  refuses it, `assignDriver` refuses it, and there is no Assign
+                  action on its tab — so a greyed-out select would advertise a
+                  capability that does not exist. `createTruck` writes null for
+                  this class regardless of what arrives. */}
+              {!isOperation && (
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="muted">{t("fleet.form.assignedDriver", lang)}</span>
+                  <select name="assigned_driver_id" defaultValue="" className={INPUT} style={INPUT_STYLE}>
+                    <option value="">{t("fleet.form.unassigned", lang)}</option>
+                    {drivers.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </>
           )}
 

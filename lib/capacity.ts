@@ -30,12 +30,30 @@
 // — see its header — because an absence check that cannot be made to fail is
 // not a check.
 //
-// WHAT DOES NOT BELONG HERE
+// AND NOW ALSO THE ONE FORMATTER — added deliberately, against this file's
+// earlier rule
 // -----------------------------------------------------------------------------
-// Reading. Every existing m³ reader stays on `capacity_m3` untouched; none of
-// them route through this file. This is the WRITE boundary only.
+// This header used to end "reading does not belong here", on the reasoning that
+// every m³ reader stayed on `capacity_m3` untouched. That reasoning held only
+// while EVERY vehicle was a water truck and therefore m³. Operation vehicles
+// may be stated in litres, and a litre figure rendered by the old
+// `` `${capacity_m3} m³` `` literal is wrong by a factor of a thousand while
+// looking entirely plausible.
+//
+// So the unit now has to travel with the number to every screen, and the
+// question is only WHERE that join is expressed. Four render sites spelling it
+// out themselves is four chances to drop the unit. It lives here, next to the
+// write, because the writer and the reader are then obliged to agree about what
+// the pair MEANS: `capacity_unit` is never null (0201 gives it a default and a
+// CHECK), and `capacity_value` null means "not stated" — the same two facts
+// capacityColumns() below produces.
+//
+// Still not here: `capacity_m3`. Nothing reads it through this file. The ten
+// existing m³ readers are untouched, and they stay correct because a litre-rated
+// vehicle carries NULL there by construction.
 
 import type { CapacityUnit, VehicleClass } from "@/lib/db-types";
+import { t, type Lang } from "@/lib/i18n";
 
 /**
  * The three columns that must always move together. Any Supabase insert/update
@@ -113,4 +131,31 @@ export function capacityColumns(input: {
     capacity_unit: unit,
     capacity_m3: unit === "m3" ? value : null,
   };
+}
+
+/**
+ * A capacity as it is spoken: the magnitude and the unit it was stated in.
+ *
+ * RETURNS NULL, NOT "—", when the capacity is unstated. The four render sites
+ * disagree about what an absent capacity should look like — the Fleet detail
+ * subtitle drops the segment entirely (it joins the non-empty parts), the stat,
+ * the info field and the list cell each print an em dash. A helper that decided
+ * for them would force the subtitle to filter the dash back out, which is how a
+ * literal "—" ends up inside a comma-joined sentence. Callers append `?? "—"`
+ * where a dash is what they want.
+ *
+ * THE UNIT SYMBOL COMES FROM THE DICTIONARY, not from a literal here. It is
+ * Latin in both languages (see the note on `common.capacityUnit` in
+ * lib/i18n.ts), so today `lang` changes nothing — but that ruling is written
+ * down in ONE place, and this reads it rather than re-deciding it.
+ *
+ * The number is NOT digit-folded. Every existing capacity render site prints
+ * Latin digits in Arabic, and so does every other quantity on these screens.
+ */
+export function formatCapacity(
+  row: { capacity_value: number | null; capacity_unit: CapacityUnit },
+  lang: Lang,
+): string | null {
+  if (row.capacity_value == null) return null;
+  return `${row.capacity_value} ${t(`common.capacityUnit.${row.capacity_unit}`, lang)}`;
 }

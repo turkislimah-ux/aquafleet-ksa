@@ -55,7 +55,15 @@ export async function fetchTruckStateCounts(
   supabase: ReturnType<typeof createClient>,
 ): Promise<TruckStateCounts> {
   const [trucksRes, workOrdersRes, outsourcedRes] = await Promise.all([
-    supabase.from("trucks").select("id, assigned_driver_id").is("terminated_at", null),
+    // WATER TRUCKS ONLY (0201) — and the three counts are why, not just the
+    // label. `buildTruckStatusMap` reads "active" as "has an assigned driver",
+    // and 0201's shape check leaves an operation vehicle no driver column to
+    // fill, so every operation row would land in `idle` by construction. The
+    // Dashboard donut would then report a growing idle fleet that is simply
+    // the yard equipment sitting where it belongs. Fleet's Trucks tab counts
+    // the same set; the mirror has to mirror.
+    supabase.from("trucks").select("id, assigned_driver_id")
+      .eq("vehicle_class", "truck").is("terminated_at", null),
     supabase.from("work_orders").select("truck_id").eq("status", "in_progress"),
     supabase.from("outsourced_jobs").select("truck_id").eq("status", "in_progress"),
   ]);

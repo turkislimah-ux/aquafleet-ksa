@@ -31,7 +31,8 @@ import { Plus, X, Pencil, Trash2 } from "lucide-react";
 import { t, arText } from "@/lib/i18n";
 import { cn, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
-import type { Truck, Staff, RepairerType, Repairer, OutsourcedDescription, OutsourcedJob } from "@/lib/db-types";
+import type { Truck, Staff, RepairerType, Repairer, OutsourcedDescription, OutsourcedJob, VehicleType } from "@/lib/db-types";
+import VehicleOptGroups from "@/components/VehicleOptGroups";
 import {
   createOutsourcedJob,
   editOutsourcedJob,
@@ -64,6 +65,7 @@ const TYPES = ["preventive", "corrective", "inspection", "predictive"] as const;
 export default function NewOutsourcedJobModal({
   lang,
   trucks,
+  vehicleTypeById,
   mechanics,
   onLeaveMechanicIds,
   repairerTypes,
@@ -77,7 +79,11 @@ export default function NewOutsourcedJobModal({
   onEdited,
 }: {
   lang: "en" | "ar";
+  // BOTH VEHICLE CLASSES (0201), same as the in-house form: an outsourced job
+  // keys off `truck_id` with no class of its own. `vehicleTypeById` names the
+  // operation half — built once by MaintenanceClient, not here.
   trucks: Truck[];
+  vehicleTypeById: ReadonlyMap<string, VehicleType>;
   mechanics: Staff[];
   // Polish item 3 (on-leave-today mechanics, UI-only) — the mechanic
   // picker below disables/grays these, it never touches
@@ -95,7 +101,15 @@ export default function NewOutsourcedJobModal({
 }) {
   const isEdit = !!editingJob;
 
-  const [truckId, setTruckId] = useState(editingJob?.truck_id ?? trucks[0]?.id ?? "");
+  // First option AS OFFERED, not first row of the array — see the same note in
+  // NewWorkOrderModal. The array is plate-ordered across both classes; the
+  // picker lists trucks first.
+  const [truckId, setTruckId] = useState(
+    editingJob?.truck_id ??
+      trucks.find((tr) => tr.vehicle_class === "truck")?.id ??
+      trucks[0]?.id ??
+      "",
+  );
   // Polish item 1 (manual title) — mirrors NewWorkOrderModal's own title
   // field exactly. Prefill with the real custom title only if one was
   // actually set (create_outsourced_job snapshots title=os_number when
@@ -300,9 +314,14 @@ export default function NewOutsourcedJobModal({
             <div>
               <label className="text-xs muted block mb-1">{t("common.truck", lang)} *</label>
               <select value={truckId} onChange={(e) => setTruckId(e.target.value)} className={INPUT} style={INPUT_STYLE} disabled={isEdit}>
-                {trucks.map((tr) => (
-                  <option key={tr.id} value={tr.id}>{tr.plate} · {tr.model ?? ""}</option>
-                ))}
+                {/* Same grouped picker as the in-house form — one component, so
+                    the two forms cannot order or label the classes differently. */}
+                <VehicleOptGroups
+                  rows={trucks}
+                  typeById={vehicleTypeById}
+                  lang={lang}
+                  suffix={(tr) => tr.model}
+                />
               </select>
             </div>
             <div>

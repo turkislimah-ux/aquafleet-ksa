@@ -51,7 +51,10 @@ import type {
   OutsourcedJob,
   OutsourcedJobRepairer,
   WorkshopPayment,
+  VehicleType,
 } from "@/lib/db-types";
+import VehicleOptGroups from "@/components/VehicleOptGroups";
+import { operationTypeName } from "@/lib/vehicle-types";
 
 type OsSection = "all" | "scheduled" | "in_progress" | "historical";
 
@@ -98,6 +101,7 @@ const OS_URGENT_ROW_TONE: Record<OsUrgent, string> = {
 export default function OutsourcedTrack({
   lang,
   trucks,
+  vehicleTypeById,
   truckFilter,
   onTruckFilterChange,
   selectedDate,
@@ -110,7 +114,10 @@ export default function OutsourcedTrack({
   workshopPayments,
 }: {
   lang: "en" | "ar";
+  // BOTH VEHICLE CLASSES (0201) — `vehicleTypeById` names the operation half in
+  // the filter, the table and the group headers. Built once by MaintenanceClient.
   trucks: Truck[];
+  vehicleTypeById: ReadonlyMap<string, VehicleType>;
   truckFilter: string;
   onTruckFilterChange: (id: string) => void;
   selectedDate: string | null;
@@ -204,7 +211,15 @@ export default function OutsourcedTrack({
       <tr key={j.id} className={cn(overdue ? "bg-rose-500/5" : "")}>
         <TD className="font-mono text-xs">{j.os_number}</TD>
         {!groupedView && (
-          <TD className="font-mono text-xs">{truck?.plate ?? j.truck_id}</TD>
+          // Type outside the mono run — same treatment as the in-house table.
+          <TD className="font-mono text-xs">
+            {truck?.plate ?? j.truck_id}
+            {truck && operationTypeName(truck, vehicleTypeById, lang) && (
+              <span className="ms-1.5 font-sans text-[11px] muted">
+                {operationTypeName(truck, vehicleTypeById, lang)}
+              </span>
+            )}
+          </TD>
         )}
         <TD>{t(`status.${j.type}`, lang)}</TD>
         <TD className="text-xs">
@@ -278,9 +293,10 @@ export default function OutsourcedTrack({
               style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
             >
               <option value="all">{t("common.all", lang)}</option>
-              {trucks.map((tr) => (
-                <option key={tr.id} value={tr.id}>{tr.plate}</option>
-              ))}
+              {/* The same grouped list the in-house filter offers — one
+                  component, so the shared `truckFilter` cannot be populated two
+                  different ways by the two tracks that both write it. */}
+              <VehicleOptGroups rows={trucks} typeById={vehicleTypeById} lang={lang} />
             </select>
           </div>
         </div>
@@ -318,6 +334,9 @@ export default function OutsourcedTrack({
                           <div className="flex items-center gap-2 flex-wrap font-medium">
                             {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="rtl:-scale-x-100 h-4 w-4" />}
                             <span className="font-mono text-xs">{truck?.plate ?? truckId}</span>
+                            {truck && operationTypeName(truck, vehicleTypeById, lang) && (
+                              <span className="text-sm muted">{operationTypeName(truck, vehicleTypeById, lang)}</span>
+                            )}
                             <span className="text-sm">{truck?.model ?? ""}</span>
                             <span className="ms-auto text-[11px] font-normal muted">{rows.length} {t("mt.jobCount", lang)}</span>
                           </div>

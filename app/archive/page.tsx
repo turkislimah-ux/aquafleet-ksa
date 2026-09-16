@@ -28,6 +28,7 @@ import type {
   ArchiveDocumentFile,
   ArchiveDocumentRenewal,
   ArchiveDocumentType,
+  VehicleType,
 } from "@/lib/db-types";
 import type { CommPayout } from "@/lib/commission-rows";
 import type {
@@ -60,7 +61,7 @@ export default async function ArchivePage() {
     consApprovalsRes, permitsRes, permitLinesRes,
     ledgerWorkOrdersRes, workOrderPartsRes, ledgerJobsRes, paymentsRes,
     poApprovalsRes, purchaseOrdersRes, receiptApprovalsRes, stockReceiptsRes,
-    suppliersRes,
+    suppliersRes, vehicleTypesRes,
   ] = await Promise.all([
     supabase
       .from("archive_document_groups")
@@ -124,7 +125,11 @@ export default async function ArchivePage() {
     supabase
       .from("trucks")
       .select(
-        "id, plate, model, year, capacity_m3, vin, vehicle_registration, registration_expiry, home_station, odometer_km, active, terminated_at, termination_reason, termination_price, released_date",
+        // BOTH VEHICLE CLASSES (0201), unfiltered on purpose — the archive is
+        // the record of everything the business owned, and an operation
+        // vehicle that was sold has to be findable. `capacity_value` +
+        // `capacity_unit` replace `capacity_m3`: see ArchiveTruckRow.
+        "id, plate, model, year, capacity_value, capacity_unit, vehicle_class, vehicle_type_id, vin, vehicle_registration, registration_expiry, home_station, odometer_km, active, terminated_at, termination_reason, termination_price, released_date",
       )
       .order("plate", { ascending: true }),
     // Maintenance history — READ-ONLY. The archive displays work_orders and
@@ -219,6 +224,14 @@ export default async function ArchivePage() {
       .select("id, supplier_id, received_on, receipt_type, total_cost_sar, grand_total_sar, rejection_reason"),
     // Neither purchase_orders nor stock_receipts stores a supplier NAME.
     supabase.from("suppliers").select("id, name"),
+    // The lookup behind an operation vehicle's name. ALL rows, active and
+    // retired: the archive never OFFERS a type to pick, it only names one, and
+    // a vehicle filed under a type that has since been retired still has to
+    // read as what it is.
+    supabase
+      .from("vehicle_types")
+      .select("id, key, label, label_ar, sort_order, active, created_at")
+      .order("sort_order", { ascending: true }),
   ]);
 
   const groups = (groupsRes.data ?? []) as ArchiveDocumentGroup[];
@@ -230,6 +243,7 @@ export default async function ArchivePage() {
   const staff = (staffRes.data ?? []) as ArchiveStaffRow[];
   const payouts = (payoutsRes.data ?? []) as CommPayout[];
   const trucks = (trucksRes.data ?? []) as ArchiveTruckRow[];
+  const vehicleTypes = (vehicleTypesRes.data ?? []) as VehicleType[];
   // Narrow selects, so these are cast to the fields actually fetched rather
   // than the full row types (which claim far more columns than are selected).
   const workOrders = (workOrdersRes.data ?? []) as ArchiveTruckTabWorkOrder[];
@@ -284,6 +298,7 @@ export default async function ArchivePage() {
     receiptApprovalsRes.error?.message ??
     stockReceiptsRes.error?.message ??
     suppliersRes.error?.message ??
+    vehicleTypesRes.error?.message ??
     null;
 
   return (
@@ -297,6 +312,7 @@ export default async function ArchivePage() {
       staff={staff}
       payouts={payouts}
       trucks={trucks}
+      vehicleTypes={vehicleTypes}
       workOrders={workOrders}
       outsourcedJobs={outsourcedJobs}
       customers={customers}

@@ -18,6 +18,7 @@ import type {
   WorkshopPayment,
   WorkshopPaymentFile,
   Warehouse,
+  VehicleType,
 } from "@/lib/db-types";
 import { todayKey } from "@/lib/utils";
 import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
@@ -51,10 +52,19 @@ export default async function MaintenancePage() {
     outsourcedJobTasksRes,
     workshopPaymentsRes,
     workshopPaymentFilesRes,
+    vehicleTypesRes,
   ] = await Promise.all([
     supabase
       .from("trucks")
-      .select("id, plate, model, year, capacity_m3, status, home_station, odometer_km, vin, assigned_driver_id, last_service_date, utilization_pct, active, created_at, terminated_at, termination_reason, termination_price, released_date")
+      // BOTH VEHICLE CLASSES (0201), unfiltered on purpose: a crane breaks
+      // down and a pickup needs a service exactly like a water truck does, and
+      // work_orders / outsourced_jobs key off truck_id with no class of their
+      // own. This is one of the surfaces that must NOT narrow.
+      //
+      // The four 0201 columns are selected because the rows below are cast
+      // `as Truck[]`, and a cast that claims a shape the query does not return
+      // is how `undefined` reaches a render that believed the compiler.
+      .select("id, plate, model, year, capacity_m3, capacity_value, capacity_unit, vehicle_class, vehicle_type_id, status, home_station, odometer_km, vin, assigned_driver_id, last_service_date, utilization_pct, active, created_at, terminated_at, termination_reason, termination_price, released_date")
       .eq("active", true)
       .is("terminated_at", null)
       .order("plate", { ascending: true }),
@@ -166,6 +176,15 @@ export default async function MaintenancePage() {
       .from("workshop_payment_files")
       .select("id, payment_id, storage_path, file_name, mime_type, uploaded_at")
       .order("uploaded_at", { ascending: true }),
+    // vehicle_types (0201) — the lookup that turns an operation vehicle's
+    // `vehicle_type_id` into a word. ALL rows, active AND retired, the same as
+    // the Fleet page's own read: this page only ever NAMES a type, it never
+    // offers one to pick, and a vehicle filed under a type retired last year
+    // still has to render as what it is.
+    supabase
+      .from("vehicle_types")
+      .select("id, key, label, label_ar, sort_order, active, created_at")
+      .order("sort_order", { ascending: true }),
   ]);
 
   const trucks = (trucksRes.data ?? []) as Truck[];
@@ -190,6 +209,7 @@ export default async function MaintenancePage() {
   const outsourcedJobTasks = (outsourcedJobTasksRes.data ?? []) as OutsourcedJobTask[];
   const workshopPayments = (workshopPaymentsRes.data ?? []) as WorkshopPayment[];
   const workshopPaymentFiles = (workshopPaymentFilesRes.data ?? []) as WorkshopPaymentFile[];
+  const vehicleTypes = (vehicleTypesRes.data ?? []) as VehicleType[];
 
   const error =
     trucksRes.error?.message ??
@@ -211,6 +231,7 @@ export default async function MaintenancePage() {
     outsourcedJobTasksRes.error?.message ??
     workshopPaymentsRes.error?.message ??
     workshopPaymentFilesRes.error?.message ??
+    vehicleTypesRes.error?.message ??
     null;
 
   return (
@@ -234,6 +255,7 @@ export default async function MaintenancePage() {
       outsourcedJobTasks={outsourcedJobTasks}
       workshopPayments={workshopPayments}
       workshopPaymentFiles={workshopPaymentFiles}
+      vehicleTypes={vehicleTypes}
       error={error}
     />
   );

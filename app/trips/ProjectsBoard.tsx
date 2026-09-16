@@ -322,6 +322,13 @@ function TripCard({
   const { lang } = useApp();
   const s = STAGE_STYLES[trip.stage];
   // Demo: trip.tankSizeM3 || truck.capacityM3. Trip's own tank size wins; truck capacity is the fallback.
+  //
+  // BOTH SIDES ARE m³ BY CONSTRUCTION, which is what keeps the bare `m³` on
+  // the render below true after 0201. `trips.tank_size_m3` is named for its
+  // unit, and `truckCapacityM3` comes from `trucks.capacity_m3`, which
+  // `trucks_capacity_m3_consistent_check` leaves NULL for any vehicle not
+  // rated in m³. A litre-rated vehicle cannot reach this line twice over: it
+  // has no m³ figure, and this board fetches water trucks only.
   const tankSize = trip.tank_size_m3 ?? trip.truckCapacityM3 ?? null;
 
   // Phase-timestamp rows — status-specific, mirrors the demo's phaseRows. Loading

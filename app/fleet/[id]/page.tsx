@@ -3,6 +3,7 @@ import type { TruckUtilizationRolling30Row } from "@/lib/utilization";
 import type {
   Truck,
   OperationStation,
+  VehicleType,
   WorkOrder,
   WorkOrderPart,
   OutsourcedJob,
@@ -51,6 +52,7 @@ export default async function FleetDetailPage({
     staffNamesRes,
     repairerNamesRes,
     utilizationRes,
+    vehicleTypesRes,
   ] = await Promise.all([
     // Terminated trucks are filtered out here too — a direct URL to a
     // terminated truck's id resolves to `truck: null` below (FleetDetailClient
@@ -107,6 +109,14 @@ export default async function FleetDetailPage({
     // from_day/to_day come back with the row and are printed, so the reader is
     // never guessing which 30 days these are.
     supabase.from("v_truck_utilization_rolling30").select("*").eq("truck_id", id).maybeSingle(),
+    // vehicle_types (0201) — ALL rows, active AND retired, same reasons as the
+    // operation_stations fetch above: this page must resolve THIS vehicle's
+    // type name even if it was retired last week, and the Edit modal's picker
+    // must keep offering it so saving cannot silently re-file the vehicle.
+    supabase
+      .from("vehicle_types")
+      .select("id, key, label, label_ar, sort_order, active, created_at")
+      .order("sort_order", { ascending: true }),
   ]);
 
   const drivers = (driversRes.data ?? []) as DriverLite[];
@@ -134,8 +144,16 @@ export default async function FleetDetailPage({
   const activeProjectIds = new Set(
     ((activeProjectsRes.data ?? []) as { id: string }[]).map((p) => p.id)
   );
+  // WATER TRUCKS ONLY, EXPLICITLY — the same ruling app/fleet/page.tsx makes
+  // and for the same reason. An operation vehicle cannot hold a driver
+  // (trucks_vehicle_class_shape_check), so the unfiltered list gives the same
+  // set today and would stop doing so the moment that constraint were relaxed,
+  // silently promoting a yard driver to "on duty" on this page only.
   const truckDriverIds = new Set(
-    trucks.map((t) => t.assigned_driver_id).filter((did): did is string => did != null)
+    trucks
+      .filter((t) => t.vehicle_class !== "operation")
+      .map((t) => t.assigned_driver_id)
+      .filter((did): did is string => did != null)
   );
   const activeProjectDriverIds = new Set(
     ((projectDriversRes.data ?? []) as { project_id: string; driver_id: string }[])
@@ -148,6 +166,7 @@ export default async function FleetDetailPage({
 
   const truck = trucks.find((t) => t.id === id) ?? null;
   const operationStations = (operationStationsRes.data ?? []) as OperationStation[];
+  const vehicleTypes = (vehicleTypesRes.data ?? []) as VehicleType[];
 
   // ---- Maintenance History (Phase 5) — dependents keyed on this truck's
   // own WO/OS ids, fetched in a second round trip (tiny per-truck dataset,
@@ -198,7 +217,7 @@ export default async function FleetDetailPage({
     operationStationsRes.error?.message ?? workOrdersRes.error?.message ?? outsourcedJobsRes.error?.message ??
     workOrderPartsRes.error?.message ?? outsourcedJobRepairersRes.error?.message ?? workshopPaymentsRes.error?.message ??
     staffNamesRes.error?.message ?? repairerNamesRes.error?.message ??
-    utilizationRes.error?.message ?? null;
+    utilizationRes.error?.message ?? vehicleTypesRes.error?.message ?? null;
 
   // COERCED AT THE BOUNDARY (numeric arrives as a string). NULL preserved:
   // a truck with no available days in the window has no utilization, which is
@@ -227,6 +246,7 @@ export default async function FleetDetailPage({
       onLeaveDriverIds={onLeaveDriverIds}
       driverStateById={driverStateById}
       operationStations={operationStations}
+      vehicleTypes={vehicleTypes}
       workOrders={workOrders}
       workOrderParts={workOrderParts}
       outsourcedJobs={outsourcedJobs}

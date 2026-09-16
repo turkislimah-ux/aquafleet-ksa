@@ -1063,20 +1063,25 @@ const DT_DRIVERS: ReportDriver[] = [
 // Thirteen live plates. BBB-1115 (302bcce5) is DELIBERATELY ABSENT — it is
 // terminated, so the action never fetches it, and the trips driven on it below
 // resolve to a dash. Deleting it from the trips instead would hide the case.
+// All thirteen are WATER TRUCKS, and no operation vehicle is added beside
+// them (0201). The class is on the row because the picker groups by it, but
+// this sheet renders the PROJECT TABLES, which reach these rows only through
+// a plate lookup — an operation vehicle here would have no trip to appear in
+// and would change no pixel, which makes it decoration rather than a case.
 const DT_TRUCKS: ReportTruck[] = [
-  { id: "6375dd63", plate: "AAA-5551" },
-  { id: "0f1acd56", plate: "AAA-5552" },
-  { id: "b076e19f", plate: "AAA-5553" },
-  { id: "873e01c4", plate: "AAA-5556" },
-  { id: "17e64222", plate: "BBB-1111" },
-  { id: "07237241", plate: "BBB-1114" },
-  { id: "c180b5a4", plate: "BBB-1116" },
-  { id: "63186cf1", plate: "BBB-1118" },
-  { id: "eb665862", plate: "DDD-6661" },
-  { id: "83a4f195", plate: "KKK-7771" },
-  { id: "ef6dace5", plate: "KKK-7772" },
-  { id: "46cb9f69", plate: "KKK-7773" },
-  { id: "9254b877", plate: "TTT-4441" },
+  { id: "6375dd63", plate: "AAA-5551", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "0f1acd56", plate: "AAA-5552", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "b076e19f", plate: "AAA-5553", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "873e01c4", plate: "AAA-5556", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "17e64222", plate: "BBB-1111", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "07237241", plate: "BBB-1114", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "c180b5a4", plate: "BBB-1116", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "63186cf1", plate: "BBB-1118", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "eb665862", plate: "DDD-6661", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "83a4f195", plate: "KKK-7771", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "ef6dace5", plate: "KKK-7772", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "46cb9f69", plate: "KKK-7773", vehicle_class: "truck", vehicle_type_id: null },
+  { id: "9254b877", plate: "TTT-4441", vehicle_class: "truck", vehicle_type_id: null },
 ];
 
 // All 26 roster rows on the eight active projects. The four on R TTT marked

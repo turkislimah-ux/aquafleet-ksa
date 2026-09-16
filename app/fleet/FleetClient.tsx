@@ -1,18 +1,49 @@
 "use client";
 
-// Client island for the Fleet page: 6 real KPIs, filter bar (search / status
-// chips / station), the truck roster table, and the modals — Add Truck, Edit
-// Truck (both via the shared TruckFormModal) and Assign Driver (busy drivers are
+// Client island for the Fleet page: the KPI strip, the filter bar (search /
+// status chips / station), the vehicle roster table, and the modals — Add, Edit
+// (both via the shared TruckFormModal) and Assign Driver (busy drivers are
 // locked; assigning frees the driver from any other truck first).
+//
+// TWO TABS, ONE TABLE SHAPE — AND WHY THE SPLIT IS A PRIMARY TAB
+// -----------------------------------------------------------------------------
+// 0201 made `trucks` a table of VEHICLES in two classes. A water truck earns
+// revenue, carries a driver, joins a project and is measured by utilization; an
+// operation vehicle — the yard pickups, tractors, forklifts and cranes — does
+// none of those things. Four of this table's twelve columns are meaningless for
+// half the rows.
+//
+// WHAT WAS REJECTED, and why:
+//   · ONE TABLE WITH A CLASS COLUMN. Every driver, project and utilization cell
+//     on a crane's row would read "—". A column of dashes is not information,
+//     and the KPI strip above it would have to average a fleet with an unfleet.
+//   · A FILTER CHIP ("Trucks / Operation"). A chip is a narrowing of one list.
+//     These are two rosters with different columns and different KPIs, and a
+//     chip cannot change either.
+//   · THE `SubTabPicker` SEGMENTED CONTROL. That control is this app's SECOND
+//     level of navigation (Archive's Drivers/Staff, Maintenance's tracks). Using
+//     it for a section-level split would put the fleet's two halves one rank
+//     below where they belong.
+//
+// So: the underline tab bar, pulled verbatim from app/archive/ArchiveClient.tsx
+// (which took it from TripsTabs / Maintenance) — this app's one primary-tab
+// language, not a fourth invention. State lives in the URL via useTabParam, so
+// `/fleet?tab=operation` is a real destination global search can offer.
+//
+// THE TWO TABS DO NOT SHARE FILTER STATE. Two rosters, two sets of chips (an
+// operation vehicle can never be "active" — nothing dispatches it), two result
+// counts. Sharing them would let a chip that is not on screen hide every row of
+// the other tab.
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD } from "@/components/ui";
-import { type OperationStation } from "@/lib/db-types";
+import { type OperationStation, type VehicleClass, type VehicleType } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
 import { driverAvailability, AVAILABILITY_KEY } from "@/lib/driver-assignment";
 import { type TruckOpsState } from "@/lib/truck-status";
+import { FLEET_TABS, FLEET_TAB_FALLBACK, type FleetTab } from "@/lib/fleet-tabs";
 import type { TruckRow, DriverLite } from "./page";
 import { assignDriver, unassignDriver } from "./actions";
 import TruckFormModal from "./TruckFormModal";
@@ -32,8 +63,14 @@ import {
 // fleet.truckState / fleet.driverState instead. No other route is affected.
 import { useApp } from "@/components/AppShell";
 import { t, type Lang } from "@/lib/i18n";
-import { Eye, Filter, Pencil, Plus, Truck as TruckIcon, Users, X } from "lucide-react";
+import { Eye, Filter, Forklift, Pencil, Plus, Truck as TruckIcon, Users, X } from "lucide-react";
 import ScrollLock from "@/components/ScrollLock";
+import { useTabParam } from "@/lib/useTabParam";
+// The unit travels with the number now (0201). `${capacity_m3} m³` was correct
+// while every vehicle was a water truck and is wrong by a factor of a thousand
+// for a litre-rated one — see lib/capacity.ts's header.
+import { formatCapacity } from "@/lib/capacity";
+import { vehicleTypeLabel } from "@/lib/vehicle-types";
 
 type Kpis = {
   total: number;
@@ -43,6 +80,18 @@ type Kpis = {
   totalCap: number;
   capHasData: boolean;
 };
+
+// Three figures, not six. See app/fleet/page.tsx for why "Active" and "Total
+// Capacity" are absent rather than rendered as permanent zeros.
+type OpKpis = {
+  total: number;
+  maint: number;
+  idle: number;
+};
+
+// MOVED to lib/fleet-tabs.ts. `/fleet/[id]` links back into the tab a vehicle
+// belongs to, and it cannot name one from a const that lives in this file —
+// see that module's header for why the mapping is shared rather than copied.
 
 // Status filter chips — Auto Truck-Status's 3-state derived model, plus
 // "all". Precedence order (maintenance > active > idle) matches
@@ -54,6 +103,14 @@ const STATUS_CHIPS: Array<"all" | TruckOpsState> = [
   "active",
   "idle",
 ];
+
+// The operation tab's chips are the SAME enum minus one member, not a second
+// vocabulary. "active" is dropped because buildTruckStatusMap derives it from
+// "a driver is assigned", and trucks_vehicle_class_shape_check forbids an
+// operation vehicle from having one — so the chip could only ever return an
+// empty list. Offering a filter that is guaranteed to find nothing is worse
+// than not offering it.
+const OP_STATUS_CHIPS: Array<"all" | TruckOpsState> = ["all", "maintenance", "idle"];
 
 // "05 Aug 2026" / "05 أغسطس 2026". The en-GB day-first shape and the 2-digit
 // day are unchanged — formatDateLangLocale keeps the caller's locale and swaps
@@ -133,8 +190,89 @@ function UtilizationCell({ row, lang }: { row: TruckUtilizationRow | undefined; 
   );
 }
 
+/**
+ * The filter bar both tabs wear.
+ *
+ * ONE COMPONENT, NOT TWO COPIES. The bar was already a fixed arrangement —
+ * icon, search, chips, station, result count — and the tabs differ only in
+ * which chips exist, what the search placeholder says, and which rows are being
+ * counted. Two copies would drift: a spacing fix or a new control would land on
+ * whichever tab the person was looking at.
+ *
+ * Every value is the bar's own, unchanged: `!p-3` Card, `h-9` controls,
+ * `rounded-lg`, `min-w-[200px]` on the search so the chips wrap below it rather
+ * than crushing it, `ms-auto` on the count so it takes the trailing edge in
+ * both directions.
+ */
+function FilterBar({
+  q, onQ, placeholder, chips, status, onStatus, station, onStation, stationOptions, resultCount, lang,
+}: {
+  q: string;
+  onQ: (next: string) => void;
+  placeholder: string;
+  chips: readonly (typeof STATUS_CHIPS)[number][];
+  status: (typeof STATUS_CHIPS)[number];
+  onStatus: (next: (typeof STATUS_CHIPS)[number]) => void;
+  station: string;
+  onStation: (next: string) => void;
+  stationOptions: OperationStation[];
+  resultCount: number;
+  lang: Lang;
+}) {
+  return (
+    <Card className="!p-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Filter className="h-4 w-4 muted ms-1" />
+        <input
+          value={q}
+          onChange={(e) => onQ(e.target.value)}
+          placeholder={placeholder}
+          className="h-9 px-3 rounded-lg border text-sm flex-1 min-w-[200px]"
+          style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
+        />
+        <div className="flex items-center gap-1 flex-wrap">
+          {chips.map((s) => (
+            <button
+              key={s}
+              onClick={() => onStatus(s)}
+              className={cn(
+                "h-9 px-3 rounded-lg text-xs font-medium border",
+                status === s ? "bg-brand-600 text-white border-brand-600" : "",
+              )}
+              style={status !== s ? { borderColor: "rgb(var(--border))" } : undefined}
+            >
+              {s === "all" ? t("common.all", lang) : t(`fleet.truckState.${s}`, lang)}
+            </button>
+          ))}
+        </div>
+        <select
+          value={station}
+          onChange={(e) => onStation(e.target.value)}
+          className="h-9 px-3 rounded-lg border text-sm"
+          style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
+        >
+          <option value="all">{t("fleet.filters.allStations", lang)}</option>
+          {stationOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {/* No arText — operation_stations has no name_ar column, and
+                  OperationStationField renders the same bare name. */}
+              {s.name}{!s.active ? ` ${t("shared.stations.deactivatedParen", lang)}` : ""}
+            </option>
+          ))}
+        </select>
+        <span className="muted text-xs ms-auto">
+          {t("fleet.filters.results", lang).replace("{n}", () => String(resultCount))}
+        </span>
+      </div>
+    </Card>
+  );
+}
+
 export default function FleetClient({
   trucks,
+  operationVehicles,
+  vehicleTypes,
+  opKpis,
   drivers,
   trips30d,
   onLeaveDriverIds,
@@ -147,7 +285,16 @@ export default function FleetClient({
   utilizationMonth,
   errorMsg,
 }: {
+  // WATER TRUCKS ONLY — page.tsx has already split by vehicle_class. This file
+  // never re-filters, so the two tabs cannot disagree about which half a row is
+  // in, and a future class arrives by changing the split in one place.
   trucks: TruckRow[];
+  operationVehicles: TruckRow[];
+  // ALL rows, active and retired. The table resolves a vehicle's type by id,
+  // and a vehicle whose type was retired last week must still read its name.
+  // lib/vehicle-types.ts decides which subset a PICKER offers.
+  vehicleTypes: VehicleType[];
+  opKpis: OpKpis;
   drivers: DriverLite[];
   trips30d: Record<string, number>;
   onLeaveDriverIds: string[];
@@ -228,12 +375,28 @@ export default function FleetClient({
   // itself, so a stale tab cannot assign a driver this list has greyed out.
   const onLeave = useMemo(() => new Set(onLeaveDriverIds), [onLeaveDriverIds]);
 
+  // THE URL IS THE TAB. `/fleet` is the trucks tab and carries no param;
+  // `/fleet?tab=operation` is a real destination that survives a reload, a Back
+  // press and a link from global search.
+  const [tab, setTab] = useTabParam<FleetTab>(FLEET_TABS, FLEET_TAB_FALLBACK);
+  const isOpTab = tab === "operation";
+
   const [status, setStatus] = useState<(typeof STATUS_CHIPS)[number]>("all");
   const [station, setStation] = useState<string>("all");
   const [q, setQ] = useState("");
 
-  // Add / Edit Truck modals (shared TruckFormModal).
-  const [addOpen, setAddOpen] = useState(false);
+  // The operation tab's own three. See this file's header: two rosters, two
+  // sets of chips, two result counts — sharing them would let a chip that is
+  // not on screen empty the other tab.
+  const [opStatus, setOpStatus] = useState<(typeof STATUS_CHIPS)[number]>("all");
+  const [opStation, setOpStation] = useState<string>("all");
+  const [opQ, setOpQ] = useState("");
+
+  // Add / Edit modals (shared TruckFormModal). The ADD state is the CLASS being
+  // added, not a boolean: the form needs to know which of its two shapes to
+  // wear, and "which tab was I on" is exactly the fact a boolean would throw
+  // away and then have to reconstruct at the call site.
+  const [addClass, setAddClass] = useState<VehicleClass | null>(null);
   const [editTruck, setEditTruck] = useState<TruckRow | null>(null);
 
   // Assign Driver modal — holds the truck whose driver is being changed.
@@ -254,15 +417,33 @@ export default function FleetClient({
     () => new Map(operationStations.map((s) => [s.id, s.name])),
     [operationStations],
   );
-  // Filter dropdown options: active stations, PLUS any inactive station a truck
-  // in this list is still currently based at (so the filter can still find it,
-  // and its name still resolves — matches OperationStationField's same rule).
-  const stationFilterOptions = useMemo(() => {
-    const assignedIds = new Set(
-      trucks.map((t) => t.home_station).filter((id): id is string => id != null),
-    );
-    return operationStations.filter((s) => s.active || assignedIds.has(s.id));
-  }, [operationStations, trucks]);
+  // uuid -> vehicle type, over ALL rows including retired ones — the table
+  // RESOLVES a name, it does not offer a choice, so the active flag is not its
+  // business (vehicleTypeOptions handles that, for pickers).
+  const vehicleTypeById = useMemo(
+    () => new Map(vehicleTypes.map((vt) => [vt.id, vt])),
+    [vehicleTypes],
+  );
+
+  // Filter dropdown options: active stations, PLUS any inactive station a
+  // vehicle IN THIS TAB'S LIST is still currently based at (so the filter can
+  // still find it, and its name still resolves — matches OperationStationField's
+  // same rule). Computed per tab, because a station kept alive only by a crane
+  // has no business appearing in the trucks tab's dropdown.
+  const stationOptionsFor = useCallback(
+    (rows: TruckRow[]) => {
+      const assignedIds = new Set(
+        rows.map((t) => t.home_station).filter((id): id is string => id != null),
+      );
+      return operationStations.filter((s) => s.active || assignedIds.has(s.id));
+    },
+    [operationStations],
+  );
+  const stationFilterOptions = useMemo(() => stationOptionsFor(trucks), [stationOptionsFor, trucks]);
+  const opStationFilterOptions = useMemo(
+    () => stationOptionsFor(operationVehicles),
+    [stationOptionsFor, operationVehicles],
+  );
 
   const list = useMemo(
     () =>
@@ -279,13 +460,39 @@ export default function FleetClient({
     [trucks, status, station, q, truckStatusById],
   );
 
+  const opList = useMemo(
+    () =>
+      operationVehicles.filter((tr) => {
+        if (opStatus !== "all" && truckStatusById[tr.id] !== opStatus) return false;
+        if (opStation !== "all" && tr.home_station !== opStation) return false;
+        if (opQ) {
+          const s = opQ.toLowerCase();
+          // THE TYPE NAME IS IN THE HAYSTACK, and that is why this tab has no
+          // Type dropdown. "Crane" is the word someone actually reaches for,
+          // and it is already where they are typing; a second control offering
+          // the same answer from a list would be a filter for a roster of ten.
+          // Searched in the CURRENT language only — vehicleTypeLabel returns
+          // what is on screen, and matching a name the reader cannot see would
+          // look like a bug.
+          const typeName = vehicleTypeLabel(
+            tr.vehicle_type_id ? vehicleTypeById.get(tr.vehicle_type_id) : null,
+            lang,
+          );
+          const hay = `${tr.plate} ${tr.model ?? ""} ${typeName}`.toLowerCase();
+          if (!hay.includes(s)) return false;
+        }
+        return true;
+      }),
+    [operationVehicles, opStatus, opStation, opQ, truckStatusById, vehicleTypeById, lang],
+  );
+
   function openAssign(tr: TruckRow) {
     setAssignError(null);
     setAssignTruck(tr);
   }
 
   function onTruckSaved() {
-    setAddOpen(false);
+    setAddClass(null);
     setEditTruck(null);
     router.refresh();
   }
@@ -322,19 +529,49 @@ export default function FleetClient({
     <div className="space-y-5">
       <PageHeader
         title={t("nav.fleet", lang)}
-        subtitle={t("fleet.subtitle", lang).replace("{n}", () => String(kpis.total))}
+        // BOTH HALVES OF THE HEADER BRANCH ON `tab`, THE VALUE — never on a
+        // rendered label, which stops matching the moment the page speaks
+        // Arabic. The subtitle counts the tab's own roster, so the number under
+        // the title always describes the table under it.
+        subtitle={
+          isOpTab
+            ? t("fleet.op.subtitle", lang).replace("{n}", () => String(opKpis.total))
+            : t("fleet.subtitle", lang).replace("{n}", () => String(kpis.total))
+        }
         actions={
-          <Btn variant="primary" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" /> {t("fleet.addTruck", lang)}
+          <Btn variant="primary" onClick={() => setAddClass(isOpTab ? "operation" : "truck")}>
+            <Plus className="h-4 w-4" /> {t(isOpTab ? "fleet.op.add" : "fleet.addTruck", lang)}
           </Btn>
         }
       />
 
+      {/* Tabs — underline style, matching ArchiveClient / TripsTabs / Maintenance. */}
+      <div className="flex items-center gap-1 border-b flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
+        {FLEET_TABS.map((key) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={cn(
+              "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
+              tab === key
+                ? "border-brand-600 text-brand-600 dark:text-brand-300"
+                : "border-transparent muted hover:text-[rgb(var(--fg))]",
+            )}
+          >
+            {t(`fleet.tabs.${key}`, lang)}
+          </button>
+        ))}
+      </div>
+
+      {/* ABOVE THE TABS' CONTENT, not inside one of them. A failed fetch breaks
+          both rosters at once — it is a page-level fact. */}
       {errorMsg && (
         <p className="text-sm text-rose-600 dark:text-rose-400">{t("fleet.loadFailed", lang)} {errorMsg}</p>
       )}
 
-      {/* KPI strip (6) — all REAL */}
+      {!isOpTab && (
+        <>
+      {/* KPI strip (5) — all REAL, water trucks only */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <Stat label={t("fleet.kpi.totalTrucks", lang)} value={kpis.total} tone="info" />
         <Stat label={t("fleet.kpi.active", lang)} value={kpis.active} tone="ok" />
@@ -342,57 +579,30 @@ export default function FleetClient({
         <Stat label={t("fleet.kpi.idle", lang)} value={kpis.idle} tone="info" />
         <Stat
           label={t("fleet.kpi.totalCapacity", lang)}
+          // STAYS A BARE m³ LITERAL, and that is not an oversight. This is the
+          // sum of `capacity_m3` over WATER TRUCKS, which 0201's shape check
+          // forces to m³ for every row in it — the figure is m³ by
+          // construction, not by assumption. formatCapacity() answers a
+          // different question (one row's own stated unit) and has no summed
+          // form to give.
           value={kpis.capHasData ? `${formatNum(kpis.totalCap)} m³` : "—"}
           tone="info"
         />
       </div>
 
-      {/* Filter bar */}
-      <Card className="!p-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Filter className="h-4 w-4 muted ms-1" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder={t("fleet.filters.searchPlaceholder", lang)}
-            className="h-9 px-3 rounded-lg border text-sm flex-1 min-w-[200px]"
-            style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
-          />
-          <div className="flex items-center gap-1 flex-wrap">
-            {STATUS_CHIPS.map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatus(s)}
-                className={cn(
-                  "h-9 px-3 rounded-lg text-xs font-medium border",
-                  status === s ? "bg-brand-600 text-white border-brand-600" : "",
-                )}
-                style={status !== s ? { borderColor: "rgb(var(--border))" } : undefined}
-              >
-                {s === "all" ? t("common.all", lang) : t(`fleet.truckState.${s}`, lang)}
-              </button>
-            ))}
-          </div>
-          <select
-            value={station}
-            onChange={(e) => setStation(e.target.value)}
-            className="h-9 px-3 rounded-lg border text-sm"
-            style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
-          >
-            <option value="all">{t("fleet.filters.allStations", lang)}</option>
-            {stationFilterOptions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {/* No arText — operation_stations has no name_ar column, and
-                    OperationStationField renders the same bare name. */}
-                {s.name}{!s.active ? ` ${t("shared.stations.deactivatedParen", lang)}` : ""}
-              </option>
-            ))}
-          </select>
-          <span className="muted text-xs ms-auto">
-            {t("fleet.filters.results", lang).replace("{n}", () => String(list.length))}
-          </span>
-        </div>
-      </Card>
+      <FilterBar
+        q={q}
+        onQ={setQ}
+        placeholder={t("fleet.filters.searchPlaceholder", lang)}
+        chips={STATUS_CHIPS}
+        status={status}
+        onStatus={setStatus}
+        station={station}
+        onStation={setStation}
+        stationOptions={stationFilterOptions}
+        resultCount={list.length}
+        lang={lang}
+      />
 
       {/* Table */}
       <Card className="!p-0 overflow-hidden">
@@ -509,8 +719,12 @@ export default function FleetClient({
                 <TD>
                   <UtilizationCell row={utilizationByTruck[tr.id]} lang={lang} />
                 </TD>
+                {/* formatCapacity, not the old `${capacity_m3} m³` literal.
+                    Every row here IS m³ by constraint, so the output is
+                    identical today — the point is that this cell can no longer
+                    print a unit it did not read off the row. */}
                 <TD className="tabular-nums font-medium">
-                  {tr.capacity_m3 != null ? `${tr.capacity_m3} m³` : "—"}
+                  {formatCapacity(tr, lang) ?? "—"}
                 </TD>
                 <TD className="tabular-nums">
                   {tr.odometer_km != null ? `${formatNum(tr.odometer_km)} km` : "—"}
@@ -558,22 +772,196 @@ export default function FleetClient({
           {t("fleet.utilNoteBody2", lang)}
         </span>
       </p>
+        </>
+      )}
 
-      {/* ---- Add Truck modal ---- */}
-      {addOpen && (
+      {isOpTab && (
+        <>
+      {/* THREE FIGURES, and the shape says so. The trucks strip is a 5-column
+          grid; forcing three cards into it would leave two empty cells and
+          read as a strip with something missing. `lg:grid-cols-3` fills the
+          row, and the same `grid-cols-2` base keeps the phone layout identical
+          between tabs. */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        <Stat label={t("fleet.op.total", lang)} value={opKpis.total} tone="info" />
+        <Stat
+          label={t("fleet.op.inMaintenance", lang)}
+          value={opKpis.maint}
+          // No `> 6` warn threshold here. That number is tuned to a ~40-truck
+          // water fleet where seven trucks down is a dispatch problem; the
+          // support fleet has no such figure, and inventing one would put an
+          // amber card on screen for a reason nobody could state.
+          tone="info"
+        />
+        <Stat label={t("fleet.op.idle", lang)} value={opKpis.idle} tone="info" />
+      </div>
+
+      <FilterBar
+        q={opQ}
+        onQ={setOpQ}
+        placeholder={t("fleet.op.searchPlaceholder", lang)}
+        chips={OP_STATUS_CHIPS}
+        status={opStatus}
+        onStatus={setOpStatus}
+        station={opStation}
+        onStation={setOpStation}
+        stationOptions={opStationFilterOptions}
+        resultCount={opList.length}
+        lang={lang}
+      />
+
+      {/* TEN COLUMNS, NOT TWELVE. Driver, Assigned Project and Utilization are
+          absent rather than dashed: none of the three is a fact about an
+          operation vehicle that happens to be missing. Type takes the position
+          those columns would have had, right after the plate, because it is
+          what the reader is actually scanning this table for. */}
+      <Card className="!p-0 overflow-hidden">
+        <Table>
+          <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+            <tr>
+              <TH>{t("common.plate", lang)}</TH>
+              <TH>{t("common.type", lang)}</TH>
+              <TH>{t("fleet.cols.model", lang)}</TH>
+              <TH>{t("fleet.cols.vehicleId", lang)}</TH>
+              <TH>{t("fleet.cols.station", lang)}</TH>
+              <TH>{t("common.status", lang)}</TH>
+              <TH>{t("common.capacity", lang)}</TH>
+              <TH>{t("common.odometer", lang)}</TH>
+              <TH>{t("fleet.cols.lastService", lang)}</TH>
+              <TH></TH>
+            </tr>
+          </thead>
+          <tbody>
+            {opList.length === 0 && (
+              <tr>
+                <td
+                  colSpan={10}
+                  className="py-6 px-3 border-t text-center muted text-sm"
+                  style={{ borderColor: "rgb(var(--border))" }}
+                >
+                  {t(operationVehicles.length > 0 ? "fleet.op.noneFiltered" : "fleet.op.noneYet", lang)}
+                </td>
+              </tr>
+            )}
+            {opList.map((tr) => (
+              <tr
+                key={tr.id}
+                onClick={(e) => openDetail(e, tr.id)}
+                onKeyDown={(e) => openDetailKey(e, tr.id)}
+                tabIndex={0}
+                aria-label={t("fleet.op.openDetailAria", lang).replace("{plate}", () => tr.plate)}
+                className="cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/60"
+              >
+                <TD>
+                  <div className="flex items-center gap-2">
+                    {/* SAME TINTED SQUARE, DIFFERENT GLYPH. The tint is not
+                        re-chosen: a second accent colour introduced for one tab
+                        would carry no meaning anywhere else in the app. The
+                        FORKLIFT names the CATEGORY — yard and support equipment
+                        — not the individual vehicle, which the Type column
+                        beside it names in words. A glyph per type would need an
+                        icon column on vehicle_types, which is a feature, not a
+                        default. */}
+                    <div className="h-8 w-8 rounded-lg bg-brand-500/10 text-brand-600 grid place-items-center">
+                      <Forklift className="h-4 w-4" />
+                    </div>
+                    <div className="font-mono text-xs font-medium">{tr.plate}</div>
+                  </div>
+                </TD>
+                <TD>
+                  {vehicleTypeLabel(
+                    tr.vehicle_type_id ? vehicleTypeById.get(tr.vehicle_type_id) : null,
+                    lang,
+                  )}
+                </TD>
+                <TD>
+                  {tr.model ?? "—"}
+                  {tr.year ? <span className="muted"> · {tr.year}</span> : null}
+                </TD>
+                {/* Folded to Latin for the same reason the trucks table folds
+                    it — the stored value is the cause, not the display. */}
+                <TD className="font-mono text-xs">{toLatinDigits(tr.vehicle_registration) || "—"}</TD>
+                <TD>{tr.home_station ? stationNameById.get(tr.home_station) ?? "—" : "—"}</TD>
+                <TD>
+                  <StatusPill
+                    status={truckStatusById[tr.id] ?? "idle"}
+                    label={t(`fleet.truckState.${truckStatusById[tr.id] ?? "idle"}`, lang)}
+                  />
+                </TD>
+                {/* THE CELL THE WHOLE 0201 CAPACITY SPLIT EXISTS FOR. A water
+                    bowser rated in litres renders "5000 L" here; the old
+                    `${capacity_m3} m³` literal would have printed an em dash,
+                    because a litre-rated row carries NULL in that column by
+                    construction. */}
+                <TD className="tabular-nums font-medium">
+                  {formatCapacity(tr, lang) ?? "—"}
+                </TD>
+                <TD className="tabular-nums">
+                  {tr.odometer_km != null ? `${formatNum(tr.odometer_km)} km` : "—"}
+                </TD>
+                <TD className="text-xs">{lastServiceLabel(tr.last_service_date, lang)}</TD>
+                <TD>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      title={t("fleet.op.editTitle", lang)}
+                      onClick={() => setEditTruck(tr)}
+                      className="h-9 w-9 grid place-items-center rounded-lg border hover:bg-black/5 dark:hover:bg-white/5"
+                      style={{ borderColor: "rgb(var(--border))" }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <Link
+                      href={`/fleet/${tr.id}`}
+                      className="h-9 px-3 rounded-lg text-sm font-medium inline-flex items-center gap-2 border hover:bg-black/5 dark:hover:bg-white/5"
+                      style={{ borderColor: "rgb(var(--border))" }}
+                    >
+                      <Eye className="h-3.5 w-3.5" /> {t("common.view", lang)}
+                    </Link>
+                  </div>
+                </TD>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </Card>
+
+      {/* The trucks tab's footnote explains utilization. This one explains the
+          COLUMNS THAT ARE NOT THERE — an absence nobody notices is an absence
+          nobody trusts, and "where did the driver column go" is the first
+          question this table raises. */}
+      <p className="flex items-start gap-2 text-[11px] muted leading-relaxed">
+        <Forklift className="h-3.5 w-3.5 shrink-0 mt-px" aria-hidden />
+        <span>{t("fleet.op.noDriverNote", lang)}</span>
+      </p>
+        </>
+      )}
+
+      {/* ---- Add Vehicle modal ---- */}
+      {/* ONE MODAL, BOTH CLASSES. `addClass` is the class being added, so the
+          form wears the right shape and posts the matching vehicle_class — see
+          TruckFormModal's own header for the four differences. */}
+      {addClass && (
         <TruckFormModal
           mode="add"
+          vehicleClass={addClass}
+          vehicleTypes={vehicleTypes}
           drivers={drivers}
           operationStations={operationStations}
-          onClose={() => setAddOpen(false)}
+          onClose={() => setAddClass(null)}
           onSaved={onTruckSaved}
         />
       )}
 
-      {/* ---- Edit Truck modal ---- */}
+      {/* ---- Edit Vehicle modal ---- */}
       {editTruck && (
         <TruckFormModal
           mode="edit"
+          // THE ROW'S OWN CLASS, NEVER THE ACTIVE TAB. They agree today because
+          // each table only ever hands over its own rows — but reading the tab
+          // here would mean a future surface that edits a vehicle from
+          // somewhere else silently re-files it.
+          vehicleClass={editTruck.vehicle_class}
+          vehicleTypes={vehicleTypes}
           truck={editTruck}
           drivers={drivers}
           operationStations={operationStations}

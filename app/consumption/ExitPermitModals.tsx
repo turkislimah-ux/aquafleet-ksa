@@ -28,7 +28,9 @@ import {
   type ExitPermit, type ExitPermitLine, type ExitPermitFile,
   type ExitPermitDestinationKind,
   type ExitPermitWriteOff, type ExitPermitWriteOffLine,
+  type VehicleClass, type VehicleType,
 } from "@/lib/db-types";
+import VehicleOptGroups from "@/components/VehicleOptGroups";
 import { useApp } from "@/components/AppShell";
 import { t, plural, arText, type Lang, type TKey } from "@/lib/i18n";
 // THE PRINTED PERMIT IS A DOCUMENT, not this DOM with the chrome hidden. The
@@ -57,7 +59,11 @@ type PartLite = {
   unit: string | null; warehouse_id: string; qty_on_hand: number;
 };
 type NamedLite = { id: string; name: string };
-type TruckLite = { id: string; plate: string };
+// The destination picker offers BOTH VEHICLE CLASSES (0201) — parts leave the
+// yard on a pickup as readily as on a water truck — so the row carries what it
+// takes to group and name them. Same shape as ConsumptionClient's own TruckLite,
+// which is where these arrive from.
+type TruckLite = { id: string; plate: string; vehicle_class: VehicleClass; vehicle_type_id: string | null };
 
 /**
  * ONE-TOKEN INTERPOLATION — the same helper, for the same two reasons, as the
@@ -164,7 +170,7 @@ type ItemRow = {
 
 export function PermitFormModal({
   permit, lines, files, lots, warehouses, parts, stations, projects, trucks,
-  customers, staff, onDraftCreated, onRefresh, onClose,
+  vehicleTypeById, customers, staff, onDraftCreated, onRefresh, onClose,
 }: {
   permit: ExitPermit | null;
   lines: ExitPermitLine[];
@@ -175,6 +181,10 @@ export function PermitFormModal({
   stations: NamedLite[];
   projects: NamedLite[];
   trucks: TruckLite[];
+  // Names the operation half of `trucks` above. Built once in ConsumptionClient
+  // and passed down, so the picker and the permit rows that read the saved
+  // destination back cannot name the same vehicle differently.
+  vehicleTypeById: ReadonlyMap<string, VehicleType>;
   customers: NamedLite[];
   staff: NamedLite[];
   // Handed the freshly created draft so the PARENT can adopt it. Without
@@ -265,10 +275,14 @@ export function PermitFormModal({
     }, lots);
   }
 
+  // VEHICLES ARE NO LONGER FLATTENED INTO THIS LIST. The other three kinds are
+  // plain named rows; a vehicle is two kinds of thing that need a heading
+  // between them and a type beside the plate, neither of which survives a
+  // `{ id, name }` map. The select below branches once and renders the shared
+  // grouped component for the vehicle case.
   const destOptions: NamedLite[] =
     destKind === "water_station" ? stations
     : destKind === "project" ? projects
-    : destKind === "truck" ? trucks.map((t) => ({ id: t.id, name: t.plate }))
     : destKind === "customer" ? customers
     : [];
 
@@ -491,7 +505,14 @@ export function PermitFormModal({
           ) : (
             <select value={destId} onChange={(e) => setDestId(e.target.value)} className={INPUT} style={INPUT_STYLE}>
               <option value="">{t("consumption.modals.chooseOption", lang)}</option>
-              {destOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              {destKind === "truck" ? (
+                // Trucks first, operation vehicles under their own heading —
+                // the shared partition on its default order, the same one the
+                // Maintenance pickers use.
+                <VehicleOptGroups rows={trucks} typeById={vehicleTypeById} lang={lang} />
+              ) : (
+                destOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)
+              )}
             </select>
           )}
         </div>

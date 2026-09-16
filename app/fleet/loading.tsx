@@ -1,8 +1,26 @@
 /**
  * Fleet list route skeleton.
  *
- * Mirrors FleetClient: `space-y-5`, PageHeader, the 5-up KPI strip, the filter
- * bar, then the table card.
+ * Mirrors FleetClient: `space-y-5`, PageHeader, the TAB BAR, the 5-up KPI
+ * strip, the filter bar, then the table card.
+ *
+ * THE TAB BAR IS PART OF THE SKELETON, not scenery. 0201 split this page into
+ * Trucks and Operation Vehicles, and a skeleton that omits the bar lets the
+ * real page push the KPI strip, the filters and the whole table down by the
+ * bar's height the instant it arrives — a shift on every single Fleet load,
+ * which is the one thing a skeleton exists to prevent.
+ *
+ * IT DRAWS THE *TRUCKS* TAB'S BODY, unconditionally. `loading.tsx` is rendered
+ * by the router with no searchParams, so it cannot know whether the reader is
+ * heading for `?tab=operation`. Trucks is the fallback tab
+ * (lib/fleet-tabs.ts), so it is the right guess — and the two bodies share
+ * their shape anyway: header, strip, filter bar, table.
+ *
+ * NO ACTIVE-TAB UNDERLINE. The real bar paints the selected tab in
+ * `border-brand-600`, and a skeleton that guesses WHICH tab is selected is
+ * wrong half the time in a colour the eye reads as content. The container's
+ * own `border-b` is what holds the vertical space; the two blocks inside are
+ * grey like every other `.skel`.
  *
  * THE GRID CLASSES ARE THE PAGE'S OWN, NOT preview's `.skel-grid`. preview
  * ships a fixed 4-column skeleton grid because the demo used ONE skeleton for
@@ -44,6 +62,18 @@ export default function Loading() {
           className="skel"
           style={{ height: "2.35rem", width: "7rem", borderRadius: "var(--r-3)" }}
         />
+      </div>
+
+      {/* Tab bar — the container is FleetClient's own line for line, so the
+          rule under it lands at the same y the real one will. Each block is
+          the size of a tab's label inside its `px-4 py-2.5` button. */}
+      <div className="flex items-center gap-1 border-b flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
+        <div className="px-4 py-2.5">
+          <div className="skel skel-line" style={{ height: "1.25rem", width: "3.5rem", marginBottom: 0 }} />
+        </div>
+        <div className="px-4 py-2.5">
+          <div className="skel skel-line" style={{ height: "1.25rem", width: "7rem", marginBottom: 0 }} />
+        </div>
       </div>
 
       {/* KPI strip — 5, matching FleetClient exactly */}

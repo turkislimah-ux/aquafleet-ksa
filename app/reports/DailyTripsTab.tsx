@@ -51,6 +51,9 @@ import {
   DAILY_PERIODS, periodRange, buildProjectTables, deferredTotals, validateDeferred,
   type DailyPeriod, type Totals, type DeferredRow,
 } from "@/lib/daily-trips";
+import VehicleOptGroups from "@/components/VehicleOptGroups";
+import { LOCATION_GROUP_LABELS } from "@/lib/vehicle-groups";
+import { operationTypeName } from "@/lib/vehicle-types";
 import {
   fetchDailyTrips, createDeferredDelivery, updateDeferredDelivery, deleteDeferredDelivery,
   type DailyTripsData,
@@ -205,6 +208,26 @@ export default function DailyTripsTab(
     () => new Map((data?.trucks ?? []).map((tr) => [tr.id, tr.plate])),
     [data],
   );
+
+  // The type lookup behind an operation vehicle's name. The picker below and
+  // the manual-entries table both read it, so it is built once here rather than
+  // inside either of them. The PARTITION is not built here at all any more —
+  // lib/vehicle-groups.ts owns it for all four surfaces that need one.
+  const vehicleTypeById = useMemo(
+    () => new Map((data?.vehicleTypes ?? []).map((vt) => [vt.id, vt])),
+    [data],
+  );
+  // id -> the word for an operation vehicle's type, absent for a truck. Same
+  // helper the picker's options run through, so the table and the select cannot
+  // name the same vehicle two ways.
+  const truckTypeName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const tr of data?.trucks ?? []) {
+      const name = operationTypeName(tr, vehicleTypeById, lang);
+      if (name) m.set(tr.id, name);
+    }
+    return m;
+  }, [data, vehicleTypeById, lang]);
 
   // formatDayKeyLang, not formatDayKey: the day number and the year are figures
   // and stay Latin in both languages, but the month NAME is a word and follows
@@ -652,9 +675,20 @@ export default function DailyTripsTab(
                       style={INPUT_STYLE}
                     >
                       <option value="">{t("reports.daily.choose", lang)}</option>
-                      {(data?.trucks ?? []).map((t) => (
-                        <option key={t.id} value={t.id}>{t.plate}</option>
-                      ))}
+                      {/* THE ONE PICKER THAT LEADS WITH OPERATION VEHICLES, and
+                          the only caller of LOCATION_GROUP_LABELS. This log
+                          exists for work the project tables cannot hold — a
+                          crane's day, a diesel run — so here the yard fleet is
+                          the likely answer and "Other" is what the form has
+                          always called it. Everywhere else the same component
+                          is left on its trucks-first default. */}
+                      <VehicleOptGroups
+                        rows={data?.trucks ?? []}
+                        typeById={vehicleTypeById}
+                        lang={lang}
+                        order="operation-first"
+                        labels={LOCATION_GROUP_LABELS}
+                      />
                     </select>
                   </Field>
                   <Field label={t("reports.th.date", lang)}>
@@ -753,6 +787,15 @@ export default function DailyTripsTab(
                             tables above — see the note there. */}
                         <td className="px-3 py-2 text-start font-mono text-[12px]">
                           <span dir="ltr">{truckPlate.get(r.truck_id) ?? "—"}</span>
+                          {/* The type sits OUTSIDE the mono, LTR plate span:
+                              «ونش» inside a forced-LTR run of digits renders
+                              backwards next to its own punctuation. Trucks add
+                              nothing here — operationTypeName returns null. */}
+                          {truckTypeName.get(r.truck_id) && (
+                            <span className="ms-1.5 font-sans text-[11px] muted">
+                              {truckTypeName.get(r.truck_id)}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           {r.description ?? <span className="muted">—</span>}

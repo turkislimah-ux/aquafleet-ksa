@@ -51,6 +51,7 @@ import type {
   ArchiveStaffRow,
   ArchiveSubjectKind,
   ArchiveTruckRow,
+  VehicleType,
   ArchiveCustomerRow,
   ArchiveInvoiceRow,
   ArchiveProjectRow,
@@ -153,6 +154,7 @@ export default function ArchiveClient({
   staff,
   payouts,
   trucks,
+  vehicleTypes,
   workOrders,
   outsourcedJobs,
   customers,
@@ -172,6 +174,9 @@ export default function ArchiveClient({
   staff: ArchiveStaffRow[];
   payouts: CommPayout[];
   trucks: ArchiveTruckRow[];
+  // The lookup behind an operation vehicle's name. Passed straight through to
+  // the Truck tab, which builds the id -> row Map once for every surface on it.
+  vehicleTypes: VehicleType[];
   workOrders: ArchiveTruckTabWorkOrder[];
   outsourcedJobs: ArchiveTruckTabOutsourcedJob[];
   customers: ArchiveCustomerRow[];
@@ -754,6 +759,7 @@ export default function ArchiveClient({
             filesByDoc={filesByDoc}
             renewalsByDoc={renewalsByDoc}
             trucks={trucks}
+            vehicleTypes={vehicleTypes}
             types={types}
             workOrders={workOrders}
             outsourcedJobs={outsourcedJobs}
