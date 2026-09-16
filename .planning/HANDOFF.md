@@ -10,12 +10,12 @@
 - **LEDGER RECONCILE DONE (f2e6938).** Prod AND test 198 rows, 0001..0200
   (0135/0136 absent), 1:1 with files, verified live. Files = source of truth;
   `db push`/`db diff`/rebuild valid once linked. Repo UNLINKED = no push.
-- **SNAPSHOT DROP DRAFTED, NOT RUN (fb900fe).** Undo = prod table
+- **SNAPSHOT DROP DRAFTED, NOT RUN (fb900fe, notice 9eed78d).** Undo = prod
   `schema_migrations_backup_20260916`, 133 rows.
-  `drop-ledger-snapshot-2026-09-16.sql`: STEP 1 RAISES unless snapshot 133 +
-  live 198 intact; STEP 2 = Turki drops it, SQL Editor. The 7 bodies that
-  lived ONLY there are md5-exact in
-  `ledger-orphan-bodies-2026-09-16.sql` (580d42b) — drop costs only the undo.
+  `drop-ledger-snapshot-2026-09-16.sql`: STEP 1 ran GREEN on prod and is proven
+  able to RAISE; STEP 2 = Turki drops it, SQL Editor. The 7 bodies that lived
+  ONLY there are md5-exact in `ledger-orphan-bodies-2026-09-16.sql` (580d42b)
+  — drop costs only the undo.
 - **CARRIED:** leaked-password protection OFF in Supabase Auth.
 
 ## Rules
@@ -29,7 +29,7 @@
 - **ALL BUILDS COMPLETE** — write-off UI (bb44c90), Notifications, Settings,
   ATLAS, `--clearance` (0d0a655). Corpus = 114 sheets; a moved page count
   FAILS until `doc-a4-proof.mjs --update`.
-- **ARABIC DATES (1bb97ae).** UAX#9 W2: an Arabic month (class AL) re-types EN
+- **ARABIC DATES (1bb97ae).** UAX#9 W2: an Arabic month (AL) re-types EN
   digits to AN, so one isolate scrambles. Cure = TWO isolates
   (`isoUnit`). Measure per-character (`Range` x), never by screenshot.
 - **SHEETS (374825e, 2f3c031), argued at code sites:** isolate at the CELL not
