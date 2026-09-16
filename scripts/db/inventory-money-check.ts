@@ -329,7 +329,24 @@ async function main(): Promise<void> {
 
     const truck = (
       await c.query(
-        `insert into public.trucks (plate, status, active) values ('DBCHK-0001', 'idle', true) returning id`,
+        // CAPACITY IS NOT DECORATION ON THIS FIXTURE ANY MORE (0201).
+        // trucks_vehicle_class_shape_check refuses a vehicle_class = 'truck'
+        // row with a null capacity, and trucks_capacity_m3_consistent_check
+        // then forces capacity_m3 to agree with the pair. A truck this harness
+        // only ever hangs work orders off still has to be a legal truck.
+        //
+        // All three columns are written HERE rather than through
+        // lib/capacity.ts — which is the one writer for application code —
+        // because this harness talks to Postgres over `pg` directly and has no
+        // PostgREST, no server action and no session to route through. The
+        // AST guard (scripts/capacity-single-writer-check.mjs) scopes itself to
+        // object keys for exactly this reason: SQL text is not a write it can
+        // reason about, and pretending otherwise would make it unusable here.
+        //
+        // 18 m³ because that is a real size in the live fleet. A fixture that
+        // could not exist teaches the next reader the wrong shape.
+        `insert into public.trucks (plate, status, active, capacity_value, capacity_unit, capacity_m3)
+         values ('DBCHK-0001', 'idle', true, 18, 'm3', 18) returning id`,
       )
     ).rows[0].id;
 

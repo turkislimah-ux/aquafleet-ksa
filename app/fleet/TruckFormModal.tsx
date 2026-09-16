@@ -24,6 +24,7 @@ import { type OperationStation } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "./page";
 import { createTruck, updateTruck } from "./actions";
 import OperationStationField from "@/components/OperationStationField";
+import CapacityField from "@/components/CapacityField";
 import LinkedIdField from "@/components/LinkedIdField";
 import PlateInput from "@/components/PlateInput";
 import ScrollLock from "@/components/ScrollLock";
@@ -31,7 +32,11 @@ import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
 import { foldDigitsInPlace } from "@/lib/digits";
 
-const CAPACITY_OPTIONS_M3 = [33, 18, 6] as const;
+// CAPACITY_OPTIONS_M3 = [33, 18, 6] IS GONE, AND MUST NOT COME BACK (0201).
+// Those three sizes are the water fleet's, and the fleet is no longer only
+// water trucks: an operation vehicle's tank is whatever it is, stated in m³ or
+// in litres. Capacity is now a typed value + unit — components/CapacityField.
+// The three sizes survive as what operators actually type, not as a schema.
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -117,22 +122,7 @@ export default function TruckFormModal({
               style={INPUT_STYLE}
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">{t("common.capacity", lang)}</span>
-            <select
-              name="capacity_m3"
-              defaultValue={row?.capacity_m3 != null ? String(row.capacity_m3) : isEdit ? "" : "33"}
-              className={INPUT}
-              style={INPUT_STYLE}
-            >
-              <option value="">—</option>
-              {CAPACITY_OPTIONS_M3.map((c) => (
-                <option key={c} value={c}>
-                  {c} m³
-                </option>
-              ))}
-            </select>
-          </label>
+          <CapacityField defaultValue={row?.capacity_value ?? null} />
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">{t("fleet.form.odometerKm", lang)}</span>
             <input

@@ -222,12 +222,69 @@ export type DriverIncident = {
 
 export type TruckStatus = "active" | "idle" | "maintenance" | "out_of_service";
 
+// 0201. `trucks` stopped being a table of water trucks and became a table of
+// VEHICLES; this column says which kind a row is. Fixed at creation — the edit
+// form never offers it, and no action writes it on update, because every
+// class-specific rule downstream (driver assignment, utilization, trips,
+// projects) was decided when the row was made.
+//
+// 'operation' is the yard/support fleet: pickups, tractors, cranes. They are
+// NOT 'other' — that word is taken, by the `vehicle_types` row keyed 'other',
+// and two different "other"s one join apart is a bug waiting for a reader.
+export type VehicleClass = "truck" | "operation";
+
+// 0201. The unit a capacity is stated in. Mirrors trucks_capacity_unit_check.
+// Widening this means a migration first — see lib/capacity.ts, which is the one
+// place these become column values.
+export type CapacityUnit = "m3" | "l";
+
+// 0201 — the managed bilingual lookup behind `trucks.vehicle_type_id`. Same
+// model as violation_types (0175) / staff_roles (0011) / units (0049): `key` is
+// IMMUTABLE and a rename touches the labels only, both languages live ON the
+// row (never in lib/i18n.ts — scripts/i18n-lookup-single-source-check.mjs
+// enforces that), and retiring a type sets `active = false` rather than
+// deleting it, so vehicles already pointing at it keep resolving.
+//
+// NEVER hardcode a key from this table in application code. The seed keys
+// ('pickup', 'diesel_truck', 'tractor', 'crane', 'other') are data the operator
+// may rename or retire; a branch on one of them would be a behaviour that no
+// screen admits exists.
+export type VehicleType = {
+  id: string;
+  key: string;
+  label: string;
+  label_ar: string;
+  sort_order: number;
+  active: boolean;
+  created_at: string;
+};
+
 export type Truck = {
   id: string;
   plate: string;
   model: string | null;
   year: number | null;
+  /**
+   * LEGACY SPELLING OF CAPACITY, STILL LIVE, STILL READ EVERYWHERE. 0201 did
+   * not drop it — ten surfaces read it — but it is now DERIVED, not entered:
+   * the value when `capacity_unit = 'm3'`, and NULL otherwise, tied to the pair
+   * below by `trucks_capacity_m3_consistent_check`.
+   *
+   * lib/capacity.ts is the only code permitted to write it, and
+   * scripts/capacity-single-writer-check.mjs fails the test gate if that stops
+   * being true. Read it freely; never assign it.
+   */
   capacity_m3: number | null;
+  // 0201 — capacity as entered, and the unit it was entered in. Mandatory for a
+  // truck (m³ by rule), optional and either-unit for an operation vehicle.
+  capacity_value: number | null;
+  capacity_unit: CapacityUnit;
+  // 0201 — which kind of vehicle this row is, and (operation only) which kind
+  // of operation vehicle. A truck carries a NULL vehicle_type_id and an
+  // operation vehicle must carry one; trucks_vehicle_class_shape_check refuses
+  // any other combination.
+  vehicle_class: VehicleClass;
+  vehicle_type_id: string | null;
   status: TruckStatus;
   // FK -> operation_stations.id (migration 0022; nullable, on delete set null).
   home_station: string | null;

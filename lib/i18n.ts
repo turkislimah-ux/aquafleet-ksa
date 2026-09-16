@@ -174,6 +174,24 @@ export const dict = {
     // would misdescribe itself the first time the Dashboard called it.
     na: { en: "N/A", ar: "غير متاح" },
     capacity: { en: "Capacity", ar: "السعة" },
+    // UNIT SYMBOLS STAY LATIN IN BOTH LANGUAGES, and that is a decision, not an
+    // untranslated string. Two reasons, in order of weight:
+    //
+    //   1. The four surfaces that already RENDER a capacity — the Fleet list,
+    //      the Fleet detail stat and summary, and the Archive truck card — print
+    //      a hardcoded "m³" in Arabic today. Translating the symbol only in the
+    //      form would put «م³» in the input and `m³` in the table for the same
+    //      truck on the same screen.
+    //   2. This namespace already rules on exactly this: `fleet.form.odometerKm`
+    //      carries the note "`km` stays Latin". A unit symbol is closer to an
+    //      identifier than to prose — see lib/digits.ts on that boundary.
+    //
+    // They live in the dictionary anyway rather than as literals, so the day
+    // that ruling is revisited it is revisited in ONE place.
+    capacityUnit: {
+      m3: { en: "m³", ar: "m³" },
+      l: { en: "L", ar: "L" },
+    },
     // Counted noun, so it cannot be one bare word: Arabic inflects across four
     // buckets and English still needs the singular. Both consumers pass a
     // number, so there is no caller that wants the uncounted word.

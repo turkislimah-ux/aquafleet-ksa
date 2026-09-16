@@ -20,7 +20,8 @@
     "test:pages": "npm run doc:render && node scripts/doc-a4-proof.mjs",
     "doc:clearance": "npm run doc:render && node scripts/doc-a4-proof.mjs --clearance",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run typecheck && npm run test:money && npm run test:copy && npm run test:sheets"
+    "test:guards": "node scripts/capacity-single-writer-check.mjs",
+    "test": "npm run typecheck && npm run test:money && npm run test:copy && npm run test:guards && npm run test:sheets"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

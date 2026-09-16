@@ -53,8 +53,9 @@ begin
   -- -------------------------------------------------------------------------
   insert into public.drivers (name, terminated_at)
        values ('ZZ scratch live wo ' || v_tag, null) returning id into v_driver;
-  insert into public.trucks (plate, assigned_driver_id, driver_before_maintenance)
-       values ('ZZ-WO-1-' || v_tag, null, v_driver) returning id into v_truck;
+  insert into public.trucks (plate, assigned_driver_id, driver_before_maintenance,
+                            capacity_value, capacity_unit, capacity_m3)
+       values ('ZZ-WO-1-' || v_tag, null, v_driver, 18, 'm3', 18) returning id into v_truck;
   insert into public.work_orders
          (wo_number, truck_id, type, priority, title, title_ar, due_by,
           assigned_mechanic_id, status, inventory_deducted_at)
@@ -84,8 +85,9 @@ begin
   -- -------------------------------------------------------------------------
   insert into public.drivers (name, terminated_at)
        values ('ZZ scratch term wo ' || v_tag, now()) returning id into v_driver;
-  insert into public.trucks (plate, assigned_driver_id, driver_before_maintenance)
-       values ('ZZ-WO-2-' || v_tag, null, v_driver) returning id into v_truck;
+  insert into public.trucks (plate, assigned_driver_id, driver_before_maintenance,
+                            capacity_value, capacity_unit, capacity_m3)
+       values ('ZZ-WO-2-' || v_tag, null, v_driver, 18, 'm3', 18) returning id into v_truck;
   insert into public.work_orders
          (wo_number, truck_id, type, priority, title, title_ar, due_by,
           assigned_mechanic_id, status, inventory_deducted_at)
@@ -114,8 +116,9 @@ begin
   -- -------------------------------------------------------------------------
   insert into public.drivers (name, terminated_at)
        values ('ZZ scratch live oj ' || v_tag, null) returning id into v_driver;
-  insert into public.trucks (plate, assigned_driver_id, driver_before_maintenance)
-       values ('ZZ-OJ-1-' || v_tag, null, v_driver) returning id into v_truck;
+  insert into public.trucks (plate, assigned_driver_id, driver_before_maintenance,
+                            capacity_value, capacity_unit, capacity_m3)
+       values ('ZZ-OJ-1-' || v_tag, null, v_driver, 18, 'm3', 18) returning id into v_truck;
   insert into public.outsourced_jobs
          (os_number, truck_id, responsible_mechanic_id, type, title, title_ar,
           start_date, estimated_finish, status)
@@ -144,8 +147,9 @@ begin
   -- -------------------------------------------------------------------------
   insert into public.drivers (name, terminated_at)
        values ('ZZ scratch term oj ' || v_tag, now()) returning id into v_driver;
-  insert into public.trucks (plate, assigned_driver_id, driver_before_maintenance)
-       values ('ZZ-OJ-2-' || v_tag, null, v_driver) returning id into v_truck;
+  insert into public.trucks (plate, assigned_driver_id, driver_before_maintenance,
+                            capacity_value, capacity_unit, capacity_m3)
+       values ('ZZ-OJ-2-' || v_tag, null, v_driver, 18, 'm3', 18) returning id into v_truck;
   insert into public.outsourced_jobs
          (os_number, truck_id, responsible_mechanic_id, type, title, title_ar,
           start_date, estimated_finish, status)

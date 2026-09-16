@@ -16,6 +16,7 @@ import { driverAvailability, resolveOnLeaveToday } from "@/lib/driver-assignment
 import type { LeavePeriod } from "@/lib/leave";
 import { todayKey } from "@/lib/utils";
 import { toLatinDigits } from "@/lib/digits";
+import { capacityColumns } from "@/lib/capacity";
 
 export type ActionResult = { error: string | null };
 
@@ -54,6 +55,27 @@ function idText(v: FormDataEntryValue | null) {
   return toLatinDigits(nullable(v));
 }
 
+// 0201 refuses a capacity that disagrees with its unit (23514,
+// trucks_capacity_m3_consistent_check) and a vehicle whose class, unit, type
+// and driver do not line up (23514, trucks_vehicle_class_shape_check). Both are
+// reachable from these two actions, and both arrive as the same SQLSTATE, so
+// they are told apart by name rather than by code.
+//
+// These sentences describe what the OPERATOR did, not what Postgres refused.
+// Neither is expected in normal use — lib/capacity.ts derives the triple and
+// the form marks capacity required — so seeing one means a form and a
+// constraint have drifted apart, and the message has to be enough to say which.
+function capacityConstraintMessage(error: { code?: string; message: string }): string | null {
+  if (error.code !== "23514") return null;
+  if (error.message.includes("trucks_capacity_m3_consistent_check")) {
+    return "Capacity could not be saved: the value and its unit disagree. Reload the page and try again.";
+  }
+  if (error.message.includes("trucks_vehicle_class_shape_check")) {
+    return "Capacity is required for a truck, and must be in cubic metres.";
+  }
+  return null;
+}
+
 // Free this driver from any OTHER truck before placing them, so the unique
 // index never sees the driver on two trucks at once.
 //
@@ -79,7 +101,16 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
     plate,
     model: nullable(formData.get("model")),
     year: numOrNull(formData.get("year")),
-    capacity_m3: numOrNull(formData.get("capacity_m3")),
+    // CAPACITY IS THREE COLUMNS AND THEY ARE BUILT IN ONE PLACE (0201). This
+    // form is the water-truck form, so the class is the literal "truck" rather
+    // than a posted field — which is also what forces the unit to m³ inside the
+    // helper, whatever the form sent. The Operation Vehicles tab passes
+    // "operation" here instead; nothing else about this call changes.
+    ...capacityColumns({
+      vehicleClass: "truck",
+      rawValue: formData.get("capacity_value"),
+      rawUnit: formData.get("capacity_unit"),
+    }),
     // status is a fixed literal, not read from the form — Auto Truck-Status
     // Phase 2a removed the manual status control entirely (lib/truck-
     // status.ts derives it fresh at every read instead). This column is
@@ -115,6 +146,8 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
   if (error) {
     // 23505 = unique_violation — the case-insensitive plate index (0005).
     if (error.code === "23505") return { error: `Plate "${plate}" already exists.` };
+    const capacityMsg = capacityConstraintMessage(error);
+    if (capacityMsg) return { error: capacityMsg };
     return { error: error.message };
   }
 
@@ -138,11 +171,31 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
   // is now fully derived (lib/truck-status.ts, Auto Truck-Status Phase 2a).
   // Neither field is in the Edit form anymore, and this action must not
   // silently overwrite either just because the form no longer submits them.
+  const supabase = createClient();
+
+  // THE CLASS IS READ FROM THE ROW, NEVER FROM THE FORM (0201). vehicle_class
+  // is fixed at creation and the edit form does not offer it, so trusting a
+  // posted value here would be trusting a field that is not supposed to exist —
+  // and getting it wrong is not a cosmetic error: the helper FORCES m³ for a
+  // truck, so an operation vehicle mis-read as a truck would have its litre
+  // capacity silently restated as cubic metres and copied into capacity_m3,
+  // where every existing m³ reader would believe it.
+  //
+  // Fails closed. An unreadable class is not a truck; it is a refusal.
+  const classRes = await supabase.from("trucks").select("vehicle_class").eq("id", id).maybeSingle();
+  if (classRes.error) return { error: "Could not read this vehicle. Nothing was changed — please try again." };
+  if (!classRes.data) return { error: "That vehicle no longer exists." };
+  const vehicleClass = classRes.data.vehicle_class === "operation" ? "operation" : "truck";
+
   const row = {
     plate,
     model: nullable(formData.get("model")),
     year: numOrNull(formData.get("year")),
-    capacity_m3: numOrNull(formData.get("capacity_m3")),
+    ...capacityColumns({
+      vehicleClass,
+      rawValue: formData.get("capacity_value"),
+      rawUnit: formData.get("capacity_unit"),
+    }),
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
     vin: idText(formData.get("vin")),
@@ -156,10 +209,11 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
     // as the note this file already carries above about last_service_date.
   };
 
-  const supabase = createClient();
   const { error } = await supabase.from("trucks").update(row).eq("id", id);
   if (error) {
     if (error.code === "23505") return { error: `Plate "${plate}" already exists.` };
+    const capacityMsg = capacityConstraintMessage(error);
+    if (capacityMsg) return { error: capacityMsg };
     return { error: error.message };
   }
 
