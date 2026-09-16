@@ -1734,30 +1734,44 @@ commit;
 --      closed write-off month
 --   8. negative control: write-off + reversal nets to exactly zero, all time
 --
--- HOW TO READ THE RESULT — READ THIS BEFORE YOU PANIC AT THE WORD "ERROR".
+-- HOW TO READ THE RESULT.
 --
--- THIS BLOCK ALWAYS ENDS IN AN EXCEPTION. THAT IS BY DESIGN, AND A PASS LOOKS
--- LIKE ONE. Two problems force it, and one mechanism solves both:
+-- THIS BLOCK EXITS 0 ON SUCCESS. It raises ONLY when a claim actually fails.
 --
---   1. Supabase's SQL tooling — and the MCP execute_sql / apply_migration
---      calls in particular — do NOT surface RAISE NOTICE, and generally hand
---      back only the LAST statement's rows. A plain `select` before a
---      `rollback;` can therefore come back empty, making a silent success
---      indistinguishable from "the block never ran".
---   2. More seriously: if any caller wrapped this in its own transaction and
---      swallowed the `rollback;` below, the verification's writes would COMMIT
---      — inventing a real write-off, on production, out of a test.
+-- It did not always. Until the 2026-09-16 ledger reconcile it raised on success
+-- too, as a deliberate "success signal". That cost more than it bought: because
+-- the raise was unconditional, `supabase db reset` and `supabase db push`
+-- exited 1 against a PERFECTLY HEALTHY database, so the migration set could
+-- never be used as a repeatable green/red gate. Proven in the Phase-1 replay:
+-- 197 of 198 files applied unattended and this one still failed the run.
 --
--- Raising deliberately fixes both: an exception is always surfaced verbatim,
--- and it guarantees the transaction is discarded no matter who wrapped it.
+-- The two problems the old raise solved, and what carries them now:
 --
---   ERROR "0200 VERIFY PASSED — 11/11 claims proved ..."   -> PASS. The DETAIL
---     field lists all eleven. Nothing was written. This is the success case.
---   ERROR "FAIL <n>: ..."                                  -> a real failure,
---     and the message names the claim that broke.
---   ERROR "No exited returnable permit ..."                -> no subject data.
---   anything else, or no error at all                      -> it did not run.
---     Do not record a pass.
+--   1. NOTICES ARE HIDDEN by Supabase's SQL tooling and by MCP execute_sql, so
+--      a silent pass used to be indistinguishable from "it never ran".
+--      NOW: the EXIT CODE is the signal. 0 = every claim proved (or SKIPPED,
+--      named as such). Non-zero = the message names the claim that broke.
+--      That is precisely what a gate needs, and it is machine-readable.
+--   2. If a caller wrapped this in its own transaction and swallowed the
+--      `rollback;` below, the verification writes would COMMIT — inventing a
+--      real write-off, on production, out of a test.
+--      NOW: `rollback;` still discards the work, and the ASSERTION ADDED AFTER
+--      IT re-reads the tables and RAISES if any verification row survived.
+--
+-- BE CLEAR ABOUT THE TRADE. Point 2 moves from PREVENTION to DETECTION: the old
+-- raise made persistence impossible, the new assertion makes it impossible to go
+-- unnoticed. That is a real, deliberate reduction in guarantee, accepted so the
+-- file set can be a gate. The assertion is not decoration — to watch it fire,
+-- comment out the `rollback;` and run it.
+--
+--   exit 0, NOTICE "0200 VERIFY PASSED — 11/11 ..."  -> PASS, nothing written.
+--   exit 0, NOTICE "0200 VERIFY SKIPPED — ..."       -> no subject data on this
+--     database (a fresh `db reset` has none). The claims were NOT proved here.
+--     Do not record a pass. Re-run against a database that has exit permits.
+--   ERROR "FAIL <n>: ..."                            -> a real failure, and the
+--     message names the claim that broke.
+--   ERROR "FAIL PERSISTENCE: ..."                    -> the rollback did not
+--     take and a verification write-off is sitting in the table. DELETE IT.
 -- ===========================================================================
 begin;
 
@@ -1811,7 +1825,12 @@ begin
    order by (e.ep_number = 'EP-26-0004') desc, e.exited_at
    limit 1;
   if v_ep is null then
-    raise exception 'No exited returnable permit with outstanding lines — nothing to verify against.';
+    -- An empty database is not a broken one. A fresh `supabase db reset` has
+    -- no exit permits, and failing the whole migration run for that made the
+    -- file set unusable as a gate. Report honestly and stop: SKIPPED is not a
+    -- pass, and the header says so.
+    raise notice '0200 VERIFY SKIPPED — no exited returnable permit with outstanding lines on this database, so the eleven claims were NOT proved here. This is not a pass. Re-run against a database that carries exit-permit data.';
+    return;
   end if;
 
   select jsonb_agg(jsonb_build_object('line_id', el.id,
@@ -2025,9 +2044,9 @@ begin
   raise notice 'AFTER   exit-month %  write-off-month %  reversal-month %', a_exit, a_wo, a_rev;
 
   -- ---- REPORT, AND THROW THE WORK AWAY ----------------------------------
-  -- See the header. This raise IS the pass. It carries the eleven proofs out
-  -- through tooling that hides NOTICEs, and it discards the transaction even
-  -- if the caller ignored the `rollback;` below.
+  -- The completeness check below is the one that matters: a block that proved
+  -- only nine claims and exited 0 would be worse than one that failed loudly.
+  -- It still RAISES, because that is a real failure.
   select string_agg(format('%s. %s  ->  %s', seq, claim, result), E'\n' order by seq)
     into v_summary from _wo_verify;
   select count(*) into v_n from _wo_verify;
@@ -2036,15 +2055,50 @@ begin
       v_n, coalesce(v_summary, '(none)');
   end if;
 
-  raise exception using
-    message = format('0200 VERIFY PASSED — 11/11 claims proved on %s (write-off %s SAR). NOTHING WAS WRITTEN.',
-                     v_ep_number, v_amount),
-    detail  = v_summary,
-    hint    = 'This exception is the SUCCESS signal, not a failure. It exists so the result survives tools that hide NOTICEs, and so the verification transaction is discarded no matter who wrapped it. A real failure says FAIL.';
+  -- Success is a NOTICE, not an exception: see the header. The exit code is the
+  -- signal now. The `rollback;` below discards the work, and the assertion
+  -- after it proves the rollback took.
+  raise notice E'0200 VERIFY PASSED — 11/11 claims proved on % (write-off % SAR). NOTHING WAS WRITTEN.\n%',
+    v_ep_number, v_amount, v_summary;
 end $verify$;
 
--- Belt and braces: the raise above already discarded everything.
+-- This is now the ONLY thing standing between the verification writes and the
+-- table, so it is no longer "belt and braces". The assertion below checks it.
 rollback;
+
+-- ===========================================================================
+-- 10b. THE ROLLBACK ACTUALLY TOOK — ASSERTED, NOT ASSUMED.
+--
+-- Runs OUTSIDE the verification transaction, so it reads committed state. Every
+-- write the block makes is stamped with the actor 'migration-0200-verify', so
+-- a single surviving row is detectable and nameable. To see this fire, comment
+-- out the `rollback;` above and run the section again.
+-- ===========================================================================
+do $persistence$
+declare
+  v_wo   int;
+  v_line int;
+begin
+  select count(*) into v_wo
+    from public.exit_permit_write_offs
+   where written_off_by = 'migration-0200-verify'
+      or reversed_by    = 'migration-0200-verify';
+
+  select count(*) into v_line
+    from public.exit_permit_line_consumptions c
+    join public.exit_permit_write_off_lines wl on wl.id = c.write_off_line_id
+    join public.exit_permit_write_offs w on w.id = wl.exit_permit_write_off_id
+   where w.written_off_by = 'migration-0200-verify'
+      or w.reversed_by    = 'migration-0200-verify';
+
+  if v_wo <> 0 or v_line <> 0 then
+    raise exception
+      'FAIL PERSISTENCE: the verification did NOT roll back. % write-off header(s) and % ledger row(s) stamped migration-0200-verify are sitting in the tables. They are fabricated and must be deleted: delete from public.exit_permit_write_offs where written_off_by = ''migration-0200-verify'' or reversed_by = ''migration-0200-verify'';',
+      v_wo, v_line;
+  end if;
+
+  raise notice '0200 PERSISTENCE ASSERTED — 0 write-off headers and 0 ledger rows stamped migration-0200-verify survive. The verification wrote nothing.';
+end $persistence$;
 
 -- ---------------------------------------------------------------------------
 -- 11. THE TWO NUMBERS TURKI ASKED FOR — read-only, safe to run any time.
