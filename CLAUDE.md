@@ -104,6 +104,8 @@ Loading every skill at once wastes context and has crashed sessions.
 - **Stage with single-line `git add`, then `git status`** before committing.
 - **Inspect staged blob, not working tree.** `git show :<path>` reads what
   would be committed.
+- **Shell stays at repo root.** Never cd out of the repo; use subshells or
+  absolute paths. npm test refuses to run elsewhere.
 - **Verify migration files on disk** before running in Supabase.
 - **Code-then-migrate** for breaking schema changes.
 - **Turki verifies in-browser before every commit.**
