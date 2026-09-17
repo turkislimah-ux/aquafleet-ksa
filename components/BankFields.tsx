@@ -22,13 +22,18 @@
 // `dir` is forced LTR so "SA03…" never reorders in Arabic mode. Note the live
 // message cannot BLOCK submission from in here — each form's onSubmit runs the
 // same check as a gate before calling its action.
+//
+// TWO messages, two colours, two rules (Turki's 2026-09-17 ruling): the SHAPE
+// error (rose) mirrors the DB constraint and the forms gate on it; the mod-97
+// CHECKSUM warning (amber) never blocks — save stays enabled, the server
+// action never runs it. Asked only after shape passes, so they cannot stack.
 
 import { useState } from "react";
 import type { BankCode } from "@/lib/db-types";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
 import { toLatinDigits } from "@/lib/digits";
-import { normalizeIban, isValidSaIban } from "@/lib/iban";
+import { normalizeIban, isValidSaIban, ibanChecksumOk } from "@/lib/iban";
 import { bankLabel } from "@/lib/bank-codes";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -57,6 +62,9 @@ export default function BankFields({
   // pastes from the bank's own formatting are not an error, stripped on save.
   const normalized = normalizeIban(iban);
   const ibanInvalid = normalized !== "" && !isValidSaIban(normalized);
+  // Checksum asked only once the shape is right — a short or malformed entry
+  // gets ONE message (the blocking one), not two.
+  const ibanChecksumWarn = normalized !== "" && !ibanInvalid && !ibanChecksumOk(normalized);
 
   return (
     <>
@@ -97,6 +105,11 @@ export default function BankFields({
         {ibanInvalid && (
           <span className="text-xs text-rose-600 dark:text-rose-400">
             {t("shared.bank.ibanInvalid", lang)}
+          </span>
+        )}
+        {ibanChecksumWarn && (
+          <span className="text-xs text-amber-600 dark:text-amber-400">
+            {t("shared.bank.ibanChecksumWarn", lang)}
           </span>
         )}
       </label>

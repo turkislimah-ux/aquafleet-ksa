@@ -70,8 +70,10 @@ function ibanOrNull(v: FormDataEntryValue | null): string | null {
   return s === null ? null : normalizeIban(s);
 }
 // True when the row carries an IBAN that fails the SA + 22 digits shape — the
-// same rule the DB constraint enforces, and the WHOLE rule (no checksum, by
-// Turki's ruling — lib/iban.ts's header carries it). The form already
+// same rule the DB constraint enforces, and the ONLY rule the server applies.
+// The mod-97 checksum is a client-side WARNING only, by Turki's 2026-09-17
+// ruling (lib/iban.ts's header carries it) — never enforced here, and
+// scripts/iban-check.ts asserts this file stays that way. The form already
 // validates (lib/iban.ts, same functions) as a courtesy; this is the server
 // saying the constraint's own message instead of surfacing a raw 23514.
 function invalidIban(row: { iban: string | null }): boolean {

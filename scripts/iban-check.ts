@@ -15,16 +15,22 @@
 //      strip (Turki's 2026-09-17 ruling added the dashes — banks print
 //      "SA03-8000-…" and that spelling MUST pass). Drop a separator from the
 //      regex and the same account stores two ways; it shows up here first.
-//   2. NO CHECKSUM, BY RULING (2026-09-17, mirroring the 2026-09-05 one on
-//      lib/bankAccounts.ts — the COMPANY module, deliberately separate and
-//      deliberately looser). The mod-97 tripwire below reads like a bug on
-//      purpose: a transposed digit is shape-valid and must be ACCEPTED, so
-//      re-adding a checksum fails HERE instead of quietly re-breaking the form.
+//   2. SHAPE HARD, CHECKSUM WARNS — Turki's 2026-09-17 ruling, an explicit
+//      choice (the COMPANY module, lib/bankAccounts.ts, is deliberately
+//      separate and has no checksum at all). The mod-97 verdict
+//      (ibanChecksumOk) may WARN but never BLOCK: a transposed digit must
+//      still be ACCEPTED by isValidSaIban, must be CAUGHT by ibanChecksumOk,
+//      and the server action must never call ibanChecksumOk. All three
+//      halves are asserted below, so wiring the checksum into a gate fails
+//      HERE instead of quietly re-breaking the form.
 //
 // Several cases are NEGATIVE CONTROLS asserting the shape guard can actually
 // fail — a green run means the guard ran, not that it was removed.
 
-import { normalizeIban, isValidSaIban } from "../lib/iban";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { normalizeIban, isValidSaIban, ibanChecksumOk } from "../lib/iban";
 
 let failures = 0;
 function check(name: string, got: unknown, want: unknown) {
@@ -64,12 +70,26 @@ check("SA + 22 digits accepted", isValidSaIban(IBAN), true);
 check("dashed paste passes the FULL round trip", isValidSaIban(normalizeIban("SA03-8000-0000-6080-1016-7519")), true);
 check("spaced paste passes the FULL round trip", isValidSaIban(normalizeIban("sa03 8000 0000 6080 1016 7519")), true);
 
-// ---- THE TRIPWIRE. These two READ LIKE BUGS. They are the ruling. ----
-// No banking system sits behind this field, so mod-97 cannot confirm an
-// account exists — it can only reject an operator copying a real number off
-// the driver's own statement. Re-add a checksum and these go red.
-check("TRANSPOSED digit ACCEPTED (no checksum — re-adding one fails HERE)", isValidSaIban("SA0380000000608010167591"), true);
-check("altered digit ACCEPTED (no checksum)", isValidSaIban("SA0480000000608010167519"), true);
+// ---- THE RULING (2026-09-17): shape HARD, checksum WARNS, never blocks. ----
+// (a) A transposed digit is shape-valid and must still be ACCEPTED by the
+//     gate — wire the checksum into isValidSaIban and this goes red first.
+check("TRANSPOSED digit still ACCEPTED by the shape gate (checksum never blocks)", isValidSaIban("SA0380000000608010167591"), true);
+check("altered digit still ACCEPTED by the shape gate", isValidSaIban("SA0480000000608010167519"), true);
+// (b) The same numbers must be CAUGHT by the warning verdict — and the real
+//     IBAN must pass it, or the warning would cry wolf on every save.
+check("…but ibanChecksumOk CATCHES the transposition (mod-97 fails)", ibanChecksumOk("SA0380000000608010167591"), false);
+check("…and the altered digit too", ibanChecksumOk("SA0480000000608010167519"), false);
+check("real SA IBAN PASSES the checksum (warning stays silent)", ibanChecksumOk(IBAN), true);
+// (c) THE WARNING STAYS OUT OF THE BOUNDARY — asserted structurally: the
+//     server action file must not mention ibanChecksumOk at all. The action
+//     blocks on SHAPE only (the DB constraint's own rule); the paired
+//     positive control proves the grep read the real file, not an empty one.
+const actionSrc = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "../app/drivers/actions.ts"),
+  "utf8",
+);
+check("server action never calls ibanChecksumOk (warn-not-block, structural)", actionSrc.includes("ibanChecksumOk"), false);
+check("…while the same file DOES gate on shape (grep read the real action)", actionSrc.includes("isValidSaIban"), true);
 
 // ---- NEGATIVE CONTROLS — proof the shape guard still fires at all. ----
 check("21 digits rejected (short)", isValidSaIban("SA038000000060801016751"), false);

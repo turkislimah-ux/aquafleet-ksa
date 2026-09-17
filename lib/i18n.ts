@@ -978,6 +978,13 @@ export const dict = {
         en: "IBAN must be SA followed by 22 digits.",
         ar: "يجب أن يكون الآيبان SA متبوعًا بـ 22 رقمًا.",
       },
+      // WARNING, not an error — the voice of lib/iban.ts's ibanChecksumOk.
+      // Shown when the shape is right but the mod-97 check digits disagree;
+      // save stays enabled (Turki's 2026-09-17 warn-not-block ruling).
+      ibanChecksumWarn: {
+        en: "The digits do not pass the IBAN check — verify against the bank statement before saving.",
+        ar: "الأرقام لا تجتاز فحص الآيبان — تحقّق من كشف الحساب البنكي قبل الحفظ.",
+      },
     },
 
     // OperationStationField (the picker section) and OperationStationsModal
