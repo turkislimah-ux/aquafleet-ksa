@@ -4093,6 +4093,18 @@ export const dict = {
       // literal, which would print English prose on the Arabic sheet.
       printNoItems: { en: "No items on this permit.", ar: "لا توجد أصناف في هذا الإذن." },
       printGenerated: { en: "Generated {date}", ar: "أُنشئ في {date}" },
+      // --- EMPLOYEE DECLARATION (Turki's 2026-09-18 directive) ---
+      // PRINT-ONLY, on every permit regardless of kind: the attestation printed
+      // as part of the signature section, above the rules. The screen
+      // deliberately does not carry it — the one sanctioned deviation from the
+      // sheet's mirror law (recorded in lib/docvm/exitPermit.ts). WORDING IS
+      // FIXED, set by Turki verbatim in both languages; do not edit
+      // editorially.
+      printDeclarationTitle: { en: "Employee Declaration", ar: "إقرار الموظف" },
+      printDeclarationBody: {
+        en: "I, the employee whose details appear above, acknowledge that I have received the custody items listed in this form, and I undertake to safeguard them, to use them for work purposes only, not to hand them over to others without approval, to report any loss, damage or malfunction to management, and to return them upon request or upon the end of the employment relationship, in accordance with the establishment's regulations and instructions.",
+        ar: "أقر أنا الموظف الموضحة بياناتي أعلاه بأنني استلمت العهدة المبينة في هذا النموذج، وأتعهد بالمحافظة عليها واستخدامها لأغراض العمل، وعدم تسليمها للغير دون موافقة، وإبلاغ الإدارة عن أي فقدان أو تلف أو عطل، وإعادتها عند الطلب أو عند انتهاء العلاقة الوظيفية وفقاً لأنظمة وتعليمات المنشأة.",
+      },
     },
   },
 

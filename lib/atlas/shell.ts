@@ -287,6 +287,10 @@ export const ATLAS_CSS = `
   body.compact td { padding: 6px 0; }
   body.compact .signs { margin-top: 20px; gap: 26px; }
   body.compact .sign-line { margin-top: 26px; }
+  /* The declaration wrapper takes the compact top margin INSTEAD of the .signs
+     inside it (zeroed above), so the section moves as one piece. */
+  body.compact .sign-sec { margin-top: 20px; }
+  body.compact .sign-sec .signs { margin-top: 0; }
 
   /* ---------- THE GRID ----------
      The single vertical the whole page is built on. grid-template-columns is
@@ -859,6 +863,29 @@ export const ATLAS_CSS = `
   .signs > div { flex: 1; }
   .sign-line { border-top: var(--rule-mid) solid var(--ink); margin-top: 34px; padding-top: 6px; }
   .sign-sub { font-size: 7.5px; color: var(--mid); margin-top: 3px; }
+
+  /* ---------- SIGNATURE DECLARATION ----------
+     The attestation the signer signs against, printed as PART of the signature
+     section (see signatures() in blocks.ts). The WRAPPER owns the break rule:
+     the paragraph and the rules beneath it are one legal unit and may never
+     land on different pages. The section opens with the same mid rule the
+     sign-lines close with, so the zone reads as one framed device.
+
+     INK, not --mid: a declaration is content the signer attests to, not a
+     caveat — it must survive a photocopy the way the signatures must.
+
+     The Arabic paragraph takes its own size: the Latin 8px prose body sits
+     below the 8.4px Arabic legibility floor (the typography law above), and an
+     attestation is the last text on the sheet that may go sub-legible. No
+     letter-spacing anywhere near it, per the same law. The title is a .lbl and
+     gets the Arabic label system for free; the top rule already frames the
+     block, so it takes no second rule of its own. */
+  .sign-sec { break-inside: avoid; margin-top: 26px; }
+  .sign-sec .signs { margin-top: 0; }
+  .sign-declare { border-top: var(--rule-mid) solid var(--ink); padding-top: 8px; }
+  .sign-declare .lbl { margin-bottom: 5px; color: var(--ink); }
+  .sign-declare p { margin: 0; font-size: 8px; line-height: 1.75; color: var(--ink); }
+  html[lang="ar"] .sign-declare p { font-size: 9.4px; line-height: 1.8; }
 
   /* ---------- CHARTS ---------- */
   .chart { break-inside: avoid; margin-top: 2px; }

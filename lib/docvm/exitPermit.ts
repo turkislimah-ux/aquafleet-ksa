@@ -14,6 +14,14 @@
 // `no-print`, so unlike the purchase order there is no "what survives the print
 // stylesheet" question to answer here. Everything it shows, this says.
 //
+// ONE SANCTIONED ADDITION BEYOND THE MIRROR (Turki's 2026-09-18 directive):
+// the EMPLOYEE DECLARATION, printed as part of the signature section on EVERY
+// permit, whatever its kind. The screen deliberately does not carry it — the
+// attestation exists for the signed paper copy, not the modal — so this is
+// print-only content ON TOP of the mirror, not a deviation within it. Its
+// wording is fixed i18n leaves (printDeclarationTitle/-Body), set by Turki
+// verbatim; nothing here composes or abridges it.
+//
 // IT IS NOT A PURCHASE ORDER, AND THE THREE DIFFERENCES ARE ALL DELIBERATE:
 //
 // 1. NO LETTERHEAD. A purchase order leaves the building and instructs a third
@@ -213,6 +221,10 @@ export type ExitPermitDocVm = {
   writtenOff: string | null;
   /** "Internal value at FIFO cost: 1,240 SAR". */
   internalValue: string;
+  /** The employee declaration — PART of the signature section, printed above
+   *  the rules (the header's sanctioned print-only addition). Present on every
+   *  permit; the renderer may not drop or reorder it. */
+  declaration: { title: string; body: string };
   /** Issued by / Received by / Gate — three rules to sign on. */
   signatures: readonly string[];
   footer: readonly string[];
@@ -401,6 +413,10 @@ export function buildExitPermitVm(input: ExitPermitDocInput): ExitPermitDocVm {
     internalValue: fill(t("consumption.modals.printInternalValue", lang), {
       v: formatSar(totalValue),
     }),
+    declaration: {
+      title: t("consumption.modals.printDeclarationTitle", lang),
+      body: t("consumption.modals.printDeclarationBody", lang),
+    },
     signatures,
     footer: [fill(t("consumption.modals.printGenerated", lang), { date: generated }), COMPANY],
   };

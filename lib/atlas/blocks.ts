@@ -1357,15 +1357,28 @@ export function mark(label: string, on: boolean): string {
 
 export type SignItem = { label: string; sub?: string };
 
+/** An attestation printed as PART of the signature section, directly above the
+ *  rules — the oldest device on a paper form: the paragraph the signer signs
+ *  against. A slot on signatures() rather than a block of its own, so the
+ *  paragraph and its rules can never be paginated apart — an attestation on
+ *  one page and its signatures on the next is two half-documents. */
+export type SignDeclaration = { title: string; body: string };
+
 /**
  * Rules to sign ON, with the label BENEATH each.
  *
  * Beneath, not above: above the rule the label shares space with the signature
  * and the signature wins, which is how a signed form ends up unreadable. The
  * height above each rule is fixed so a hand has room whatever the label says.
+ *
+ * With a `declaration`, the whole section wraps in `.sign-sec` (which owns the
+ * break rule) and the attestation prints first. Without one, the markup is
+ * BYTE-IDENTICAL to what it always was — a caller that passes no declaration
+ * cannot see this parameter exists, which is what keeps every other sheet's
+ * baseline untouched.
  */
-export function signatures(items: readonly SignItem[]): string {
-  return (
+export function signatures(items: readonly SignItem[], declaration?: SignDeclaration): string {
+  const rules =
     `<div class="signs">` +
     items
       .map(
@@ -1375,6 +1388,12 @@ export function signatures(items: readonly SignItem[]): string {
           `</div>`,
       )
       .join("") +
+    `</div>`;
+  if (!declaration) return rules;
+  return (
+    `<div class="sign-sec">` +
+    `<div class="sign-declare">${lbl(declaration.title)}<p>${esc(declaration.body)}</p></div>` +
+    rules +
     `</div>`
   );
 }

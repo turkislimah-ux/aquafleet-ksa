@@ -146,7 +146,14 @@ export function buildExitPermitHtml(vm: ExitPermitDocVm): string {
     // gate is being asked to act on.
     block(note(vm.internalValue)),
 
-    signatures(vm.signatures.map((label) => ({ label }))),
+    // The declaration rides the signature section — the sheet's one print-only
+    // addition (Turki, 2026-09-18). The kit's wrapper keeps the paragraph and
+    // the rules on one page; passing it here rather than as its own block is
+    // what makes it PART of the section instead of a neighbour to it.
+    signatures(
+      vm.signatures.map((label) => ({ label })),
+      vm.declaration,
+    ),
 
     sheetFooter(vm.footer),
   ].join("\n");
