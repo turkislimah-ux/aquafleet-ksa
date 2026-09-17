@@ -53,6 +53,7 @@ import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 // fifth spelling. It is flagged for the Trips batch instead.
 import { WATER_TYPE_LABELS, type WaterType, type BankCode } from "@/lib/db-types";
 import { bankLabel } from "@/lib/bank-codes";
+import { bankTransferHeaders, bankTransferRow } from "@/lib/bank-transfer";
 import type { BuiltReport } from "@/lib/report-builder";
 import {
   basisLabel,
@@ -1918,66 +1919,43 @@ export function PayslipsStatement({
     ? rows.find((r) => r.driver_id === selectedDriverId) ?? null
     : null;
 
-  // THE REGISTER, AND ONLY WHILE THE REGISTER IS SHOWING. Opening one driver's
-  // payslip replaces the body with a DOCUMENT — a numbered, signed artefact with
-  // a print button of its own, not a table — so the builder returns null there
-  // and the header button disables itself rather than exporting a one-row file
-  // that reads like the register the user just left.
+  // THE BANK-TRANSFER FILE, NOT A REGISTER DUMP (0202). What the export button
+  // on this tab produces changed meaning: it is now the batch the bank's
+  // salary portal uploads — ISSUED payslips only, one row per document, frozen
+  // money with live routing, in the eleven-column shape lib/bank-transfer.ts
+  // pins as the bank's contract. The on-screen register (previews, statuses,
+  // running months) still PRINTS below; it no longer exports, because a
+  // preview row in a wire-transfer file is money nobody signed for.
+  //
+  // Null while a driver's document is open — same rule as before, the header
+  // button disables rather than exporting something that is not the screen —
+  // and null when the period holds no issued slips at all: a disabled button
+  // IS the message that there is nothing to pay out yet.
   //
   // MUST SIT ABOVE the `if (selected)` return below.
   const buildCsv = useCallback(() => {
-    if (selected || rows.length === 0) return null;
+    if (selected) return null;
+    const docs = issued
+      .filter((i) => i.period_start >= periodStart && i.period_start <= periodEnd)
+      .map((i) => ({ doc: i, driver: drivers.find((d) => d.id === i.driver_id) }))
+      // Register order — month desc, then name — so the file reads like the
+      // screen the clerk cross-checks it against.
+      .sort((a, b) =>
+        b.doc.period_start.localeCompare(a.doc.period_start) ||
+        (a.driver?.name ?? "").localeCompare(b.driver?.name ?? ""));
+    if (docs.length === 0) return null;
     return {
-      slug: "payslips",
+      slug: "bank-transfer",
+      // The flag lib/csv.ts branches on: Windows-1256 bytes, no BOM, no sep=,
+      // no title/period preamble — the portal's parser, not Excel.
+      variant: "bank" as const,
       title: t("reports.statements.tab.payslips", lang),
       period: label,
-      columns: [
-        t("common.driver", lang),
-        t("reports.th.month", lang),
-        withSar(t("reports.th.salary", lang), lang),
-        withSar(t("reports.th.commission", lang), lang),
-        t("reports.th.basis", lang),
-        withSar(t("reports.th.net", lang), lang),
-        t("common.status", lang),
-      ],
-      rows: rows.map((r): CsvValue[] => {
-        // AN ISSUED SLIP'S FROZEN FIGURES WIN, exactly as the cells below
-        // choose them: a document that exists is what was paid, and a fresh
-        // preview of the same month could differ from it.
-        const doc = issued.find(
-          (i) => i.driver_id === r.driver_id && i.period_start === r.period_start,
-        );
-        const salary = doc ? doc.base_salary_sar : r.base_salary_sar;
-        const comm = doc
-          ? doc.commission_sar + doc.specials_sar + doc.adjustments_sar + doc.bonus_sar
-          : r.commission_sar + r.specials_sar + r.adjustments_sar + r.bonus_sar;
-        const net = doc ? doc.net_sar : r.net_sar;
-        // The chip's own condition, not a second rule: `paid` is basis "paid"
-        // AND settled, everything else reads as earned.
-        const chipBasis = doc ? doc.commission_basis : r.commission_basis;
-        const chipSettled = doc ? doc.commission_settled : r.commission_settled;
-        const basisText = chipBasis === "paid" && chipSettled
-          ? t("reports.payslips.chipPaid", lang)
-          : t("reports.payslips.chipEarned", lang);
-        // SAME PRIORITY AS THE STATUS CELL, in the same order: an issued number
-        // is the strongest fact, then terminated, then a missing hire date,
-        // then a month still running. Changing one without the other is how the
-        // file and the screen start disagreeing about who was paid.
-        const status = doc ? doc.payslip_number
-          : r.terminated ? t("reports.payslips.statusTerminated", lang)
-          : r.hire_date_missing ? t("reports.payslips.statusNoHireDate", lang)
-          : isRunning(r.period_start) ? t("reports.payslips.statusMonthInProgress", lang)
-          : t("reports.payslips.statusNotIssued", lang);
-        return [
-          r.driver_name,
-          monthLabelOf(r.period_start, lang),
-          salary, comm, basisText, net, status,
-        ];
-      }),
+      columns: [...bankTransferHeaders(lang)],
+      rows: docs.map(({ doc, driver }): CsvValue[] =>
+        bankTransferRow(doc, driver, bankCodes, lang)),
     };
-    // `currentMonthStart` is what `isRunning` closes over, and it is derived
-    // from `today` — so `today` is the dep, not the function.
-  }, [lang, label, rows, issued, selected, today]);
+  }, [lang, label, issued, drivers, bankCodes, selected, periodStart, periodEnd]);
 
   useCsvSource(registerCsv, buildCsv);
 
@@ -2120,11 +2098,30 @@ export function PayslipsStatement({
                 // come from the SAME expression since 0118 — the freeze reads
                 // this column too, so a preview and its document cannot differ.
                 const net = doc ? doc.net_sar : r.net_sar;
+                // THE STATUS CHAIN, COMPUTED ONCE PER ROW — the cell below
+                // renders it and the row tint reads it, so the two cannot
+                // disagree. Priority ruled (see the cell's comment): issued >
+                // terminated > no hire date > month running > not issued.
+                const status = doc ? ("issued" as const)
+                  : r.terminated ? ("terminated" as const)
+                  : r.hire_date_missing ? ("noHire" as const)
+                  : isRunning(r.period_start) ? ("running" as const)
+                  : ("unissued" as const);
                 return (
                   <tr
                     key={`${r.driver_id}-${r.period_start}`}
                     onClick={() => onSelectDriver(r.driver_id)}
-                    className="cursor-pointer hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+                    className={cn(
+                      "cursor-pointer",
+                      // 0202 — a FINISHED month with no document is the one
+                      // row that needs action: issue it, or the driver is
+                      // missing from the bank-transfer file this tab exports.
+                      // Light wash in the app's warn tone; terminated and
+                      // running months are not actionable and stay plain.
+                      status === "unissued"
+                        ? "bg-amber-500/[0.07] hover:bg-amber-500/[0.14]"
+                        : "hover:bg-black/[0.03] dark:hover:bg-white/[0.04]",
+                    )}
                   >
                     <TD className="font-medium">{r.driver_name}</TD>
                     <TD className="muted">{monthLabelOf(r.period_start, lang)}</TD>
@@ -2147,7 +2144,7 @@ export function PayslipsStatement({
                           still refuses, termination does not. */}
                       {doc ? (
                         <span className="font-mono text-[11px] font-bold">{doc.payslip_number}</span>
-                      ) : r.terminated ? (
+                      ) : status === "terminated" ? (
                         <span
                           className="text-[11px] font-bold text-slate-600 dark:text-slate-300"
                           // `{d}` is a stored ISO date — Latin in both
@@ -2163,11 +2160,11 @@ export function PayslipsStatement({
                         >
                           {t("reports.payslips.statusTerminated", lang)}
                         </span>
-                      ) : r.hire_date_missing ? (
+                      ) : status === "noHire" ? (
                         <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300">
                           {t("reports.payslips.statusNoHireDate", lang)}
                         </span>
-                      ) : isRunning(r.period_start) ? (
+                      ) : status === "running" ? (
                         <span className="text-[11px] font-bold muted">
                           {t("reports.payslips.statusMonthInProgress", lang)}
                         </span>

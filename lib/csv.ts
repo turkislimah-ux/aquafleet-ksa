@@ -11,6 +11,8 @@
 // NO DEPENDENCY. A Blob and an <a download> are the whole delivery mechanism;
 // a spreadsheet library would be a package for something the platform does.
 
+import { encodeCp1256 } from "./cp1256";
+
 /**
  * Quote a cell if it carries a delimiter.
  *
@@ -64,6 +66,14 @@ export type CsvTable = {
    * and this is the one string in the file the user cannot edit afterwards.
    */
   slug: string;
+  /**
+   * "bank" (0202) marks the salary-upload file, whose reader is the bank's
+   * PORTAL PARSER, not a person in Excel — so every workaround above inverts:
+   * no UTF-8 BOM (Windows-1256 bytes instead, lib/cp1256.ts), no `sep=`
+   * directive, no title/period preamble. Headers are the first line. Absent =
+   * every existing export, byte-for-byte unchanged.
+   */
+  variant?: "bank";
   /** Translated report name, written as the first line of the file. */
   title: string;
   /** Translated period label, written beside the title. Null for a table that
@@ -78,6 +88,27 @@ export type CsvTable = {
 
 /** What a report hands the export button. Null = nothing to export right now. */
 export type CsvSource = () => CsvTable | null;
+
+/**
+ * THE ENABLE/EMIT RULE — one source of truth for "can the button export".
+ *
+ * The header button disables on `!exportSource`, i.e. on the REGISTRATION.
+ * This function is what makes that the same fact as "the builder has
+ * something to emit": a builder that returns null right now registers as
+ * null (button disabled), a builder with a table registers AS ITSELF — the
+ * very closure the click will call, so what the enable check saw is what the
+ * click emits. Builders are pure and re-registered whenever their deps
+ * change (useCsvSource), so the probe here cannot go stale between renders.
+ *
+ * Found the hard way (0202): the payslips bank-transfer builder returns null
+ * on a period with no issued slips — which is every CURRENT month, the
+ * statements tab's default — and the button stayed enabled while the click
+ * was swallowed by runExport's own null check. No error, no file, nothing.
+ * scripts/bank-transfer-check.ts pins this rule and greps the hook's wiring.
+ */
+export function resolveCsvRegistration(build: CsvSource): CsvSource | null {
+  return build() ? build : null;
+}
 
 /**
  * Serialize a table to a CSV string.
@@ -97,6 +128,35 @@ export function buildCsv(table: CsvTable): string {
 }
 
 /**
+ * Serialize the BANK variant — the same cells and quoting, none of the Excel
+ * workarounds: no BOM, no `sep=`, no preamble. Headers first, then rows, CRLF
+ * terminated. The portal parses this shape and rejects any of the three
+ * extras, which is the whole reason this is a second serializer rather than a
+ * flag on the first — the shared parts (csvCell, CSV_SEP, CRLF) are shared,
+ * the deliberate differences are visible in one screen of code.
+ *
+ * Returns a STRING; the byte encoding (Windows-1256) is downloadCsv's job, so
+ * this can be asserted in a test as text before bytes complicate the diff.
+ */
+export function buildBankCsv(table: CsvTable): string {
+  const lines = [table.columns, ...table.rows]
+    .map((row) => row.map(csvCell).join(CSV_SEP));
+  return lines.join("\r\n") + "\r\n";
+}
+
+/** The delivery mechanism, shared by both variants. */
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Build the file and hand it to the browser.
  *
  * `suffix` goes in the filename after the slug — the period key, so a folder of
@@ -105,15 +165,17 @@ export function buildCsv(table: CsvTable): string {
  * a slash in `a.download` silently truncates the name at it.
  */
 export function downloadCsv(table: CsvTable, suffix: string): void {
-  const csv = buildCsv(table);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
   const safe = suffix.replace(/[^0-9A-Za-z_-]+/g, "-").replace(/^-+|-+$/g, "");
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = safe ? `${table.slug}-${safe}.csv` : `${table.slug}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  const name = safe ? `${table.slug}-${safe}.csv` : `${table.slug}.csv`;
+  if (table.variant === "bank") {
+    // Windows-1256 BYTES — the encoder import sits here, not in the builder,
+    // so tests assert the text and only the download pays for the table.
+    const blob = new Blob([encodeCp1256(buildBankCsv(table)) as BlobPart], {
+      type: "text/csv;charset=windows-1256;",
+    });
+    triggerDownload(blob, name);
+    return;
+  }
+  const blob = new Blob([buildCsv(table)], { type: "text/csv;charset=utf-8;" });
+  triggerDownload(blob, name);
 }

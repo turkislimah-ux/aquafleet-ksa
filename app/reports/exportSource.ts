@@ -27,7 +27,7 @@
 // export the screen the user just left.
 
 import { useEffect } from "react";
-import type { CsvSource } from "@/lib/csv";
+import { resolveCsvRegistration, type CsvSource } from "@/lib/csv";
 import { t, fill, type Lang } from "@/lib/i18n";
 
 /** Passed down from ReportsClient. Null clears the registration. */
@@ -43,11 +43,19 @@ export type RegisterCsv = (source: CsvSource | null) => void;
  *
  * Returning null from `build` means "nothing to export right now"; the header
  * button disables itself rather than emitting a file with only headings.
+ *
+ * That sentence is now TRUE BY CONSTRUCTION rather than by hope: the effect
+ * probes the builder through resolveCsvRegistration (lib/csv.ts) and
+ * registers NULL when it has nothing to emit, which is the exact condition
+ * the header's `disabled={!exportSource}` reads. Before 0202 the closure was
+ * registered unconditionally, so a null-returning builder left the button
+ * enabled and the click silently swallowed — the bank-transfer export on a
+ * running month was where that finally surfaced.
  */
 export function useCsvSource(register: RegisterCsv | undefined, build: CsvSource): void {
   useEffect(() => {
     if (!register) return;
-    register(build);
+    register(resolveCsvRegistration(build));
     return () => register(null);
   }, [register, build]);
 }
