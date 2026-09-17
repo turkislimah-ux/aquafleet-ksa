@@ -11,9 +11,9 @@
   fold). Unissued rows amber via one status discriminant. 45 checks:
   `scripts/bank-transfer-check.ts` (test:money).
 - **ENABLE/EMIT RULE — ALL nine report exports.** `resolveCsvRegistration`
-  (lib/csv.ts) probes the builder at registration: nothing to emit = null
-  registration = disabled button. `useCsvSource` wires it; builder deps must
-  cover its rows AND period. Never register a raw builder.
+  (lib/csv.ts): nothing to emit = null registration = disabled button.
+  `useCsvSource` wires it; builder deps must cover rows AND period. Never
+  register a raw builder.
 - **OPERATION VEHICLES + TYPED CAPACITY: CLOSED** (aca7486, 366bb2f,
   058f09d). Grouping `lib/vehicle-groups.ts`, naming `lib/vehicle-types.ts`,
   capacity `lib/capacity.ts`, tabs `lib/fleet-tabs.ts` — never re-derive.
@@ -26,8 +26,8 @@
   Turki's, SQL Editor. Undo = `schema_migrations_backup_20260916`; orphan
   bodies in 580d42b.
 - **PARKED:** leaked-password protection OFF in Supabase Auth.
-- **CARRIED:** `web-design-guidelines` + `vercel-composition-patterns` NOT
-  installed. Use `preview/` + `frontend-design` and say so.
+- **CARRIED:** `web-design-guidelines` + `vercel-composition-patterns` not
+  installed. Use `preview/` + `frontend-design`, say so.
 
 ## Rules
 - CLAUDE.md = rules. Read it, NEVER append.
