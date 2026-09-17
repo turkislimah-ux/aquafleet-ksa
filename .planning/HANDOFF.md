@@ -1,7 +1,7 @@
 # SESSION HANDOFF
 
 ## State
-- **DB at 0202, PROD + TEST.** Migration FILES are authoritative. Repo
+- **DB at 0202, PROD + TEST.** Migration FILES authoritative. Repo
   UNLINKED = no `db push`.
 - **0202 CLOSED, VERIFIED IN-BROWSER:** bank details (a89ed87) + bank-transfer
   export (f0edd54). Payslips CSV = bank portal salary batch: Arabic headers
@@ -18,10 +18,10 @@
   058f09d). Grouping `lib/vehicle-groups.ts`, naming `lib/vehicle-types.ts`,
   capacity `lib/capacity.ts`, tabs `lib/fleet-tabs.ts` — never re-derive.
   `capacity_m3` arithmetic only; labels `formatCapacity`.
-- **test:guards** (in npm test) — capacity-single-writer +
+- **test:guards** (in npm test): capacity-single-writer +
   trucks-write-surface, text-level.
-- **`v_fleet_state_now` includes operation vehicles ON PURPOSE.** Utilization
-  excludes them via `v_truck_day_state`. Do not reconcile.
+- **`v_fleet_state_now` includes operation vehicles ON PURPOSE.**
+  Utilization excludes via `v_truck_day_state`. Do not reconcile.
 - **PARKED:** snapshot-drop STEP 2 (`drop-ledger-snapshot-2026-09-16.sql`) —
   Turki's, SQL Editor. Undo = `schema_migrations_backup_20260916`; orphan
   bodies in 580d42b.
