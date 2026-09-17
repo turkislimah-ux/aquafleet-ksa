@@ -205,6 +205,13 @@ export type Driver = {
   // is the effective last-working-day the manager picked (may be in the past).
   terminated_at: string | null;
   termination_date: string | null;
+  // Added in 0202 — bank transfer details. Both nullable and independent in the
+  // DB, but every consumer treats them as a PAIR: the payslip header and the
+  // bank-transfer file show nothing unless BOTH are present, because half a
+  // payment instruction is worse than none. iban is stored NORMALISED (no
+  // spaces, upper-case — lib/iban.ts) and checked by drivers_iban_format_check.
+  bank_code_id: string | null;
+  iban: string | null;
   created_at: string;
 };
 
@@ -422,6 +429,26 @@ export type Staff = {
   // ONLY on the People page — never in the Maintenance UI (Turki's
   // explicit instruction; compensation data stays with the staff record).
   monthly_salary_sar: number | null;
+  // Added in 0202 — bank transfer details, same pair and same pair-rule as
+  // Driver (see there). iban stored normalised; staff_iban_format_check.
+  bank_code_id: string | null;
+  iban: string | null;
+};
+
+// 0202 — the managed bilingual lookup behind drivers.bank_code_id and
+// staff.bank_code_id. Same model as vehicle_types (0201) above: `key` is the
+// bank's 4-letter SWIFT prefix and IMMUTABLE, both labels live ON the row,
+// retiring sets `active = false` and existing rows keep resolving. Seed-only
+// in v1 — no in-app add/rename; the picker offers active rows but is handed
+// ALL rows so a retired-but-selected bank still shows its name.
+export type BankCode = {
+  id: string;
+  key: string;
+  label: string;
+  label_ar: string;
+  sort_order: number;
+  active: boolean;
+  created_at: string;
 };
 
 // ---------------------------------------------------------------------------

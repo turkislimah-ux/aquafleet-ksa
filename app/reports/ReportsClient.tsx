@@ -36,9 +36,10 @@ import {
   type OperationsByDriverRow, type InvoiceOutstandingLiveRow,
   type PayslipBasisRow, type IssuedPayslipRow,
   type DriverCommissionByProjectRow,
-  type VatSourceDocRow,
+  type VatSourceDocRow, type PayslipDriverRow,
 } from "@/lib/reports";
 import type { DriverViolationView, ViolationType } from "@/lib/violations";
+import type { BankCode } from "@/lib/db-types";
 import OverviewTab from "./OverviewTab";
 import StatementsTab from "./StatementsTab";
 import MetricsGlossaryModal from "./MetricsGlossaryModal";
@@ -136,6 +137,14 @@ type ReportsClientProps = {
    */
   violationsByDriver: Record<string, DriverViolationView[]>;
   violationTypes: ViolationType[];
+  /**
+   * 0202 — bank routing for the payslip statement, LIVE from drivers (see
+   * PayslipDriverRow's note in lib/reports.ts). `bankCodes` is the whole
+   * lookup, retired rows included, so a retired bank still resolves to its
+   * name on an old slip.
+   */
+  payslipDrivers: PayslipDriverRow[];
+  bankCodes: BankCode[];
   /** Per-driver operations (0101) — the Operations statement transposes on it. */
   opsByDriver: OperationsByDriverRow[];
 };
@@ -308,6 +317,8 @@ export default function ReportsClient(props: ReportsClientProps) {
           driverCommission={props.driverCommission}
           violationsByDriver={props.violationsByDriver}
           violationTypes={props.violationTypes}
+          payslipDrivers={props.payslipDrivers}
+          bankCodes={props.bankCodes}
           today={props.today}
           registerCsv={registerExport}
           onManageExpenses={() => setExpensesOpen(true)}

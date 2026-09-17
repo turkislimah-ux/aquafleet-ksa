@@ -13,6 +13,7 @@ import {
   type CommCycle,
 } from "@/lib/commission-rows";
 import { validateViolationImage } from "@/lib/violations";
+import { normalizeIban, isValidSaIban } from "@/lib/iban";
 
 export type ActionResult = { error: string | null };
 
@@ -57,6 +58,25 @@ function boolOrNull(v: FormDataEntryValue | null): boolean | null {
   if (s === "false") return false;
   return null;
 }
+// IBAN (0202) — an identifier like iqama/licence, so Arabic-Indic digits fold
+// to Latin first, then lib/iban.ts normalises (strip spaces + dashes, upcase;
+// banks print both formattings). THE
+// ACTION IS THE BOUNDARY: whatever spacing the form let through, the DB only
+// ever sees the one canonical spelling its check constraint expects. The
+// validity verdict is NOT taken here — parse() has no way to return an error —
+// so each caller runs `invalidIban()` on the parsed row before writing.
+function ibanOrNull(v: FormDataEntryValue | null): string | null {
+  const s = toLatinDigits(nullable(v));
+  return s === null ? null : normalizeIban(s);
+}
+// True when the row carries an IBAN that fails the SA + 22 digits shape — the
+// same rule the DB constraint enforces, and the WHOLE rule (no checksum, by
+// Turki's ruling — lib/iban.ts's header carries it). The form already
+// validates (lib/iban.ts, same functions) as a courtesy; this is the server
+// saying the constraint's own message instead of surfacing a raw 23514.
+function invalidIban(row: { iban: string | null }): boolean {
+  return row.iban !== null && !isValidSaIban(row.iban);
+}
 
 function parse(formData: FormData) {
   return {
@@ -88,6 +108,13 @@ function parse(formData: FormData) {
     // are. The form renders a real three-option control (Yes / No / not
     // recorded), so a submitted "" is a deliberate choice, not a disabled input.
     health_insurance: boolOrNull(formData.get("health_insurance")),
+    // 0202 — bank transfer pair. NOT linked identity fields: editable on
+    // create AND update, so neither is ever destructured out of updateDriver's
+    // payload. Both optional and independent at the write layer; the pair rule
+    // (show/export nothing unless both present) is a READ rule, enforced where
+    // the pair is read, so entering them one visit at a time still works.
+    bank_code_id: nullable(formData.get("bank_code_id")),
+    iban: ibanOrNull(formData.get("iban")),
     // active: dropped (Commit 2, termination sequence) — drivers.active no
     // longer written from the form; derived state's "deactivated" branch is
     // gone, termination (0020, terminated_at) supersedes it. The column itself
@@ -143,6 +170,7 @@ async function assignDriverToTruck(
 export async function createDriver(formData: FormData): Promise<ActionResult> {
   const row = parse(formData);
   if (!row.name) return { error: "Name is required." };
+  if (invalidIban(row)) return { error: "IBAN must be SA followed by 22 digits." };
 
   const supabase = createClient();
   const { data, error } = await supabase.from("drivers").insert(row).select("id").single();
@@ -162,6 +190,7 @@ export async function createDriver(formData: FormData): Promise<ActionResult> {
 export async function updateDriver(id: string, formData: FormData): Promise<ActionResult> {
   const parsed = parse(formData);
   if (!parsed.name) return { error: "Name is required." };
+  if (invalidIban(parsed)) return { error: "IBAN must be SA followed by 22 digits." };
 
   // LINKED IDENTITY FIELDS ARE STRIPPED FROM THE UPDATE (0088/0089).
   //
@@ -247,6 +276,10 @@ function parseStaff(formData: FormData) {
     // entered. Required by create_work_order/edit_work_order whenever this
     // staff member is assigned as a WO's mechanic; not required otherwise.
     monthly_salary_sar: numOrNull(formData.get("monthly_salary_sar")),
+    // 0202 — same pair and same rules as parse() above: editable on create
+    // AND update, never stripped from updateStaff's payload.
+    bank_code_id: nullable(formData.get("bank_code_id")),
+    iban: ibanOrNull(formData.get("iban")),
   };
 }
 
@@ -254,6 +287,7 @@ export async function createStaff(formData: FormData): Promise<ActionResult> {
   const row = parseStaff(formData);
   if (!row.name) return { error: "Name is required." };
   if (!row.role) return { error: "Pick a role." };
+  if (invalidIban(row)) return { error: "IBAN must be SA followed by 22 digits." };
 
   const supabase = createClient();
   const { error } = await supabase.from("staff").insert(row);
@@ -268,6 +302,7 @@ export async function updateStaff(id: string, formData: FormData): Promise<Actio
   const parsed = parseStaff(formData);
   if (!parsed.name) return { error: "Name is required." };
   if (!parsed.role) return { error: "Pick a role." };
+  if (invalidIban(parsed)) return { error: "IBAN must be SA followed by 22 digits." };
 
   // Stripped for the same reason as updateDriver above — see its comment.
   const { iqama_number: _iqamaNumber, iqama_expiry: _iqamaExpiry, ...row } = parsed;

@@ -6,7 +6,7 @@
 // feed the Driver Detail modal. Both derived from one trips fetch.
 
 import { createClient } from "@/lib/supabase/server";
-import type { Driver, Staff, StaffRole, OperationStation, DriverIncident, StaffCommission, StaffCommissionType } from "@/lib/db-types";
+import type { BankCode, Driver, Staff, StaffRole, OperationStation, DriverIncident, StaffCommission, StaffCommissionType } from "@/lib/db-types";
 import type { LeavePeriod, LeaveType } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { buildActiveJobTruckIds, buildTruckStatusMap } from "@/lib/truck-status";
@@ -56,7 +56,7 @@ export default async function DriversPage() {
   // Fleet page carried until 22aad18; this is its twin.
   const since = daysAgoKey(30);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, staffCommissionsRes, commissionTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes, activeWorkOrdersRes, activeOutsourcedJobsRes, openWorkOrdersRes, violationTypesRes, driverViolationsRes, frozenViolationsRes, payslipDeductionsRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, staffCommissionsRes, commissionTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes, activeWorkOrdersRes, activeOutsourcedJobsRes, openWorkOrdersRes, violationTypesRes, driverViolationsRes, frozenViolationsRes, payslipDeductionsRes, bankCodesRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       // Terminated trucks vanish from the driver-detail "Current Assignment"
@@ -218,6 +218,14 @@ export default async function DriversPage() {
       // A row EXISTING here means issued — there is no draft state. Only the
       // three money columns the outstanding definition needs.
       supabase.from("driver_payslips").select("id, driver_id, deductions_sar, unabsorbed_sar"),
+      // Bank codes (0202) — ALL rows, active and retired, same reason
+      // violation_types above fetches every row: the picker OFFERS only the
+      // active ones (it filters), but a driver already pointing at a retired
+      // bank must keep resolving its name instead of rendering blank.
+      supabase
+        .from("bank_codes")
+        .select("id, key, label, label_ar, sort_order, active, created_at")
+        .order("sort_order", { ascending: true }),
     ]);
 
   // ---- Driver set split (termination) ----------------------------------
@@ -256,6 +264,7 @@ export default async function DriversPage() {
   const operationStations = (operationStationsRes.data ?? []) as OperationStation[];
   const driverIncidents = (driverIncidentsRes.data ?? []) as DriverIncident[];
   const violationTypes = (violationTypesRes.data ?? []) as ViolationType[];
+  const bankCodes = (bankCodesRes.data ?? []) as BankCode[];
   const today = todayKey(); // local (matches trip day-math), not UTC
   const projectsById: Record<string, string> = {};
   const activeProjectIds = new Set<string>();
@@ -369,7 +378,10 @@ export default async function DriversPage() {
     violationTypesRes.error ||
     driverViolationsRes.error ||
     frozenViolationsRes.error ||
-    payslipDeductionsRes.error;
+    payslipDeductionsRes.error ||
+    // A failed bank_codes read as `[]` would render every saved bank as blank
+    // AND offer an empty picker — data loss on the next save, not just a gap.
+    bankCodesRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -431,6 +443,7 @@ export default async function DriversPage() {
       violationsByDriver={violationsByDriver}
       violationOutstanding={violationOutstanding}
       violationTypes={violationTypes}
+      bankCodes={bankCodes}
       error={error?.message ?? null}
     />
   );

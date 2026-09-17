@@ -22,6 +22,7 @@ import { Btn, Stat, StatusPill, Table, TH, TD, PILL_TONE_CLS } from "@/component
 import { addYearsToKey, cn, formatSar } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
 import {
+  type BankCode,
   type Driver,
   type Staff,
   type StaffRole,
@@ -66,6 +67,8 @@ import LinkedIdField from "@/components/LinkedIdField";
 import StaffTab from "./StaffTab";
 import type { CommPayout } from "@/lib/commission-rows";
 import ScrollLock from "@/components/ScrollLock";
+import BankFields from "@/components/BankFields";
+import { normalizeIban, isValidSaIban } from "@/lib/iban";
 import TrafficViolationsSection from "./TrafficViolationsSection";
 import type { DriverViolationView, OutstandingCell, ViolationType } from "@/lib/violations";
 
@@ -279,6 +282,7 @@ export default function DriversClient({
   violationsByDriver,
   violationOutstanding,
   violationTypes,
+  bankCodes,
   error,
 }: {
   // ACTIVE roster only (terminated_at is null) — KPIs, roster grid, pickers.
@@ -339,6 +343,10 @@ export default function DriversClient({
   violationsByDriver: Record<string, DriverViolationView[]>;
   violationOutstanding: Record<string, OutstandingCell>;
   violationTypes: ViolationType[];
+  // Bank codes (0202) — ALL rows, retired included; the picker filters to
+  // active itself and keeps a retired-but-selected bank resolving. Shared by
+  // the driver form here and StaffTab's form.
+  bankCodes: BankCode[];
   error: string | null;
 }) {
   const { lang } = useApp();
@@ -592,6 +600,15 @@ export default function DriversClient({
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const truckId = String(fd.get("truck_id") ?? "");
+
+    // IBAN gate (0202) — same lib/iban.ts verdict the server action re-runs;
+    // caught here so the typo dies before the round-trip. Empty is fine (both
+    // bank fields are optional); only a non-empty invalid value blocks.
+    const iban = normalizeIban(String(fd.get("iban") ?? ""));
+    if (iban && !isValidSaIban(iban)) {
+      setFormError(t("shared.bank.ibanInvalid", lang));
+      return;
+    }
 
     // Footgun guard: chosen truck already carries a different driver → moving it.
     if (truckId) {
@@ -922,6 +939,7 @@ export default function DriversClient({
           openAddSignal={addStaffSignal}
           openWoByMechanic={openWoByMechanic}
           truckCount={trucks.length}
+          bankCodes={bankCodes}
         />
       )}
 
@@ -1128,6 +1146,16 @@ export default function DriversClient({
                   <option value="false">{t("drivers.health.no", lang)}</option>
                 </select>
               </Field>
+              {/* Bank pair (0202) — NOT linked identity fields: editable on
+                  create AND edit, unlike the iqama/licence block above. Keyed
+                  on editing?.id so reopening the form for another driver
+                  resets the component's internal state. */}
+              <BankFields
+                key={editing?.id ?? "new"}
+                bankCodes={bankCodes}
+                defaultBankCodeId={editing?.bank_code_id ?? null}
+                defaultIban={editing?.iban ?? null}
+              />
               {formError && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{formError}</p>}
 
               <div className="flex justify-end gap-2 sm:col-span-2 mt-2">

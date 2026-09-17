@@ -51,7 +51,8 @@ import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 // app/reports/. Translating it here would reach outside this batch; minting a
 // reports-local copy is how one map becomes three and a fourth surface gets a
 // fifth spelling. It is flagged for the Trips batch instead.
-import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
+import { WATER_TYPE_LABELS, type WaterType, type BankCode } from "@/lib/db-types";
+import { bankLabel } from "@/lib/bank-codes";
 import type { BuiltReport } from "@/lib/report-builder";
 import {
   basisLabel,
@@ -65,6 +66,7 @@ import {
   type FillingMonthRow, type FillingByStationRow,
   type PayslipBasisRow, type IssuedPayslipRow,
   type DriverCommissionByProjectRow,
+  type PayslipDriverRow,
 } from "@/lib/reports";
 import {
   inMonth, violationTypeLabel,
@@ -96,7 +98,7 @@ import { buildCostVm } from "@/lib/docvm/cost";
 import { buildCustomVm } from "@/lib/docvm/custom";
 import { buildNarrativeVm } from "@/lib/docvm/narrative";
 import { buildOpsVm } from "@/lib/docvm/operations";
-import { buildPayslipVm } from "@/lib/docvm/payslip";
+import { buildPayslipVm, resolvePayslipBank, type PayslipBankLine } from "@/lib/docvm/payslip";
 import { buildPayslipRegisterVm } from "@/lib/docvm/payslip-register";
 import { buildReceivablesVm } from "@/lib/docvm/receivables";
 import { buildRevenueVm } from "@/lib/docvm/revenue";
@@ -1862,6 +1864,7 @@ function monthLabelOf(iso: string, lang: Lang) {
 
 export function PayslipsStatement({
   basis, issued, commission, violationsByDriver, violationTypes,
+  drivers, bankCodes,
   periodStart, periodEnd, label, today,
   selectedDriverId, onSelectDriver, onIssue, issuingId, registerCsv, registerPrint,
 }: {
@@ -1878,6 +1881,13 @@ export function PayslipsStatement({
    */
   violationsByDriver: Record<string, DriverViolationView[]>;
   violationTypes: ViolationType[];
+  /**
+   * 0202 — bank routing, LIVE from drivers, the one line on the document that
+   * is NOT frozen (see resolvePayslipBank). `bankCodes` is the whole lookup,
+   * retired rows included, so an old slip still names a retired bank.
+   */
+  drivers: PayslipDriverRow[];
+  bankCodes: BankCode[];
   periodStart: string; periodEnd: string; label: string;
   /** Riyadh today, from the server — never new Date() in the client. */
   today: string;
@@ -1993,6 +2003,11 @@ export function PayslipsStatement({
         violations: violationsByDriver[selected.driver_id] ?? [],
         violationTypes,
         running: isRunning(selected.period_start),
+        // LIVE from the driver, resolved at print time — the same call the
+        // screen branch below makes, so sheet and screen cannot disagree.
+        bank: resolvePayslipBank(
+          drivers.find((d) => d.id === selected.driver_id), bankCodes,
+        ),
       }));
     }
     return buildPayslipRegisterHtml(buildPayslipRegisterVm({
@@ -2004,7 +2019,8 @@ export function PayslipsStatement({
     }));
     // `currentMonthStart` is what `isRunning` closes over, and it is derived
     // from `today` — so `today` is the dep, not the function.
-  }, [lang, label, today, rows, issued, selected, violationsByDriver, violationTypes]);
+  }, [lang, label, today, rows, issued, selected, violationsByDriver, violationTypes,
+      drivers, bankCodes]);
 
   usePrintSource(registerPrint, buildDoc);
 
@@ -2020,6 +2036,9 @@ export function PayslipsStatement({
           violations={violationsByDriver[selected.driver_id] ?? []}
           violationTypes={violationTypes}
           running={isRunning(selected.period_start)}
+          bank={resolvePayslipBank(
+            drivers.find((d) => d.id === selected.driver_id), bankCodes,
+          )}
           onBack={() => onSelectDriver(null)}
           onIssue={onIssue}
           issuing={issuingId === selected.driver_id}
@@ -2358,7 +2377,7 @@ function FineChip({ tone, title, children }: {
  * driver_payslips, a preview reads every figure off the basis view.
  */
 function PayslipDocument({
-  row, doc, violations, violationTypes, running, onBack, onIssue, issuing,
+  row, doc, violations, violationTypes, running, bank, onBack, onIssue, issuing,
 }: {
   row: PayslipBasisRow;
   doc: IssuedPayslipRow | null;
@@ -2371,6 +2390,12 @@ function PayslipDocument({
   /** Every type, active and retired — a historical fine still needs its name. */
   violationTypes: ViolationType[];
   running: boolean;
+  /**
+   * 0202 — where the money goes, LIVE from the driver and null unless BOTH
+   * halves exist. Already resolved by resolvePayslipBank, which owns the pair
+   * rule; this component only draws what it is handed.
+   */
+  bank: PayslipBankLine | null;
   onBack: () => void;
   onIssue: (driverId: string, periodStart: string) => void;
   issuing: boolean;
@@ -2692,6 +2717,23 @@ function PayslipDocument({
         // YEAR stays Latin, like every other figure here.
         period={`${row.driver_name} · ${monthLabelOf(row.period_start, lang)}`}
       />
+
+      {/* THE BANK PAIR (0202), directly under the name — where the money goes,
+          LIVE from the driver, never frozen (see resolvePayslipBank, which also
+          owns the rule that HALF a pair renders as NOTHING: no dash, no empty
+          label that could be read as data). `-mt-3` tucks it against
+          ScreenHead's period line so the two read as one identity block. The
+          IBAN is an IDENTIFIER — mono like the payslip number above it, and
+          dir="ltr" so "SA03…" never reorders on an Arabic screen. */}
+      {bank && (
+        <p className="-mt-3 mb-4 text-sm muted">
+          {/* "KEY · name" — bankLabel, the one spelling of a bank on every
+              surface (lib/bank-codes.ts). */}
+          {bankLabel(bank, lang)}
+          {" · "}
+          <span dir="ltr" className="font-mono text-[13px]">{bank.iban}</span>
+        </p>
+      )}
 
       {/* WHY THE ACTION IS UNAVAILABLE, said where the button is — a disabled
           control with no reason is indistinguishable from a broken one. */}

@@ -16,7 +16,7 @@ import { Btn, Stat } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 import { foldDigitsInPlace } from "@/lib/digits";
-import { type Staff, type StaffRole, type OperationStation, type StaffCommission, type StaffCommissionType } from "@/lib/db-types";
+import { type BankCode, type Staff, type StaffRole, type OperationStation, type StaffCommission, type StaffCommissionType } from "@/lib/db-types";
 import { onLeaveTodaySet, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { addDaysToKey, formatDate, formatSar } from "@/lib/utils";
 import { createStaff, updateStaff, terminateStaff, addStaffRole } from "./actions";
@@ -29,6 +29,8 @@ import LookupSelect from "./LookupSelect";
 import LinkedIdField from "@/components/LinkedIdField";
 import { useRecordFocus } from "@/lib/useRecordFocus";
 import ScrollLock from "@/components/ScrollLock";
+import BankFields from "@/components/BankFields";
+import { normalizeIban, isValidSaIban } from "@/lib/iban";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -52,6 +54,7 @@ export default function StaffTab({
   openAddSignal,
   openWoByMechanic,
   truckCount,
+  bankCodes,
 }: {
   staff: Staff[];
   staffRoles: StaffRole[];
@@ -77,6 +80,9 @@ export default function StaffTab({
   openWoByMechanic: Record<string, number>;
   // Total non-terminated trucks, for the mechanics-to-truck ratio.
   truckCount: number;
+  // Bank codes (0202) — ALL rows (active + retired); BankFields filters and
+  // keeps a retired-but-selected bank resolving. Fetched by the page.
+  bankCodes: BankCode[];
 }) {
   const { lang } = useApp();
   const router = useRouter();
@@ -241,6 +247,15 @@ export default function StaffTab({
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+
+    // IBAN gate (0202) — same lib/iban.ts verdict the server action re-runs;
+    // caught here so the typo dies before the round-trip.
+    const iban = normalizeIban(String(fd.get("iban") ?? ""));
+    if (iban && !isValidSaIban(iban)) {
+      setFormError(t("shared.bank.ibanInvalid", lang));
+      return;
+    }
+
     setSaving(true);
     setFormError(null);
     const res = editing ? await updateStaff(editing.id, fd) : await createStaff(fd);
@@ -648,6 +663,15 @@ export default function StaffTab({
                   archiveHref={editing?.id ? `/archive?tab=staff&sub=management&person=${editing.id}` : null}
                 />
               </Field>
+              {/* Bank pair (0202) — NOT linked identity fields: editable on
+                  create AND edit. Keyed on editing?.id so reopening for
+                  another person resets the component's internal state. */}
+              <BankFields
+                key={editing?.id ?? "new"}
+                bankCodes={bankCodes}
+                defaultBankCodeId={editing?.bank_code_id ?? null}
+                defaultIban={editing?.iban ?? null}
+              />
               <label className="flex items-center gap-2 text-sm sm:col-span-2">
                 <input name="active" type="checkbox" defaultChecked={editing ? editing.active : true} />
                 <span>{t("drivers.staff.fActive", lang)}</span>

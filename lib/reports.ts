@@ -1306,6 +1306,27 @@ type PayslipSnapshot = {
 };
 
 /**
+ * The payslip statement's slice of the drivers table (0202) — bank pair for
+ * the payslip header and print masthead, iqama + Arabic name for the
+ * bank-transfer CSV. Read LIVE, never frozen into the payslip: a driver who
+ * changes banks must see the NEW account on every payslip he opens, because
+ * this line answers "where do we send the money", not "what did we owe".
+ * (Contrast with every money column above, which IS frozen at issue.)
+ *
+ * No termination filter on the fetch that fills this — issued payslips
+ * outlive employment, and a terminated driver's final slip still names his
+ * bank.
+ */
+export type PayslipDriverRow = {
+  id: string;
+  name: string;
+  name_ar: string | null;
+  iqama_number: string | null;
+  bank_code_id: string | null;
+  iban: string | null;
+};
+
+/**
  * COLOURS COME FROM lib/cost-colors.ts, the same record the Dashboard's Cost
  * mix reads. They were hardcoded here and had drifted into something worse than
  * a mismatch — Payroll and Outsourced were SWAPPED against the Dashboard, so

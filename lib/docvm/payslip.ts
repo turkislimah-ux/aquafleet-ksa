@@ -109,6 +109,7 @@ import {
   monthLabel,
 } from "../utils";
 import { DOC_COMPANY, docGeneratedMeta } from "./reportDoc";
+import { bankLabel } from "../bank-codes";
 
 // ---------------------------------------------------------------------------
 // Input — exactly what the component holds
@@ -130,7 +131,49 @@ export type PayslipDocInput = {
    * than re-derived from a date here: this file computes no "today".
    */
   running: boolean;
+  /**
+   * Where the money goes (0202) — resolved by resolvePayslipBank, LIVE from
+   * the driver, NEVER from the snapshot. The ONE exception to the freeze rule
+   * above, deliberately: every money figure states what WAS owed, but this
+   * line answers "where do we send it", and a driver who changed banks must
+   * see the new account on a reprint of an old slip. Null when either half of
+   * the pair is missing — the resolver owns that rule.
+   */
+  bank: PayslipBankLine | null;
 };
+
+/**
+ * The bank pair as ONE value: the bank's 4-letter key, both spellings of its
+ * name (the reader's language is picked at render, via bankLabel), and the
+ * IBAN. Existing at all means BOTH halves are present — see resolvePayslipBank.
+ */
+export type PayslipBankLine = {
+  key: string;
+  label: string;
+  label_ar: string;
+  iban: string;
+};
+
+/**
+ * THE PAIR RULE, IN ONE PLACE. A bank without an account, or an account
+ * without a bank, renders as NOTHING — not a dash, not a blank label: on a
+ * document someone takes to a teller, half a routing line reads as data. The
+ * screen header and the printed masthead both call this, so they cannot
+ * disagree about whether the pair is shown.
+ *
+ * `bankCodes` must be ALL rows, retired included — a driver still pointing at
+ * a retired bank keeps its name (the 0201 lookup rule). An id that resolves
+ * to NO row at all is treated as missing, same as no id.
+ */
+export function resolvePayslipBank(
+  driver: { bank_code_id: string | null; iban: string | null } | null | undefined,
+  bankCodes: readonly { id: string; key: string; label: string; label_ar: string }[],
+): PayslipBankLine | null {
+  if (!driver || !driver.bank_code_id || !driver.iban) return null;
+  const bank = bankCodes.find((b) => b.id === driver.bank_code_id);
+  if (!bank) return null;
+  return { key: bank.key, label: bank.label, label_ar: bank.label_ar, iban: driver.iban };
+}
 
 // ---------------------------------------------------------------------------
 // Output — one worded object per ATLAS block, and no ATLAS types in it
@@ -500,7 +543,28 @@ export function buildPayslipVm(input: PayslipDocInput): PayslipDocVm {
       // a label and monthLabel writes it in the reader's language. The middot is
       // the screen's own.
       subtitle: `${row.driver_name} · ${month}`,
-      meta: [[docGeneratedMeta(lang, generated)]],
+      // The bank pair sits FIRST, directly under the driver's name — it is
+      // about him; "generated" is about the sheet. One line, two pairs, and
+      // `num: true` on the IBAN so "SA03…" never reorders on an Arabic sheet.
+      // No line at all when the pair is incomplete — resolvePayslipBank's rule.
+      meta: [
+        ...(input.bank
+          ? [[
+              {
+                label: t("shared.bank.fBank", lang),
+                // "KEY · name" — bankLabel is the one spelling of a bank on
+                // every surface (lib/bank-codes.ts); the sheet composes nothing.
+                value: bankLabel(input.bank, lang),
+              },
+              {
+                label: t("shared.bank.fIban", lang),
+                value: input.bank.iban,
+                num: true,
+              },
+            ]]
+          : []),
+        [docGeneratedMeta(lang, generated)],
+      ],
       ...(doc
         ? {}
         : {

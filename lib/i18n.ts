@@ -966,6 +966,20 @@ export const dict = {
       switchToLight: { en: "Switch to light mode", ar: "التبديل إلى الوضع الفاتح" },
     },
 
+    // BankFields (0202) — the bank picker + IBAN pair on the driver AND staff
+    // forms, plus the payslip surfaces that render the same pair. ONE
+    // vocabulary: the word on the form is the word on the slip. Bank NAMES are
+    // not here — they live on bank_codes rows (label/label_ar), resolved via
+    // arText, per the lookup single-source rule.
+    bank: {
+      fBank: { en: "Bank", ar: "البنك" },
+      fIban: { en: "IBAN", ar: "الآيبان" },
+      ibanInvalid: {
+        en: "IBAN must be SA followed by 22 digits.",
+        ar: "يجب أن يكون الآيبان SA متبوعًا بـ 22 رقمًا.",
+      },
+    },
+
     // OperationStationField (the picker section) and OperationStationsModal
     // (the popup it opens). One group: they are one feature in two files, and
     // `deactivated` is genuinely rendered by both.

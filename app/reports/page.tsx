@@ -53,8 +53,9 @@ import type {
   RevenueInvoiceRow, SalesReturnRow, CommissionsRow, CommissionsPaidRow,
   MetricDictionaryRow, OperationsByDriverRow, InvoiceOutstandingLiveRow,
   PayslipBasisRow, IssuedPayslipRow, DriverCommissionByProjectRow,
-  VatSourceDocRow,
+  VatSourceDocRow, PayslipDriverRow,
 } from "@/lib/reports";
+import type { BankCode } from "@/lib/db-types";
 import {
   buildViolationViews,
   type DriverViolation,
@@ -93,6 +94,8 @@ export default async function ReportsPage() {
     violationTypesRes,
     driverViolationsRes,
     frozenViolationsRes,
+    payslipDriversRes,
+    bankCodesRes,
   ] = await Promise.all([
     supabase.from("v_pnl_monthly").select("*").order("month"),
     supabase.from("v_collections_monthly").select("*").order("month"),
@@ -223,6 +226,25 @@ export default async function ReportsPage() {
         "id, driver_id, violation_type_id, ref_no, amount_sar, violation_date, payment_status, note, voided_at, created_by, created_at, image_path",
       ),
     supabase.from("driver_payslip_violations").select("payslip_id, violation_id"),
+    // ---- Bank details for the payslip statement (0202) ---------------------
+    //
+    // BASE TABLES again, and again nothing here restates a figure: this is
+    // routing data — which bank, which account — for the payslip header and
+    // the bank-transfer file. Read LIVE from drivers, never from the frozen
+    // snapshot, because a driver who changes banks must see the NEW account on
+    // every slip he opens; the money above stays frozen, the address it goes
+    // to does not.
+    //
+    // No termination filter: issued payslips outlive employment, and a
+    // terminated driver's final month still names his bank.
+    //
+    // bank_codes arrives WHOLE (active + retired) so a driver still pointing
+    // at a retired bank resolves to its name rather than to a blank — the
+    // 0201 lookup rule.
+    supabase.from("drivers").select("id, name, name_ar, iqama_number, bank_code_id, iban"),
+    supabase.from("bank_codes")
+      .select("id, key, label, label_ar, sort_order, active, created_at")
+      .order("sort_order", { ascending: true }),
   ]);
 
   // One honest error line beats ten empty cards that look like real zeros.
@@ -244,7 +266,11 @@ export default async function ReportsPage() {
     // "no data", it is the specific claim that this driver was fined nothing,
     // printed underneath a Deductions line that says otherwise.
     violationTypesRes.error?.message ?? driverViolationsRes.error?.message ??
-    frozenViolationsRes.error?.message ?? null;
+    frozenViolationsRes.error?.message ??
+    // A failed bank read arrives as [] — which the payslip header renders as
+    // "this driver has no bank on file", printed on a document someone will
+    // take to a teller. Silence is a claim here; fail loudly instead.
+    payslipDriversRes.error?.message ?? bankCodesRes.error?.message ?? null;
 
   // The three VAT sources ARE in the chain above, unlike an earlier attempt at
   // this panel that carried an "unavailable" flag for them. That flag existed
@@ -604,6 +630,18 @@ export default async function ReportsPage() {
   //
   // Only the UNISSUED months consume this. An issued month reads its snapshot.
   const violationTypes = (violationTypesRes.data ?? []) as ViolationType[];
+
+  // Bank routing for the payslip statement (0202). Strings-or-null only, so
+  // the boundary coercion is String-or-null rather than n().
+  const payslipDrivers: PayslipDriverRow[] = ((payslipDriversRes.data ?? []) as Row[]).map((r) => ({
+    id: String(r.id),
+    name: String(r.name ?? ""),
+    name_ar: r.name_ar ? String(r.name_ar) : null,
+    iqama_number: r.iqama_number ? String(r.iqama_number) : null,
+    bank_code_id: r.bank_code_id ? String(r.bank_code_id) : null,
+    iban: r.iban ? String(r.iban) : null,
+  }));
+  const bankCodes = (bankCodesRes.data ?? []) as BankCode[];
   const { byDriver: violationsByDriver } = buildViolationViews({
     violations: (driverViolationsRes.data ?? []) as DriverViolation[],
     frozen: (frozenViolationsRes.data ?? []) as FrozenViolation[],
@@ -619,6 +657,8 @@ export default async function ReportsPage() {
       driverCommission={driverCommission}
       violationsByDriver={violationsByDriver}
       violationTypes={violationTypes}
+      payslipDrivers={payslipDrivers}
+      bankCodes={bankCodes}
       opsByDriver={opsByDriver}
       invoices={invoices}
       outstandingLive={outstandingLive}
