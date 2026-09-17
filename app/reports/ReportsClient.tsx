@@ -182,6 +182,13 @@ export default function ReportsClient(props: ReportsClientProps) {
   function runExport() {
     if (!exportSource) return;
     const table = exportSource();
+    // NOT the enable rule — that is resolveCsvRegistration probing the builder
+    // at registration (exportSource.ts), which is why a registered source has
+    // a table to give. This line only covers the one commit gap React leaves:
+    // data changed this render, the re-registering effect has not run yet, and
+    // a click lands in between. Swallowing that click is correct — the button
+    // is about to disable — but leaning on this line INSTEAD of the probe is
+    // the 0202 defect (enabled button, silently eaten click) coming back.
     if (!table) return;
     // The period the file covers goes in the NAME, not just the header row:
     // these land in a downloads folder together and "pnl.csv (3)" tells the
@@ -232,9 +239,14 @@ export default function ReportsClient(props: ReportsClientProps) {
             {/* EXPORT IS ON BOTH TABS — the one control here that is not
                 Overview-scoped, because every report has rows worth taking into
                 a spreadsheet. It is DISABLED, not hidden, when the report on
-                screen has nothing tabular to give (the Narrative statement) or
-                has not loaded yet: a button that vanishes per statement reads as
-                a bug, and a hidden one cannot explain itself. */}
+                screen has nothing to EMIT — the Narrative statement (prose),
+                a report not yet loaded, or a table that is visible but empty
+                for the period (the payslip register on a running month, the
+                0202 case): a button that vanishes per statement reads as a
+                bug, and a hidden one cannot explain itself. The disable is
+                the registration itself — resolveCsvRegistration probes the
+                builder (exportSource.ts), so `!exportSource` below IS
+                "nothing to emit". */}
             {/* THE TOOLTIP IS ON THE WRAPPER, AND IT HAS TO BE. Btn carries
                 `disabled:pointer-events-none`, so a disabled button never
                 receives a hover and a `title` on it would never fire — the grey

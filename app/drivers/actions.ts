@@ -60,8 +60,8 @@ function boolOrNull(v: FormDataEntryValue | null): boolean | null {
 }
 // IBAN (0202) — an identifier like iqama/licence, so Arabic-Indic digits fold
 // to Latin first, then lib/iban.ts normalises (strip spaces + dashes, upcase;
-// banks print both formattings). THE
-// ACTION IS THE BOUNDARY: whatever spacing the form let through, the DB only
+// banks print both formattings). THE ACTION IS THE BOUNDARY: whatever
+// spacing the form let through, the DB only
 // ever sees the one canonical spelling its check constraint expects. The
 // validity verdict is NOT taken here — parse() has no way to return an error —
 // so each caller runs `invalidIban()` on the parsed row before writing.

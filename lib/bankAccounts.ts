@@ -24,6 +24,17 @@
 // IBANs here are the COMPANY's OWN, printed on customer invoices by design —
 // public information, not a secret, and not customer data. They are still never
 // logged: an IBAN in a log line is an IBAN in a place nobody audits.
+//
+// NOT lib/iban.ts, AND NOT A MISSED REUSE. That module is the DRIVER/STAFF
+// field (0202): Saudi-only, shape-pinned to the DB's `^SA[0-9]{22}$` check
+// constraint. THIS one is the company's own accounts: foreign IBANs allowed,
+// no length rule (Turki's 2026-09-05 ruling; scripts/bank-accounts-check.ts
+// defends the loosening). NO CHECKSUM in either module — ruled here
+// 2026-09-05 and ruled there 2026-09-17, same reasoning both times: we are
+// connected to no banking system, so mod-97 can only reject an operator
+// copying a number off a real bank statement. Two fields, two rules,
+// deliberately two modules — its header says the same about this one. Do
+// not unify.
 
 /** Hard ceiling, mirrored by `company_settings_bank_accounts_shape` (0184). */
 export const MAX_BANK_ACCOUNTS = 3;

@@ -4129,16 +4129,20 @@ export const dict = {
       // that does not appear anywhere on their disk.
       exportCsv: { en: "Export CSV", ar: "تصدير CSV" },
       // WHY THE BUTTON IS GREY, said out loud. The export button is disabled
-      // rather than hidden on the surfaces that have no table — Narrative is
-      // prose, and a single opened payslip is one document. A control that
-      // vanishes per statement reads as a bug, but a silent grey one reads as a
-      // dead button, which is the same complaint from the other side. This is
-      // the sentence that closes it, and it is deliberately about the VIEW and
-      // not about the button: the reader wants to know what to do next, which
-      // is go to a statement that has rows.
+      // rather than hidden whenever the view has nothing to emit — Narrative
+      // is prose, a single opened payslip is one document, and since the
+      // enable/emit rule (resolveCsvRegistration, lib/csv.ts) ALSO a table
+      // that is on screen but empty for the period, like the payslip register
+      // on a running month with nothing issued. A control that vanishes per
+      // statement reads as a bug, but a silent grey one reads as a dead
+      // button, which is the same complaint from the other side. This is the
+      // sentence that closes it, phrased about what there IS to export rather
+      // than about the button or "a table" — the register case above shows a
+      // table while the file would be empty, so "no table" would be false on
+      // the very surface that surfaced the rule.
       exportDisabled: {
-        en: "This view has no table to export.",
-        ar: "لا يحتوي هذا العرض على جدول قابل للتصدير.",
+        en: "Nothing to export in this view right now.",
+        ar: "لا يوجد ما يمكن تصديره في هذا العرض حالياً.",
       },
     },
 

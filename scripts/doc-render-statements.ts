@@ -1,5 +1,6 @@
-// FIXTURE CORPUS for the SEVEN migrated statements — batch 3's four, batch 4's
-// Cost and Operations, and batch 5's P&L. It renders every sheet in BOTH
+// FIXTURE CORPUS for the migrated statements — batch 3's four, batch 4's
+// Cost and Operations, batch 5's P&L, and the payslip sheet (0202). It
+// renders every sheet in BOTH
 // languages to a directory, and the tools that judge them read that directory:
 //
 //   npm run doc:render     # this file AND doc-render-records.ts
@@ -15,7 +16,7 @@
 // Output goes to $DOC_SHEETS, default /tmp/atlas-sheets — outside the repo on
 // purpose, because these are the artefacts of a check and not sources.
 //
-// IT IS A STANDING CHECK, NOT A ONE-OFF. The seven sheets are committed and
+// IT IS A STANDING CHECK, NOT A ONE-OFF. These sheets are committed and
 // approved, so re-rendering them is the regression proof for any change
 // underneath them: a kit spacing edit, an i18n key, a shared helper. The bidi
 // findings and the page counts off a clean tree are the baseline, and anything
