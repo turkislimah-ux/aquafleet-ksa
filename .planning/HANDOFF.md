@@ -7,16 +7,17 @@
   authoritative. Repo UNLINKED = no `db push`.
 - **OPERATION VEHICLES + TYPED CAPACITY: BUILT, VERIFIED IN-BROWSER, CLOSED.**
   aca7486 (truck write path onto typed capacity), 366bb2f (surfaced, grouped,
-  type-labelled), 058f09d (sweep: dead code, drifted comments). Nothing open.
+  type-labelled), 058f09d (sweep). Nothing open.
   - Grouping = `lib/vehicle-groups.ts` ONLY. Naming = `lib/vehicle-types.ts`.
     Capacity triple = `lib/capacity.ts`. Fleet tabs = `lib/fleet-tabs.ts`.
     Never re-derive at a call site.
+  - `capacity_m3` read by ARITHMETIC only (sums need one unit); labels use
+    `formatCapacity`. Do not merge.
 - **`npm run test:guards` (in `npm test`)** — `capacity-single-writer-check` +
   `trucks-write-surface-check`. Text-level: fail if a write path reaches
   `trucks` or builds capacity columns outside their owning files.
 - **`v_fleet_state_now` INCLUDES operation vehicles ON PURPOSE.** Utilization
-  excludes them via `v_truck_day_state`, truck-only. Do not "fix" either
-  to match.
+  excludes them via `v_truck_day_state`, truck-only. Do not reconcile them.
 - **PARKED:** snapshot-drop STEP 2 (`drop-ledger-snapshot-2026-09-16.sql`) —
   STEP 1 green on prod, proven able to RAISE; STEP 2 is Turki's, SQL Editor.
   Undo = prod `schema_migrations_backup_20260916`; 7 orphan bodies md5-exact
@@ -32,4 +33,3 @@
 - Money/migration gate: draft, STOP, architect reviews.
 - Session cap: 15 turns. First compaction = wrap up.
 - This file stays under 2KB. If larger, Code is appending diary. Cut it.
-- ATLAS: 114 sheets; a moved page count fails `npm test` until `--update`.
