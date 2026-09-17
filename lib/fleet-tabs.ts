@@ -37,13 +37,17 @@ export const FLEET_TAB_FALLBACK: FleetTab = "trucks";
  *
  * Branches on "operation" rather than on "truck" so a future third class
  * defaults to the Trucks tab — visible in the wrong group beats invisible.
+ *
+ * MODULE-PRIVATE, like `fleetHref` below, and deliberately so: both are steps
+ * inside `fleetHrefForClass`, and exporting either would hand a caller the
+ * ability to name a tab on its own — the hardcode this file exists to remove.
  */
-export function fleetTabForClass(cls: VehicleClass): FleetTab {
+function fleetTabForClass(cls: VehicleClass): FleetTab {
   return cls === "operation" ? "operation" : "trucks";
 }
 
 /** The Fleet URL for a tab. */
-export function fleetHref(tab: FleetTab): string {
+function fleetHref(tab: FleetTab): string {
   return tab === FLEET_TAB_FALLBACK ? "/fleet" : `/fleet?tab=${tab}`;
 }
 

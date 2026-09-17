@@ -2354,7 +2354,6 @@ export const dict = {
       // The model is a manufacturer's name, so the example stays Latin.
       modelPlaceholder: { en: "e.g. Mercedes-Benz Actros 3340", ar: "مثال: Mercedes-Benz Actros 3340" },
       editTruckTitle: { en: "Edit truck", ar: "تعديل الشاحنة" },
-      editVehicleTitle: { en: "Edit vehicle", ar: "تعديل المركبة" },
       // The unit picker on an operation vehicle's capacity. A truck never
       // renders it — its unit is m³ by constraint, not by choice — so this is
       // the accessible name of a control only half the form ever shows.

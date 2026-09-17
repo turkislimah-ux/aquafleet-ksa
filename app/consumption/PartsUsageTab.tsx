@@ -41,7 +41,7 @@ import {
 import type {
   ExitPermit, ExitPermitLine, WorkOrder, WorkOrderPart, VehicleClass, VehicleType,
 } from "@/lib/db-types";
-import { vehicleLabel } from "@/lib/vehicle-types";
+import { operationTypeName, vehicleLabel } from "@/lib/vehicle-types";
 import ScrollLock from "@/components/ScrollLock";
 
 // `name_ar` rides along so a part name can go through arText(). It is nullable
@@ -86,8 +86,21 @@ export default function PartsUsageTab({
   // NAME, not plate — an operation vehicle carries its type here too. Every
   // truck-keyed figure on this tab (the table, the chart, the weekly summary
   // sentence) runs through this one resolver, so they all gained it together.
+  //
+  // THE JOINED STRING IS FOR PROSE ONLY — a chart label and a summary sentence,
+  // both of which are already running text in the page's language. The table
+  // below renders the plate in a `font-mono` run, and «ونش» inside that run is
+  // an Arabic word in an LTR monospace identifier; it takes `vehicleNameOf`
+  // instead, which hands back the two halves separately. Same split, same
+  // reason, as ArchiveTruckTab's `TruckName`.
   const plateOf = useMemo(() => {
     const m = new Map(trucks.map((t) => [t.id, vehicleLabel(t, vehicleTypeById, lang)]));
+    return (id: string) => m.get(id) ?? null;
+  }, [trucks, vehicleTypeById, lang]);
+  const vehicleNameOf = useMemo(() => {
+    const m = new Map(
+      trucks.map((t) => [t.id, { plate: t.plate, type: operationTypeName(t, vehicleTypeById, lang) }]),
+    );
     return (id: string) => m.get(id) ?? null;
   }, [trucks, vehicleTypeById, lang]);
   // DISPLAY name, so arText() decides which column is shown. The map is rebuilt
@@ -389,7 +402,7 @@ export default function PartsUsageTab({
             ? <button onClick={() => setModal("trucks")} className="text-xs text-brand-600 dark:text-brand-300 font-medium hover:underline">{t("consumption.partsUsage.viewAllTrucks", lang)}</button>
             : undefined}
         />
-        <TruckTable rows={truckRows.slice(0, 5)} lang={lang} />
+        <TruckTable rows={truckRows.slice(0, 5)} nameOf={vehicleNameOf} lang={lang} />
       </Card>
 
       {/* ---- 5) Parts consumption: two lists side by side ----
@@ -557,7 +570,7 @@ export default function PartsUsageTab({
 
       {modal === "trucks" && (
         <ListModal title={t("consumption.partsUsage.modalTrucksTitle", lang)} subtitle={win.label} onClose={() => setModal(null)} lang={lang}>
-          <TruckTable rows={truckRows} lang={lang} />
+          <TruckTable rows={truckRows} nameOf={vehicleNameOf} lang={lang} />
         </ListModal>
       )}
       {modal === "value" && (
@@ -907,7 +920,24 @@ function PairedTrendChart({ series, lang }: { series: Bucket[]; lang: Lang }) {
   );
 }
 
-function TruckTable({ rows, lang }: { rows: TruckUsage[]; lang: Lang }) {
+// `nameOf` rather than the row's own `plate`, for the operation half only: the
+// row carries the JOINED label (it is what the chart and the summary sentence
+// need), and this cell needs the two halves apart — the plate stays a mono LTR
+// identifier and the type is prose beside it, the shape ArchiveTruckTab's
+// `TruckName` already uses for the same reason.
+//
+// The row's own `plate` remains the fallback. `byTruck` substitutes an
+// "unknown truck" string when an id is not in the map, and that string must
+// still show rather than collapse to a blank cell.
+function TruckTable({
+  rows,
+  nameOf,
+  lang,
+}: {
+  rows: TruckUsage[];
+  nameOf: (id: string) => { plate: string; type: string | null } | null;
+  lang: Lang;
+}) {
   if (rows.length === 0) {
     return <p className="p-4 text-sm muted">{t("consumption.partsUsage.truckEmpty", lang)}</p>;
   }
@@ -922,19 +952,23 @@ function TruckTable({ rows, lang }: { rows: TruckUsage[]; lang: Lang }) {
         </tr>
       </thead>
       <tbody>
-        {rows.map((t) => (
+        {rows.map((t) => {
+          const name = nameOf(t.truckId);
+          return (
           <tr key={t.truckId}>
             <TD>
               <span className="inline-flex items-center gap-1.5">
                 <Truck className="h-3.5 w-3.5 muted" />
-                <span className="font-mono text-xs font-medium">{t.plate}</span>
+                <span className="font-mono text-xs font-medium">{name?.plate ?? t.plate}</span>
+                {name?.type && <span className="text-[11px] muted">{name.type}</span>}
               </span>
             </TD>
             <TD className="text-xs tabular-nums">{t.visits}</TD>
             <TD className="text-xs tabular-nums">{formatNum(t.qty, 2)}</TD>
             <TD className="text-xs tabular-nums font-medium">{formatSar(t.valueSar)}</TD>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </Table>
   );

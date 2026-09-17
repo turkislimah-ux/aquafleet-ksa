@@ -2,8 +2,9 @@
 
 // Client island for the Fleet page: the KPI strip, the filter bar (search /
 // status chips / station), the vehicle roster table, and the modals — Add, Edit
-// (both via the shared TruckFormModal) and Assign Driver (busy drivers are
-// locked; assigning frees the driver from any other truck first).
+// (both via the shared TruckFormModal) and Assign Driver (a driver already held
+// by another truck is LOCKED in the modal, and `assignDriver` refuses the same
+// case server-side rather than moving him — see its JSDoc in ./actions.ts).
 //
 // TWO TABS, ONE TABLE SHAPE — AND WHY THE SPLIT IS A PRIMARY TAB
 // -----------------------------------------------------------------------------

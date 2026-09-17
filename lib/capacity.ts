@@ -4,11 +4,10 @@
 // -----------------------------------------------------------------------------
 // Migration 0201 split a capacity that hid its unit inside a column NAME
 // (`capacity_m3`) into a value and a unit (`capacity_value` + `capacity_unit`).
-// The old column did not go away: ten live read sites — Dashboard, Trips,
-// Archive, Fleet list, Fleet detail, the maintenance pickers and the
-// utilization views — still read it, and rewriting all of them in the same
-// batch as the write path was the change most likely to move money. So the
-// column STAYS, and the database ties it to the new pair with a CHECK:
+// The old column did not go away: a dozen live sites read it, and rewriting all
+// of them in the same batch as the write path was the change most likely to
+// move money. So the column STAYS, and the database ties it to the new pair
+// with a CHECK:
 //
 //   capacity_m3 is not distinct from
 //     (case when capacity_unit = 'm3' then capacity_value end)
@@ -48,9 +47,18 @@
 // CHECK), and `capacity_value` null means "not stated" — the same two facts
 // capacityColumns() below produces.
 //
-// Still not here: `capacity_m3`. Nothing reads it through this file. The ten
-// existing m³ readers are untouched, and they stay correct because a litre-rated
-// vehicle carries NULL there by construction.
+// WHICH SITES MOVED, AND WHICH DID NOT. Every place that DISPLAYS one vehicle's
+// capacity as text now calls `formatCapacity` — the Fleet list cell, the Fleet
+// detail stat, the Archive truck matrix. What still reads `capacity_m3` raw is
+// exactly the arithmetic: the Fleet KPI strip's total (trucks tab only, and
+// trucks are m³ by constraint), the Trips tank-size fallback, the Dashboard's
+// delivery series (which reads the VIEW's aggregate, not the column), and the
+// utilization views in SQL. That division is the point — a sum needs one unit,
+// and a label needs to say which unit it is.
+//
+// Still not here: `capacity_m3`. Nothing reads it through this file. The
+// arithmetic readers above are untouched, and they stay correct because a
+// litre-rated vehicle carries NULL there by construction.
 
 import type { CapacityUnit, VehicleClass } from "@/lib/db-types";
 import { t, type Lang } from "@/lib/i18n";
@@ -75,7 +83,14 @@ export const CAPACITY_UNITS = ["m3", "l"] as const;
 /** What an unstated unit means. Matches the column DEFAULT in 0201. */
 export const DEFAULT_CAPACITY_UNIT: CapacityUnit = "m3";
 
-export function isCapacityUnit(value: unknown): value is CapacityUnit {
+/**
+ * MODULE-PRIVATE on purpose. This narrows a RAW POSTED value on the way into
+ * `capacityColumns`, and that is the only place a raw unit should be turned
+ * into a stored one. Exported, it would be an invitation to validate a unit
+ * somewhere else and then write the columns by hand — the second capacity code
+ * path that `scripts/capacity-single-writer-check.mjs` exists to refuse.
+ */
+function isCapacityUnit(value: unknown): value is CapacityUnit {
   return typeof value === "string" && (CAPACITY_UNITS as readonly string[]).includes(value);
 }
 

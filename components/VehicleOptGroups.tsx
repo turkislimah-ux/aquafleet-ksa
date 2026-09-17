@@ -2,14 +2,15 @@
 
 // The `<option>` list for any `<select>` that offers BOTH vehicle classes.
 //
-// Three selects do — the Maintenance truck filter and its two job forms' truck
-// pickers, the Consumption exit-permit destination, and the daily-trips
-// deferred-location picker. Before 0201 each of them was one flat
-// `trucks.map(...)`; after it, each would have needed the same partition, the
-// same two headings and the same "name the operation vehicle's type" rule
-// written out again. This is that, once. The partition itself is
-// lib/vehicle-groups.ts, which the Archive tab also uses to draw a separator
-// that is not an `<optgroup>`.
+// Seven selects do — Maintenance's two track filters (in-house and outsourced)
+// and its two job forms' pickers, the Consumption exit-permit destination, the
+// Archive Truck tab's job-history filter, and the daily-trips deferred-location
+// picker. Before 0201 each of them was one flat `trucks.map(...)`; after it,
+// each would have needed the same partition, the same two headings and the same
+// "name the operation vehicle's type" rule written out again. This is that,
+// once. The partition itself is lib/vehicle-groups.ts, which the Archive tab
+// ALSO uses a second time — for the separator row inside its roster table,
+// which is not an `<optgroup>` and cannot be one.
 //
 // WHY `<optgroup>` AND NOT A DISABLED "─── Other ───" ROW: the browser renders
 // the label as a heading rather than as a choice, a screen reader announces the

@@ -265,10 +265,16 @@ export type Truck = {
   model: string | null;
   year: number | null;
   /**
-   * LEGACY SPELLING OF CAPACITY, STILL LIVE, STILL READ EVERYWHERE. 0201 did
-   * not drop it — ten surfaces read it — but it is now DERIVED, not entered:
-   * the value when `capacity_unit = 'm3'`, and NULL otherwise, tied to the pair
-   * below by `trucks_capacity_m3_consistent_check`.
+   * LEGACY SPELLING OF CAPACITY, STILL LIVE, STILL READ. 0201 did not drop it,
+   * but it is now DERIVED, not entered: the value when `capacity_unit = 'm3'`,
+   * and NULL otherwise, tied to the pair below by
+   * `trucks_capacity_m3_consistent_check`.
+   *
+   * WHAT READS IT IS NOW THE ARITHMETIC, NOT THE LABELS. Every surface that
+   * renders one vehicle's capacity as text goes through `formatCapacity`, which
+   * reads the pair; what still reads this column is the Fleet KPI total, the
+   * Trips tank-size fallback and the utilization views — sums, which need a
+   * single unit. See lib/capacity.ts for why the split falls there.
    *
    * lib/capacity.ts is the only code permitted to write it, and
    * scripts/capacity-single-writer-check.mjs fails the test gate if that stops

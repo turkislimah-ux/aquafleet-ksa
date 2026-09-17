@@ -33,6 +33,7 @@ import { cn, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import type { Truck, Staff, RepairerType, Repairer, OutsourcedDescription, OutsourcedJob, VehicleType } from "@/lib/db-types";
 import VehicleOptGroups from "@/components/VehicleOptGroups";
+import { firstGroupedVehicle } from "@/lib/vehicle-groups";
 import {
   createOutsourcedJob,
   editOutsourcedJob,
@@ -101,14 +102,10 @@ export default function NewOutsourcedJobModal({
 }) {
   const isEdit = !!editingJob;
 
-  // First option AS OFFERED, not first row of the array — see the same note in
-  // NewWorkOrderModal. The array is plate-ordered across both classes; the
-  // picker lists trucks first.
+  // First option AS OFFERED, not first row of the array — see
+  // lib/vehicle-groups.ts, which owns the order this has to agree with.
   const [truckId, setTruckId] = useState(
-    editingJob?.truck_id ??
-      trucks.find((tr) => tr.vehicle_class === "truck")?.id ??
-      trucks[0]?.id ??
-      "",
+    editingJob?.truck_id ?? firstGroupedVehicle(trucks)?.id ?? "",
   );
   // Polish item 1 (manual title) — mirrors NewWorkOrderModal's own title
   // field exactly. Prefill with the real custom title only if one was

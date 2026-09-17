@@ -154,18 +154,22 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
     vehicle_class: vehicleClass,
     vehicle_type_id: vehicleTypeId,
     // status is a fixed literal, not read from the form — Auto Truck-Status
-    // Phase 2a removed the manual status control entirely (lib/truck-
-    // status.ts derives it fresh at every read instead). This column is
+    // Phase 2a removed the manual status control entirely. This column is
     // still NOT NULL at the schema level, so a new row needs SOME value.
     //
-    // THE TWO CLASSES SEED IT DIFFERENTLY, and the difference is not cosmetic.
-    // A truck's derived status turns on whether a driver is assigned, so
-    // "active" is a harmless seed that the deriver immediately overwrites. An
-    // operation vehicle can NEVER hold a driver (the constraint refuses it), so
-    // nothing will ever derive it "active" — seeding it that way would leave a
-    // permanent lie in the column. "idle" is what a vehicle sitting in the yard
-    // with no driver actually is, and it is what the Operation Vehicles tab
-    // renders as "In Yard".
+    // NOTHING READS IT AND NOTHING EVER WRITES IT AGAIN. Every screen shows
+    // `truckOpsStatus()`, derived at render from two live facts (any
+    // in_progress job, any assigned driver); the column is dormant, kept
+    // rather than dropped, like every other dormant column here. So this is
+    // not a starting value that some later process corrects — it is the only
+    // value the row will ever carry.
+    //
+    // WHICH IS WHY THE TWO CLASSES SEED IT DIFFERENTLY. A truck may take a
+    // driver, so "active" is a value that can at least be true of it. An
+    // operation vehicle can NEVER hold one (the constraint refuses it), so
+    // "active" on that row would be a statement that is false on the day it
+    // is written and false permanently. "idle" is what a vehicle sitting in
+    // the yard with no driver actually is.
     status: isOperation ? "idle" : "active",
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),

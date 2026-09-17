@@ -1,14 +1,14 @@
-// Splitting a mixed vehicle list into its two classes — ONE mechanism, four
-// call sites (0201).
+// Splitting a mixed vehicle list into its two classes — ONE mechanism (0201).
 //
 // `trucks` holds water trucks AND operation vehicles since 0201, so every
 // surface that lists the table unfiltered now lists two different kinds of
-// thing in one column. Four of them do: the Maintenance truck filter and its
-// two job forms, the Consumption exit-permit destination picker, the Archive
-// Truck tab, and the Daily Trips deferred-location picker. Each wants a
-// heading between the classes; none of them should decide on its own what the
-// order or the wording is, because a picker that says "Other" on one screen
-// and "Operation Vehicles" on the next describes the same rows twice.
+// thing in one column: Maintenance's two track filters and its two job forms,
+// the Consumption exit-permit destination picker, the Archive Truck tab (both
+// its job-history filter and its roster table), and the Daily Trips
+// deferred-location picker. Each wants a heading between the classes; none of
+// them should decide on its own what the order or the wording is, because a
+// picker that says "Other" on one screen and "Operation Vehicles" on the next
+// describes the same rows twice.
 //
 // THE ORDER IS A CONTENT DECISION, NOT A DEFAULT. Trucks lead everywhere,
 // because everywhere but one the question being asked is about the water
@@ -23,10 +23,10 @@
 // it is a vehicle ("Operation Vehicles"). Both label sets are here so the
 // choice is made from a list of two rather than invented per file.
 //
-// Rendering lives elsewhere — components/VehicleOptGroups.tsx for the three
-// `<select>`s, and the Archive tab draws its own row separator, because a
-// table separator and an `<optgroup>` are not the same element and pretending
-// they are would put markup decisions in a data module.
+// Rendering lives elsewhere — components/VehicleOptGroups.tsx for every
+// `<select>`, and the Archive tab draws its own row separator, because a table
+// separator and an `<optgroup>` are not the same element and pretending they
+// are would put markup decisions in a data module.
 
 import type { VehicleClass } from "@/lib/db-types";
 import type { TKey } from "@/lib/i18n";
@@ -92,4 +92,26 @@ export function groupVehiclesByClass<T extends VehicleClassRow>(
       rows: cls === "operation" ? operation : trucks,
     }))
     .filter((g) => g.rows.length > 0);
+}
+
+/**
+ * The row a grouped picker offers FIRST — what a form should pre-select.
+ *
+ * `rows[0]` is the wrong answer and looks like the right one. The arrays these
+ * pickers are fed are plate-ordered across both classes, so `rows[0]` can be an
+ * operation vehicle sitting under a heading the reader has to scroll to, while
+ * the select shows a truck at the top.
+ *
+ * IT IS HERE RATHER THAN IN THE FORMS BECAUSE IT IS THE ORDER'S ANSWER, NOT THE
+ * FORM'S. Both maintenance job forms used to spell it `find(cls === "truck")`,
+ * which is the same answer only for as long as `trucks-first` stays the order
+ * above — a silent drift, in a default value nobody re-checks. Empty groups are
+ * already dropped, so an operation-only fleet gets its own first row here with
+ * no special case.
+ */
+export function firstGroupedVehicle<T extends VehicleClassRow>(
+  rows: readonly T[],
+  order: VehicleGroupOrder = "trucks-first",
+): T | undefined {
+  return groupVehiclesByClass(rows, order)[0]?.rows[0];
 }

@@ -36,20 +36,6 @@ export function vehicleTypeLabel(vt: VehicleType | undefined | null, lang: Lang)
 }
 
 /**
- * The options a picker offers, in the order it offers them.
- *
- * ACTIVE ROWS, PLUS whichever one is already selected even if it has since been
- * retired. That second clause is not politeness. Without it, editing a vehicle
- * whose type was retired renders a `<select>` with no matching option, the
- * browser silently displays the first one, and pressing Save re-files the
- * vehicle as a type nobody chose. Retired-but-selected is shown so it can be
- * kept; it just cannot be picked fresh.
- *
- * Ordered by `sort_order` then label, which is what the add action's max+1
- * assumes — a tie between two rows added at the same moment falls back to the
- * name rather than to insertion luck.
- */
-/**
  * How a vehicle is NAMED away from the Fleet page: the plate, plus the type for
  * an operation vehicle.
  *
@@ -110,6 +96,20 @@ export function operationTypeName(
   return vt ? vehicleTypeLabel(vt, lang) : null;
 }
 
+/**
+ * The options a picker offers, in the order it offers them.
+ *
+ * ACTIVE ROWS, PLUS whichever one is already selected even if it has since been
+ * retired. That second clause is not politeness. Without it, editing a vehicle
+ * whose type was retired renders a `<select>` with no matching option, the
+ * browser silently displays the first one, and pressing Save re-files the
+ * vehicle as a type nobody chose. Retired-but-selected is shown so it can be
+ * kept; it just cannot be picked fresh.
+ *
+ * Ordered by `sort_order` then label, which is what the add action's max+1
+ * assumes — a tie between two rows added at the same moment falls back to the
+ * name rather than to insertion luck.
+ */
 export function vehicleTypeOptions(
   types: VehicleType[],
   selectedId: string | null,

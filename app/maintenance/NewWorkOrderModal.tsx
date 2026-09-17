@@ -46,6 +46,7 @@ import { cn, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings, Warehouse, VehicleType } from "@/lib/db-types";
 import VehicleOptGroups from "@/components/VehicleOptGroups";
+import { firstGroupedVehicle } from "@/lib/vehicle-groups";
 import { createWorkOrder, editWorkOrder, saveWorkOrderTitle, addRepairDescription } from "./actions";
 import { hourlyLaborCost } from "./laborCost";
 import { MechanicPicker } from "./MechanicPicker";
@@ -127,16 +128,11 @@ export default function NewWorkOrderModal({
   const isEdit = !!editingWorkOrder;
   const editableStatus = editingWorkOrder?.status ?? "open";
 
-  // THE FIRST OPTION THE PICKER OFFERS, not the first row of the array. The
-  // array is plate-ordered across both classes, while the picker lists trucks
-  // first — so `trucks[0]` could pre-select a crane sitting under a heading the
-  // reader has to scroll to. Falls back to `trucks[0]` for an operation-only
-  // fleet, which is the same row the picker shows first in that case.
+  // THE FIRST OPTION THE PICKER OFFERS, not the first row of the array —
+  // asked of the grouping itself, so this default cannot drift from the order
+  // the `<VehicleOptGroups>` below actually renders. See lib/vehicle-groups.ts.
   const [truckId, setTruckId] = useState(
-    editingWorkOrder?.truck_id ??
-      trucks.find((tr) => tr.vehicle_class === "truck")?.id ??
-      trucks[0]?.id ??
-      "",
+    editingWorkOrder?.truck_id ?? firstGroupedVehicle(trucks)?.id ?? "",
   );
   // Polish item 1 (manual title) — one optional field, EN or AR, shown on
   // BOTH create and edit (moved out of a separate detail-view inline
