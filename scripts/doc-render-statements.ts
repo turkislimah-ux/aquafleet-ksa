@@ -103,6 +103,7 @@ import { buildCustomHtml } from "../lib/docs/custom";
 import { buildDailyTripsHtml } from "../lib/docs/daily-trips";
 import { buildNarrativeHtml } from "../lib/docs/narrative";
 import { buildOpsHtml } from "../lib/docs/operations";
+import { buildPayslipHtml } from "../lib/docs/payslip";
 import { buildPnlHtml } from "../lib/docs/pnl";
 import { buildReceivablesHtml } from "../lib/docs/receivables";
 import { buildRevenueHtml } from "../lib/docs/revenue";
@@ -111,6 +112,7 @@ import { buildCustomVm, type CustomDocInput } from "../lib/docvm/custom";
 import { buildDailyDocVm, type DailyDocInput } from "../lib/docvm/daily-trips";
 import { buildNarrativeVm, type NarrativeDocInput } from "../lib/docvm/narrative";
 import { buildOpsVm, type OpsDocDriver, type OpsDocInput } from "../lib/docvm/operations";
+import { buildPayslipVm, resolvePayslipBank, type PayslipDocInput } from "../lib/docvm/payslip";
 import { buildPnlVm, type PnlDocInput } from "../lib/docvm/pnl";
 import { buildReceivablesVm, type ReceivablesDocInput } from "../lib/docvm/receivables";
 import { buildRevenueVm, type RevenueDocInput } from "../lib/docvm/revenue";
@@ -118,9 +120,11 @@ import { fill, t, type Lang } from "../lib/i18n";
 import {
   AGING_ORDER, buildNarrative, isPeriodInProgress, monthsIn, periodLabel, peakOver,
   priorPeriodStart, sumOver,
-  type CollectionsRow, type ExpenseCategoryPeriodRow, type MetricDictionaryRow,
-  type OperationsRow, type PnlPeriodRow, type RevenueInvoiceRow, type VatSourceDocRow,
+  type CollectionsRow, type ExpenseCategoryPeriodRow, type IssuedPayslipRow,
+  type MetricDictionaryRow, type OperationsRow, type PayslipBasisRow,
+  type PnlPeriodRow, type RevenueInvoiceRow, type VatSourceDocRow,
 } from "../lib/reports";
+import type { DriverViolationView, ViolationType } from "../lib/violations";
 import { buildReport, GROUPING_TKEY, type BuilderSelection } from "../lib/report-builder";
 import { formatDayKeyLang } from "../lib/utils";
 
@@ -1252,6 +1256,171 @@ const dailyInput = (
 });
 
 // ---------------------------------------------------------------------------
+// PAYSLIP — the one sheet that is handed to the person it is about (0202).
+// ---------------------------------------------------------------------------
+// SYNTHETIC, and named so: unlike the statement fixtures above these were not
+// lifted out of the database — the four cases exist to pin four branches, and
+// no live month holds all four at once. The arithmetic is honest everywhere
+// (net = base + commission + specials + adjustments + bonus − deductions),
+// because a sheet whose ledger does not add up proves only that nobody read it.
+//
+// The BANK LINE is why the sheet enters the corpus now: 0202 put a routing
+// pair on the masthead, so the print change must sit under the A4 proof like
+// every other sheet. The bank is resolved through resolvePayslipBank — the
+// same call the app makes — so the corpus also pins the PAIR RULE (half a
+// pair renders as NOTHING) and the 0201 lookup rule (a retired bank keeps
+// its name for the driver still on it).
+
+const PS_BANKS = [
+  { id: "bk-rjhi", key: "RJHI", label: "Al Rajhi Bank", label_ar: "مصرف الراجحي" },
+  // RETIRED in bank_codes (active=false there). The resolver takes ALL rows,
+  // so the driver still pointing here keeps the bank's name on his slip.
+  { id: "bk-samb", key: "SAMB", label: "Saudi American Bank", label_ar: "البنك السعودي الأمريكي" },
+];
+
+const PS_DRIVERS = [
+  { id: "ps-d1", bank_code_id: "bk-samb", iban: "SA4420000001234567891234" },
+  { id: "ps-d2", bank_code_id: "bk-rjhi", iban: "SA0380000000608010167519" },
+  // HALF A PAIR — an IBAN with no bank. The resolver's rule: nothing renders,
+  // not a dash, not a lone account number someone would hand to a teller.
+  { id: "ps-d3", bank_code_id: null, iban: "SA9160000000987654321098" },
+  { id: "ps-d4", bank_code_id: "bk-rjhi", iban: "SA7710000011223344556677" },
+];
+const psBank = (driverId: string) =>
+  resolvePayslipBank(PS_DRIVERS.find((d) => d.id === driverId), PS_BANKS);
+
+// Every basis row in full — the vm reads identity and flags off it even when
+// a frozen document owns the money figures.
+const psRow = (over: Partial<PayslipBasisRow>): PayslipBasisRow => ({
+  period_start: "2026-08-01",
+  driver_id: "ps-d1",
+  driver_name: "Omar Al-Harbi",
+  base_salary_sar: 4000,
+  salary_missing: false,
+  hire_date_missing: false,
+  commission_basis: "none",
+  commission_settled: false,
+  payout_count: 0,
+  commission_sar: 0,
+  specials_sar: 0,
+  adjustments_sar: 0,
+  bonus_sar: 0,
+  issued_payslip_id: null,
+  issued_payslip_number: null,
+  terminated: false,
+  termination_date: null,
+  net_sar: 4000,
+  violation_deduction_sar: 0,
+  deductions_sar: 0,
+  unabsorbed_sar: 0,
+  ...over,
+});
+
+const PS_VTYPES: ViolationType[] = [
+  { id: "vt-speed", key: "speeding", label: "Speeding", label_ar: "تجاوز السرعة", is_default: true, active: true },
+  // Retired type — the live branch must still print its name (typeById holds
+  // every type, active or not, same as the app's fetch).
+  { id: "vt-park", key: "parking", label: "Illegal Parking", label_ar: "وقوف خاطئ", is_default: false, active: false },
+];
+
+const psFine = (over: Partial<DriverViolationView>): DriverViolationView => ({
+  id: "v-0",
+  driver_id: "ps-d2",
+  violation_type_id: "vt-speed",
+  ref_no: "TRF-0000",
+  amount_sar: 0,
+  violation_date: "2026-09-05",
+  payment_status: "not_paid",
+  note: null,
+  voided_at: null,
+  created_by: null,
+  created_at: "2026-09-05T08:00:00+03:00",
+  image_path: null,
+  settlement: { state: "unsettled", locked: false, payslipId: null },
+  ...over,
+});
+
+// ISSUED August — the frozen branch with everything on it: a settled payout
+// (chip ON), covered trips, two frozen fines fully absorbed, and a bank line
+// resolved through a RETIRED bank. 4000+850+150+200+300−250 = 5250.
+const PS_DOC_ISSUED: IssuedPayslipRow = {
+  id: "ps-doc-1",
+  payslip_number: "PS-2026-0007",
+  driver_id: "ps-d1",
+  period_start: "2026-08-01",
+  issued_at: "2026-09-02T10:00:00+03:00",
+  issued_by: "turkislimah@gmail.com",
+  commission_basis: "paid",
+  commission_settled: true,
+  base_salary_sar: 4000,
+  commission_sar: 850,
+  specials_sar: 150,
+  adjustments_sar: 200,
+  bonus_sar: 300,
+  violation_deduction_sar: 250,
+  deductions_sar: 250,
+  unabsorbed_sar: 0,
+  net_sar: 5250,
+  snapshot: {
+    driver_name: "Omar Al-Harbi",
+    salary_at_issue: 4000,
+    commission_basis: "paid",
+    payout_count: 1,
+    payouts: [{
+      id: "po-1", period_label: "Aug 1 – Aug 31", paid_at: "2026-09-02",
+      base_sar: 700, specials_sar: 150, adjustments_sar: 0, bonus_sar: 0, total_sar: 850,
+    }],
+    covered_trips: { count: 38, first_trip: "2026-08-01", last_trip: "2026-08-31" },
+    violations: {
+      month_total_sar: 250,
+      absorbed_sar: 250,
+      unabsorbed_sar: 0,
+      // Labels FROZEN at issue — the sheet prints these, not the live types.
+      items: [
+        { id: "v-f1", ref_no: "TRF-88214", type_key: "speeding", type_label: "Speeding", type_label_ar: "تجاوز السرعة", amount_sar: 150, violation_date: "2026-08-09", payment_status: "paid" },
+        { id: "v-f2", ref_no: "TRF-88790", type_key: "parking", type_label: "Illegal Parking", type_label_ar: "وقوف خاطئ", amount_sar: 100, violation_date: "2026-08-21", payment_status: "not_paid" },
+      ],
+    },
+  },
+};
+
+// ISSUED August, EMPTY EVERYTHING — no commission, no fines (the section still
+// prints, with its "none" sentence), no payouts, and NO BANK LINE: ps-d3
+// carries an IBAN but no bank, and half a pair renders as nothing.
+const PS_DOC_NOBANK: IssuedPayslipRow = {
+  id: "ps-doc-2",
+  payslip_number: "PS-2026-0011",
+  driver_id: "ps-d3",
+  period_start: "2026-08-01",
+  issued_at: "2026-09-02T10:05:00+03:00",
+  issued_by: "turkislimah@gmail.com",
+  commission_basis: "none",
+  commission_settled: false,
+  base_salary_sar: 3200,
+  commission_sar: 0,
+  specials_sar: 0,
+  adjustments_sar: 0,
+  bonus_sar: 0,
+  violation_deduction_sar: 0,
+  deductions_sar: 0,
+  unabsorbed_sar: 0,
+  net_sar: 3200,
+  snapshot: { driver_name: "Tariq Al-Dossari", salary_at_issue: 3200, commission_basis: "none", payout_count: 0 },
+};
+
+const psInput = (lang: Lang, over: Partial<PayslipDocInput>): PayslipDocInput => ({
+  lang,
+  generatedAt: AT,
+  row: psRow({}),
+  doc: null,
+  violations: [],
+  violationTypes: PS_VTYPES,
+  running: false,
+  bank: null,
+  ...over,
+});
+
+// ---------------------------------------------------------------------------
 
 mkdirSync(OUT, { recursive: true });
 const written: string[] = [];
@@ -1398,6 +1567,62 @@ for (const lang of ["en", "ar"] as const) {
     })],
   ];
   for (const [name, input] of daily) write(name, lang, buildDailyTripsHtml(buildDailyDocVm(input)));
+
+  // --- Payslip -------------------------------------------------------------
+  const payslip: [string, PayslipDocInput][] = [
+    // The frozen branch with everything on it: settled payout, covered trips,
+    // two frozen fines fully absorbed, retired-bank line via the resolver.
+    ["payslip-issued-synthetic", psInput(lang, {
+      row: psRow({
+        commission_basis: "paid", commission_settled: true, payout_count: 1,
+        commission_sar: 850, specials_sar: 150, adjustments_sar: 200, bonus_sar: 300,
+        issued_payslip_id: "ps-doc-1", issued_payslip_number: "PS-2026-0007",
+        net_sar: 5250, violation_deduction_sar: 250, deductions_sar: 250,
+      }),
+      doc: PS_DOC_ISSUED,
+      bank: psBank("ps-d1"),
+    })],
+    // The RUNNING month, unissued: marks on the masthead, the standfirst
+    // saying why, LIVE fines (one against a retired type), earned-basis note.
+    // 3500+400−300 = 3600.
+    ["payslip-unissued-synthetic", psInput(lang, {
+      row: psRow({
+        period_start: "2026-09-01", driver_id: "ps-d2", driver_name: "Fahd Al-Qahtani",
+        base_salary_sar: 3500, commission_basis: "earned", commission_sar: 400,
+        net_sar: 3600, violation_deduction_sar: 300, deductions_sar: 300,
+      }),
+      violations: [
+        psFine({ id: "v-l1", ref_no: "TRF-90311", amount_sar: 120, violation_date: "2026-09-04", payment_status: "paid" }),
+        psFine({ id: "v-l2", ref_no: "TRF-90557", violation_type_id: "vt-park", amount_sar: 180, violation_date: "2026-09-08" }),
+      ],
+      running: true,
+      bank: psBank("ps-d2"),
+    })],
+    // Issued with NOTHING on it — zero commission, no fines (the section still
+    // prints its "none" sentence), and NO bank line: ps-d3 is half a pair.
+    ["payslip-nobank-synthetic", psInput(lang, {
+      row: psRow({
+        driver_id: "ps-d3", driver_name: "Tariq Al-Dossari", base_salary_sar: 3200,
+        issued_payslip_id: "ps-doc-2", issued_payslip_number: "PS-2026-0011", net_sar: 3200,
+      }),
+      doc: PS_DOC_NOBANK,
+      bank: psBank("ps-d3"),
+    })],
+    // The clamp's worst month: fines outran the pay, so Deductions shows what
+    // was TAKEN (800), the caveat says what was not (400), and net is zero.
+    // Closed month, unissued — issue is allowed, which is its own standfirst.
+    ["payslip-unabsorbed-synthetic", psInput(lang, {
+      row: psRow({
+        driver_id: "ps-d4", driver_name: "Nasser Al-Shammari", base_salary_sar: 800,
+        net_sar: 0, violation_deduction_sar: 1200, deductions_sar: 800, unabsorbed_sar: 400,
+      }),
+      violations: [
+        psFine({ id: "v-l3", driver_id: "ps-d4", ref_no: "TRF-87102", amount_sar: 1200, violation_date: "2026-08-15" }),
+      ],
+      bank: psBank("ps-d4"),
+    })],
+  ];
+  for (const [name, input] of payslip) write(name, lang, buildPayslipHtml(buildPayslipVm(input)));
 }
 
 for (const f of written) console.log(f);
