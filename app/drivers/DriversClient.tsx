@@ -766,12 +766,15 @@ export default function DriversClient({
                       </TD>
                       <TD>{stationName(d.home_station) ?? <span className="muted">—</span>}</TD>
                       <TD>{pillFor(d)}</TD>
-                      {/* Item 7 — the plate is one of the two things people scan
-                          this table for (that and the name), and at font-mono
-                          text-xs regular it was the faintest cell in the row.
-                          Bumped to the body size and semibold so it carries the
-                          same weight as the driver name opposite it. */}
-                      <TD>{truck ? <span className="font-mono text-sm font-semibold">{truck.plate}</span> : <span className="muted">—</span>}</TD>
+                      {/* font-mono text-xs, regular — the value the preview
+                          roster uses for this exact cell (pages-1.js drivers
+                          table truck column) and the same treatment the app's
+                          own maintenance rows give a plate. An earlier pass had
+                          bumped this to text-sm semibold ("Item 7"); Turki
+                          reversed that on 2026-09-18 — it read too heavy
+                          against the rest of the row. Mono stays: a plate is a
+                          code, not a word. */}
+                      <TD>{truck ? <span className="font-mono text-xs">{truck.plate}</span> : <span className="muted">—</span>}</TD>
                       <TD>
                         {(activeProjectNamesByDriver[d.id]?.length ?? 0) > 0 ? (
                           <div className="flex flex-col gap-1">
