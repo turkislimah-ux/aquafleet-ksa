@@ -8,6 +8,14 @@ const nextConfig = {
   // server, which is the exact failure that script exists to prevent.
   // The rule, and the failure it prevents, are stated in that script's header.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  experimental: {
+    serverActions: {
+      // Default is 1 MB, which silently rejected invoice-photo uploads at the
+      // framework layer before the server action ever ran. Client pre-gates
+      // (lib/upload-image.ts) keep real batches well under this.
+      bodySizeLimit: "15mb",
+    },
+  },
 };
 
 module.exports = nextConfig;

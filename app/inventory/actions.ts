@@ -1133,3 +1133,57 @@ export async function rejectReceipt(
   }
   return { error: null, receipt };
 }
+
+// ---------------------------------------------------------------------------
+// Saved-invoice viewer (read-only). Until now NOTHING read
+// stock_receipt_files back — files were written at receive time and then
+// unreachable from the UI. Signed URLs expire after 300s, so the modal
+// fetches fresh links on EVERY open and never caches them (same TTL +
+// createSignedUrls pattern as app/maintenance/osActions.ts's
+// getWorkshopPaymentFileSignedUrls). A file whose signing failed comes back
+// with url: null — the gallery shows an error tile for it, never a blank.
+// ---------------------------------------------------------------------------
+
+export type ReceiptFileLink = {
+  id: string;
+  file_name: string;
+  mime_type: string | null;
+  url: string | null;
+};
+
+export async function getReceiptFiles(
+  receiptId: string,
+): Promise<{ error: string | null; files?: ReceiptFileLink[] }> {
+  const supabase = createClient();
+
+  const { data: rows, error } = await supabase
+    .from("stock_receipt_files")
+    .select("id, storage_path, file_name, mime_type")
+    .eq("receipt_id", receiptId)
+    .order("uploaded_at", { ascending: true });
+  if (error) return { error: error.message };
+  if (!rows || rows.length === 0) return { error: null, files: [] };
+
+  const paths = rows.map((r) => r.storage_path as string);
+  const { data: signed, error: signErr } = await supabase.storage
+    .from(INVOICE_BUCKET)
+    .createSignedUrls(paths, 300);
+  if (signErr || !signed) {
+    return { error: signErr?.message ?? "Could not generate invoice links." };
+  }
+
+  const byPath = new Map<string, string>();
+  for (const item of signed) {
+    if (item.path && item.signedUrl) byPath.set(item.path, item.signedUrl);
+  }
+
+  return {
+    error: null,
+    files: rows.map((r) => ({
+      id: r.id as string,
+      file_name: (r.file_name as string | null) ?? "invoice",
+      mime_type: (r.mime_type as string | null) ?? null,
+      url: byPath.get(r.storage_path as string) ?? null,
+    })),
+  };
+}

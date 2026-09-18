@@ -45,7 +45,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { X, Save, ChevronDown } from "lucide-react";
+import { X, Save, ChevronDown, Paperclip, Eye } from "lucide-react";
 import { Btn, Card } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { Warehouse, Part, Supplier, Unit } from "@/lib/db-types";
@@ -58,10 +58,12 @@ import {
   createPart,
   createUnit,
   updatePart,
+  getReceiptFiles,
   type SupplierInput,
   type PartInput,
   type UnitInput,
   type PartUpdateInput,
+  type ReceiptFileLink,
 } from "./actions";
 import ScrollLock from "@/components/ScrollLock";
 import { arText, t } from "@/lib/i18n";
@@ -1463,5 +1465,115 @@ export function InvoiceFileTile({
         ×
       </button>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Saved-invoice gallery — THE one shared viewer for a receipt's uploaded
+// files, rendered on every surface where a receipt or PO is reviewed
+// (ReceiptDetailModal, PODetailModal after receive, and the Approve/Reject
+// vote dialogs). Lives here — the established leaf module — so all of those
+// PurchaseOrders.tsx surfaces AND anything InventoryClient-side can render
+// it without a new import edge; there is deliberately NO second copy of
+// this markup anywhere.
+//
+// Self-contained: fetches (and freshly SIGNS, 300s TTL) via
+// getReceiptFiles on every mount. Every host modal unmounts on close, so
+// each open re-signs and a stale URL can never be reused. Tile vocabulary
+// mirrors InvoiceFileTile above (70px thumbnail / PDF badge, filename row,
+// hover brand border) — but these tiles OPEN in a new tab, with a
+// hover-reveal Eye where the pre-save × sits. A file whose signing failed
+// renders a rose error tile, never a blank; while loading, pulse-skeleton
+// tiles hold the space. Renders nothing at all only when the receipt
+// genuinely has zero files and no error.
+export function ReceiptInvoiceFiles({ receiptId, lang }: { receiptId: string; lang: "en" | "ar" }) {
+  const [files, setFiles] = useState<ReceiptFileLink[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getReceiptFiles(receiptId)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.error) {
+          setLoadError(res.error);
+          setFiles([]);
+        } else {
+          setFiles(res.files ?? []);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLoadError(t("inventory.shared.fileOpenFailed", lang));
+        setFiles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [receiptId, lang]);
+
+  if (files !== null && files.length === 0 && !loadError) return null;
+
+  return (
+    <Card className="!p-3 mb-4">
+      <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+        <Paperclip className="h-4 w-4 text-brand-600" />
+        {t("inventory.shared.invoiceFiles", lang)}
+        {files !== null && <span className="muted text-xs font-normal">({files.length})</span>}
+      </h4>
+      {loadError && <p className="text-xs text-rose-600 dark:text-rose-400 mb-2">{loadError}</p>}
+      <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))" }}>
+        {files === null
+          ? [0, 1].map((i) => (
+              <div
+                key={i}
+                className="rounded-lg border overflow-hidden animate-pulse"
+                style={{ borderColor: "rgb(var(--border))" }}
+              >
+                <div className="h-[70px] bg-black/5 dark:bg-white/5" />
+                <div className="h-[22px]" />
+              </div>
+            ))
+          : files.map((f) =>
+              f.url ? (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => window.open(f.url as string, "_blank", "noopener")}
+                  title={f.file_name}
+                  className="group relative rounded-lg border overflow-hidden flex flex-col text-start transition-all hover:border-brand-500 hover:shadow-md"
+                  style={{ borderColor: "rgb(var(--border))" }}
+                >
+                  {f.mime_type?.startsWith("image/") ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={f.url} alt={f.file_name} className="w-full h-[70px] object-cover block" />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-[70px] gap-1 bg-rose-500/[0.06] w-full">
+                      <span className="bg-rose-700 text-white text-[10px] font-bold px-1.5 py-0.5 rounded tracking-wide">
+                        {f.mime_type === "application/pdf" ? "PDF" : "FILE"}
+                      </span>
+                    </div>
+                  )}
+                  <span className="text-[11px] muted px-1.5 py-1 truncate w-full">{f.file_name}</span>
+                  <span className="absolute top-1 end-1 w-5 h-5 grid place-items-center rounded-full bg-brand-600 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Eye className="h-3 w-3" />
+                  </span>
+                </button>
+              ) : (
+                <div
+                  key={f.id}
+                  className="rounded-lg border border-rose-300 dark:border-rose-900/50 overflow-hidden flex flex-col"
+                >
+                  <div className="flex items-center justify-center h-[70px] px-2 bg-rose-500/[0.06]">
+                    <p className="text-[10px] text-rose-600 dark:text-rose-400 text-center leading-snug">
+                      {t("inventory.shared.fileOpenFailed", lang)}
+                    </p>
+                  </div>
+                  <span className="text-[11px] muted px-1.5 py-1 truncate">{f.file_name}</span>
+                </div>
+              )
+            )}
+      </div>
+    </Card>
   );
 }

@@ -103,12 +103,14 @@ import {
   NewSupplierModal,
   AddPartModal,
   InvoiceFileTile,
+  ReceiptInvoiceFiles,
   PartPicker,
 } from "./SharedCreateModals";
 import { categoryLabel } from "@/lib/inventory-labels";
 import { computePartFinanceStats, partAiTip } from "@/lib/part-finance";
 import ScrollLock from "@/components/ScrollLock";
 import { arText, fill, plural, t } from "@/lib/i18n";
+import { prepareUploadImage, batchBytes, MAX_PREPARED_FILE_BYTES, MAX_BATCH_BYTES } from "@/lib/upload-image";
 // THE PRINTED PURCHASE ORDER IS A DOCUMENT, not this DOM with the chrome hidden.
 // The view-model decides every word and figure, the renderer only the look, and
 // printHtml owns the transport — a hidden same-origin iframe the browser prints
@@ -669,55 +671,61 @@ export function NewPOModal({
     setSaving(status);
     setError(null);
 
-    // "Risky batch" Stage 3, item 6 — editing an existing draft goes
-    // through updatePurchaseOrder() (no RPC, see its own header comment)
-    // instead of createPurchaseOrder(). Everything after this point
-    // (Issue now, error handling) is identical either way — both return
-    // the same { error, po } shape.
-    const saveRes = editingPO
-      ? await updatePurchaseOrder(editingPO.po.id, {
-          supplier_id: supplierId,
-          warehouse_id: warehouseId,
-          lines,
-          expected_delivery: expectedDelivery || null,
-          note: note.trim() || null,
-        })
-      : await createPurchaseOrder({
-          supplier_id: supplierId,
-          warehouse_id: warehouseId,
-          lines,
-          expected_delivery: expectedDelivery || null,
-          note: note.trim() || null,
-          ai_generated: !!aiSuggestion,
-          ai_rationale: aiSuggestion?.rationale.en ?? null,
-          ai_rationale_ar: aiSuggestion?.rationale.ar ?? null,
-        });
-    if (saveRes.error || !saveRes.po) {
-      setSaving(null);
-      setError(saveRes.error ?? (t("inventory.po.couldNotSave", lang)));
-      return;
-    }
+    // try/catch so a network drop can't skip setSaving(null) and leave the
+    // button stuck on "Saving…" with no message (the finally owns it).
+    try {
+      // "Risky batch" Stage 3, item 6 — editing an existing draft goes
+      // through updatePurchaseOrder() (no RPC, see its own header comment)
+      // instead of createPurchaseOrder(). Everything after this point
+      // (Issue now, error handling) is identical either way — both return
+      // the same { error, po } shape.
+      const saveRes = editingPO
+        ? await updatePurchaseOrder(editingPO.po.id, {
+            supplier_id: supplierId,
+            warehouse_id: warehouseId,
+            lines,
+            expected_delivery: expectedDelivery || null,
+            note: note.trim() || null,
+          })
+        : await createPurchaseOrder({
+            supplier_id: supplierId,
+            warehouse_id: warehouseId,
+            lines,
+            expected_delivery: expectedDelivery || null,
+            note: note.trim() || null,
+            ai_generated: !!aiSuggestion,
+            ai_rationale: aiSuggestion?.rationale.en ?? null,
+            ai_rationale_ar: aiSuggestion?.rationale.ar ?? null,
+          });
+      if (saveRes.error || !saveRes.po) {
+        setError(saveRes.error ?? (t("inventory.po.couldNotSave", lang)));
+        return;
+      }
 
-    if (status === "draft") {
-      setSaving(null);
-      onSaved();
-      onClose();
-      router.refresh();
-      return;
-    }
+      if (status === "draft") {
+        onSaved();
+        onClose();
+        router.refresh();
+        return;
+      }
 
-    const issueRes = await issuePurchaseOrder(saveRes.po.id);
-    setSaving(null);
-    if (issueRes.error) {
-      // The PO already exists as a draft at this point — don't lose it.
-      // Refresh so it shows up in the list, but keep the modal open so
-      // Turki sees exactly why "Issue now" didn't finish.
-      router.refresh();
-      setError(
-        fill(t("inventory.po.savedDraftIssuingFailed", lang), { po: saveRes.po.po_number }) +
-          issueRes.error
-      );
+      const issueRes = await issuePurchaseOrder(saveRes.po.id);
+      if (issueRes.error) {
+        // The PO already exists as a draft at this point — don't lose it.
+        // Refresh so it shows up in the list, but keep the modal open so
+        // Turki sees exactly why "Issue now" didn't finish.
+        router.refresh();
+        setError(
+          fill(t("inventory.po.savedDraftIssuingFailed", lang), { po: saveRes.po.po_number }) +
+            issueRes.error
+        );
+        return;
+      }
+    } catch {
+      setError(t("inventory.shared.saveFailedNetwork", lang));
       return;
+    } finally {
+      setSaving(null);
     }
 
     onSaved();
@@ -1254,6 +1262,7 @@ export function PODetailModal({
   po,
   lines,
   approvals,
+  receiptId,
   suppliers,
   warehouses,
   parts,
@@ -1269,6 +1278,10 @@ export function PODetailModal({
   lines: PurchaseOrderLine[];
   // Phase 6 (migration 0052) — this PO's approvals only (caller filters).
   approvals: PurchaseOrderApproval[];
+  // The PO's linked stock receipt (null until Receive Stock has run) —
+  // caller resolves it (stockReceipts.find(r => r.po_id === po.id)) so this
+  // modal can show the receipt's uploaded invoice files once they exist.
+  receiptId: string | null;
   suppliers: Supplier[];
   warehouses: Warehouse[];
   parts: Part[];
@@ -1678,6 +1691,13 @@ export function PODetailModal({
           </Card>
         )}
 
+        {/* Invoice files — shared viewer (ReceiptInvoiceFiles), only once a
+            receipt exists (Receive Stock has run and uploaded them). Sits
+            between Note and Approvals, the same slot ReceiptDetailModal
+            gives it — the approver reviewing a pending_approval PO reads
+            the actual invoice right above the vote record. */}
+        {receiptId && <ReceiptInvoiceFiles receiptId={receiptId} lang={lang} />}
+
         {/* Approvals section — preview's approvalsHtml (pages-2.js
             ~2357-2377), visible from pending_approval onward. Rejection is
             a single terminal event (0052), not a list — shown as its own
@@ -2038,9 +2058,30 @@ export function ReceivePOModal({
     onClose();
   }
 
-  function addFiles(list: FileList | null) {
-    if (!list || list.length === 0) return;
-    setFiles((prev) => [...prev, ...Array.from(list)]);
+  // Callers pass a PLAIN File[] copied synchronously from the input/drop
+  // event — resetting `input.value` clears the live FileList, so an async
+  // handler reading it later would see nothing. Images are downscaled +
+  // WebP-encoded per Turki's ruling; non-images pass through untouched;
+  // undecodable (HEIC) and still-oversize files are refused with a visible
+  // message instead of silently dropped. Same helper as InventoryClient's
+  // Add Parts flow — one preparation path for both.
+  async function addFiles(picked: File[]) {
+    if (picked.length === 0) return;
+    const prepared: File[] = [];
+    for (const original of picked) {
+      const result = await prepareUploadImage(original);
+      if (!result.ok) {
+        setError(fill(t("inventory.shared.fileUnreadable", lang), { name: result.fileName }));
+        return;
+      }
+      if (result.file.size > MAX_PREPARED_FILE_BYTES) {
+        setError(fill(t("inventory.shared.fileTooLarge", lang), { name: result.file.name }));
+        return;
+      }
+      prepared.push(result.file);
+    }
+    setError(null);
+    setFiles((prev) => [...prev, ...prepared]);
   }
 
   function removeFile(idx: number) {
@@ -2059,46 +2100,61 @@ export function ReceivePOModal({
       setError(t("inventory.shared.invoiceMustUploaded", lang));
       return;
     }
+    // Refuse a too-big batch HERE, with a message — otherwise the framework's
+    // serverActions body limit kills the request before the action runs and
+    // the user sees nothing.
+    if (batchBytes(files) > MAX_BATCH_BYTES) {
+      setError(t("inventory.shared.batchTooLarge", lang));
+      return;
+    }
 
     setSaving(true);
     setError(null);
 
-    let res: { error: string | null };
-    if (detached) {
-      // Plain loose receipt (0047) — same RPC the header's "Add Parts" flow
-      // already uses. Uses the PO's own supplier_id/warehouse_id (not
-      // editable here — detaching doesn't change WHAT was received, only
-      // whether it gets reconciled against the PO). No po_id, no PO status
-      // change, no PO line writes — the PO stays exactly as it was.
-      const looseLines: ReceiveLine[] = receiveLines.map((l) => ({
-        part_id: l.part_id,
-        qty: Number(l.received_qty),
-        unit_price_sar: Number(l.received_unit_price_sar),
-      }));
-      const formData = new FormData();
-      formData.set("supplierId", po.supplier_id);
-      formData.set("warehouseId", po.warehouse_id);
-      formData.set("note", note.trim());
-      formData.set("linesJson", JSON.stringify(looseLines));
-      for (const file of files) formData.append("invoiceFiles", file);
-      res = await receiveLooseParts(formData);
-    } else {
-      const payload: ReceivePoLineInput[] = receiveLines.map((l) =>
-        l.line_id !== null
-          ? { line_id: l.line_id, received_qty: Number(l.received_qty), received_unit_price_sar: Number(l.received_unit_price_sar) }
-          : { part_id: l.part_id, received_qty: Number(l.received_qty), received_unit_price_sar: Number(l.received_unit_price_sar) }
-      );
-      const formData = new FormData();
-      formData.set("poId", po.id);
-      formData.set("note", note.trim());
-      formData.set("linesJson", JSON.stringify(payload));
-      for (const file of files) formData.append("invoiceFiles", file);
-      res = await receivePurchaseOrder(formData);
-    }
-    setSaving(false);
-    if (res.error) {
-      setError(res.error);
+    // try/catch so a network drop can't skip setSaving(false) and leave the
+    // button stuck on "Saving…" with no message (the finally owns it).
+    try {
+      let res: { error: string | null };
+      if (detached) {
+        // Plain loose receipt (0047) — same RPC the header's "Add Parts" flow
+        // already uses. Uses the PO's own supplier_id/warehouse_id (not
+        // editable here — detaching doesn't change WHAT was received, only
+        // whether it gets reconciled against the PO). No po_id, no PO status
+        // change, no PO line writes — the PO stays exactly as it was.
+        const looseLines: ReceiveLine[] = receiveLines.map((l) => ({
+          part_id: l.part_id,
+          qty: Number(l.received_qty),
+          unit_price_sar: Number(l.received_unit_price_sar),
+        }));
+        const formData = new FormData();
+        formData.set("supplierId", po.supplier_id);
+        formData.set("warehouseId", po.warehouse_id);
+        formData.set("note", note.trim());
+        formData.set("linesJson", JSON.stringify(looseLines));
+        for (const file of files) formData.append("invoiceFiles", file);
+        res = await receiveLooseParts(formData);
+      } else {
+        const payload: ReceivePoLineInput[] = receiveLines.map((l) =>
+          l.line_id !== null
+            ? { line_id: l.line_id, received_qty: Number(l.received_qty), received_unit_price_sar: Number(l.received_unit_price_sar) }
+            : { part_id: l.part_id, received_qty: Number(l.received_qty), received_unit_price_sar: Number(l.received_unit_price_sar) }
+        );
+        const formData = new FormData();
+        formData.set("poId", po.id);
+        formData.set("note", note.trim());
+        formData.set("linesJson", JSON.stringify(payload));
+        for (const file of files) formData.append("invoiceFiles", file);
+        res = await receivePurchaseOrder(formData);
+      }
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+    } catch {
+      setError(t("inventory.shared.saveFailedNetwork", lang));
       return;
+    } finally {
+      setSaving(false);
     }
     onReceived();
     router.refresh();
@@ -2341,7 +2397,7 @@ export function ReceivePOModal({
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
-              addFiles(e.dataTransfer.files);
+              void addFiles(Array.from(e.dataTransfer.files));
             }}
           >
             <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -2363,8 +2419,11 @@ export function ReceivePOModal({
                 multiple
                 className="sr-only"
                 onChange={(e) => {
-                  addFiles(e.target.files);
+                  // Copy BEFORE resetting value — the reset clears the live
+                  // FileList, and addFiles is async.
+                  const picked = e.target.files ? Array.from(e.target.files) : [];
                   e.target.value = "";
+                  void addFiles(picked);
                 }}
               />
             </div>
@@ -2648,6 +2707,11 @@ export function ApproveReceiptModal({
             <VoteSummary approvals={approvals} lang={lang} />
           </div>
 
+          {/* Invoice files — shared viewer (ReceiptInvoiceFiles): the vote
+              is cast HERE, so the evidence must be reviewable here too,
+              not only back in the detail modals. */}
+          {receiptId && <ReceiptInvoiceFiles receiptId={receiptId} lang={lang} />}
+
           {myVote && (
             <p className="text-xs muted mb-3 italic">
               {t(
@@ -2809,6 +2873,11 @@ export function RejectReceiptModal({
           <div className="mb-3">
             <VoteSummary approvals={approvals} lang={lang} />
           </div>
+
+          {/* Invoice files — shared viewer (ReceiptInvoiceFiles): the reject
+              vote is cast HERE, so the invoice evidence must be reviewable
+              here too, not only back in the detail modals. */}
+          {receiptId && <ReceiptInvoiceFiles receiptId={receiptId} lang={lang} />}
 
           {myVote && (
             <p className="text-xs muted mb-3 italic">
@@ -3400,6 +3469,12 @@ export function ReceiptDetailModal({
             <p className="text-sm whitespace-pre-wrap">{receipt.note}</p>
           </Card>
         )}
+
+        {/* Invoice files — the shared saved-invoice viewer (SharedCreateModals'
+            ReceiptInvoiceFiles): fetched + freshly signed on every open,
+            error tiles on failed signing, never a blank. Same component on
+            every review surface — no second copy of the markup. */}
+        <ReceiptInvoiceFiles receiptId={receipt.id} lang={lang} />
 
         {/* Votes card — same shape/position as PODetailModal's own
             "Approved by" card (icon + heading + count, list of voters,

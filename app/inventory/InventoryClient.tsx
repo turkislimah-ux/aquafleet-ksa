@@ -279,6 +279,7 @@ import {
   type ReceiveLine,
 } from "./actions";
 import { arText, fill, plural, t } from "@/lib/i18n";
+import { prepareUploadImage, batchBytes, MAX_PREPARED_FILE_BYTES, MAX_BATCH_BYTES } from "@/lib/upload-image";
 import { categoryLabel, lotStatusLabel, movementLabel } from "@/lib/inventory-labels";
 import { computePartFinanceStats } from "@/lib/part-finance";
 // THE PRINTED ITEM RECORD IS A DOCUMENT, not this drawer with the chrome
@@ -998,6 +999,9 @@ export default function InventoryClient({
         <PODetailModal
           lang={lang}
           po={viewPO}
+          /* Receipt for this PO (null until Receive Stock) — lets the detail
+             modal show the uploaded invoice files via ReceiptInvoiceFiles. */
+          receiptId={stockReceipts.find((r) => r.po_id === viewPO.id)?.id ?? null}
           lines={purchaseOrderLines}
           approvals={purchaseOrderApprovals.filter((a) => a.purchase_order_id === viewPO.id)}
           suppliers={suppliers}
@@ -2042,9 +2046,29 @@ function ReceivePartsModal({
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   }
 
-  function addFiles(list: FileList | null) {
-    if (!list || list.length === 0) return;
-    setFiles((prev) => [...prev, ...Array.from(list)]);
+  // Callers pass a PLAIN File[] copied synchronously from the input/drop
+  // event — resetting `input.value` clears the live FileList, so an async
+  // handler reading it later would see nothing (the "same file twice" bug's
+  // cousin). Images are downscaled + WebP-encoded per Turki's ruling;
+  // non-images pass through untouched; undecodable (HEIC) and still-oversize
+  // files are refused with a visible message instead of silently dropped.
+  async function addFiles(picked: File[]) {
+    if (picked.length === 0) return;
+    const prepared: File[] = [];
+    for (const original of picked) {
+      const result = await prepareUploadImage(original);
+      if (!result.ok) {
+        setError(fill(t("inventory.shared.fileUnreadable", lang), { name: result.fileName }));
+        return;
+      }
+      if (result.file.size > MAX_PREPARED_FILE_BYTES) {
+        setError(fill(t("inventory.shared.fileTooLarge", lang), { name: result.file.name }));
+        return;
+      }
+      prepared.push(result.file);
+    }
+    setError(null);
+    setFiles((prev) => [...prev, ...prepared]);
   }
 
   function removeFile(idx: number) {
@@ -2071,6 +2095,13 @@ function ReceivePartsModal({
       setError(t("inventory.shared.invoiceMustUploaded", lang));
       return;
     }
+    // Refuse a too-big batch HERE, with a message — otherwise the framework's
+    // serverActions body limit kills the request before the action runs and
+    // the user sees nothing.
+    if (batchBytes(files) > MAX_BATCH_BYTES) {
+      setError(t("inventory.shared.batchTooLarge", lang));
+      return;
+    }
 
     const formData = new FormData();
     formData.set("supplierId", supplierId);
@@ -2081,11 +2112,20 @@ function ReceivePartsModal({
 
     setSaving(true);
     setError(null);
-    const res = await receiveLooseParts(formData);
-    setSaving(false);
-    if (res.error) {
-      setError(res.error);
+    try {
+      const res = await receiveLooseParts(formData);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+    } catch {
+      // Network drop / framework-layer rejection — the action never ran, so
+      // nothing was written. Without this catch the throw skipped
+      // setSaving(false) and the button stuck on "Saving…" forever.
+      setError(t("inventory.shared.saveFailedNetwork", lang));
       return;
+    } finally {
+      setSaving(false);
     }
     onClose();
     router.refresh();
@@ -2329,7 +2369,7 @@ function ReceivePartsModal({
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
-              addFiles(e.dataTransfer.files);
+              void addFiles(Array.from(e.dataTransfer.files));
             }}
           >
             <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -2351,8 +2391,11 @@ function ReceivePartsModal({
                 multiple
                 className="sr-only"
                 onChange={(e) => {
-                  addFiles(e.target.files);
+                  // Copy BEFORE resetting value — the reset clears the live
+                  // FileList, and addFiles is async.
+                  const picked = e.target.files ? Array.from(e.target.files) : [];
                   e.target.value = "";
+                  void addFiles(picked);
                 }}
               />
             </div>
