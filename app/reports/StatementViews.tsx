@@ -44,7 +44,7 @@ import { Table, TH, TD, Btn } from "@/components/ui";
 // input and cannot be tested against fixed data.
 import { cn, formatSar, formatSarExact, formatNum, monthLabel } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
+import { t, fill, plural, arText, personName, type Lang } from "@/lib/i18n";
 // WATER_TYPE_LABELS stays ENGLISH this batch, deliberately. It lives in
 // lib/db-types.ts and is read by 20+ call sites across app/trips/**,
 // lib/invoiceDisplay.ts and a server action — exactly one of them is in
@@ -1900,13 +1900,23 @@ export function PayslipsStatement({
   registerPrint?: RegisterPrint;
 }) {
   const { lang } = useApp();
+  // The DISPLAYED name per driver, resolved from the drivers list (which
+  // carries name_ar) rather than the basis view's prejoined driver_name —
+  // the view stays untouched, and the screen's name follows the UI language.
+  // Fallback to the view's own name covers a basis row whose driver the list
+  // no longer holds.
+  const displayNameById = useMemo(
+    () => new Map(drivers.map((d) => [d.id, personName(d, lang)])),
+    [drivers, lang],
+  );
   const rows = useMemo(
     () => basis
       .filter((r) => r.period_start >= periodStart && r.period_start <= periodEnd)
       .sort((a, b) =>
         b.period_start.localeCompare(a.period_start) ||
-        a.driver_name.localeCompare(b.driver_name)),
-    [basis, periodStart, periodEnd],
+        (displayNameById.get(a.driver_id) ?? a.driver_name).localeCompare(
+          displayNameById.get(b.driver_id) ?? b.driver_name)),
+    [basis, periodStart, periodEnd, displayNameById],
   );
 
   // A month can only be issued once it has finished. The database refuses it
@@ -2010,6 +2020,7 @@ export function PayslipsStatement({
       <div className="card p-6">
         <PayslipDocument
           row={selected}
+          displayName={displayNameById.get(selected.driver_id) ?? selected.driver_name}
           doc={doc}
           violations={violationsByDriver[selected.driver_id] ?? []}
           violationTypes={violationTypes}
@@ -2123,7 +2134,7 @@ export function PayslipsStatement({
                         : "hover:bg-black/[0.03] dark:hover:bg-white/[0.04]",
                     )}
                   >
-                    <TD className="font-medium">{r.driver_name}</TD>
+                    <TD className="font-medium">{displayNameById.get(r.driver_id) ?? r.driver_name}</TD>
                     <TD className="muted">{monthLabelOf(r.period_start, lang)}</TD>
                     <TD className="text-end tabular-nums">{formatSar(salary)}</TD>
                     <TD className="text-end tabular-nums">{formatSar(commission)}</TD>
@@ -2374,9 +2385,15 @@ function FineChip({ tone, title, children }: {
  * driver_payslips, a preview reads every figure off the basis view.
  */
 function PayslipDocument({
-  row, doc, violations, violationTypes, running, bank, onBack, onIssue, issuing,
+  row, displayName, doc, violations, violationTypes, running, bank, onBack, onIssue, issuing,
 }: {
   row: PayslipBasisRow;
+  /**
+   * The register's language-following resolution of the driver's name
+   * (lib/i18n personName over the drivers list), passed down because the
+   * basis view carries only the prejoined English driver_name.
+   */
+  displayName: string;
   doc: IssuedPayslipRow | null;
   /**
    * This driver's LIVE fines, every month of them, settlement already resolved
@@ -2707,12 +2724,12 @@ function PayslipDocument({
           // beside it is monospace data and is never translated.
           ? <>{t("reports.payslips.payslipWord", lang)} <b className="font-mono font-bold">{doc.payslip_number}</b></>
           : t("reports.payslips.payslipNotIssued", lang)}
-        // The driver's name is entity data with no `_ar` column, so it renders
-        // as stored in both languages. The month beside it does NOT: a month
-        // name is a label, and monthLabelOf() now writes it in the reader's
-        // language — the same call every other month on this page makes. The
-        // YEAR stays Latin, like every other figure here.
-        period={`${row.driver_name} · ${monthLabelOf(row.period_start, lang)}`}
+        // The driver's name follows the UI language (personName, resolved by
+        // the register and passed as displayName). The month beside it too:
+        // monthLabelOf() writes it in the reader's language — the same call
+        // every other month on this page makes. The YEAR stays Latin, like
+        // every other figure here.
+        period={`${displayName} · ${monthLabelOf(row.period_start, lang)}`}
       />
 
       {/* THE BANK PAIR (0202), directly under the name — where the money goes,
@@ -2764,7 +2781,7 @@ function PayslipDocument({
               other seam here is a JSX `{" "}`. */}
           <p className="mt-1 text-[12px] leading-relaxed">
             {t("reports.payslips.confirmBefore", lang)}{" "}
-            <b>{row.driver_name}</b>
+            <b>{displayName}</b>
             {t("reports.payslips.confirmAfterName", lang)}{" "}
             <b>{monthLabelOf(row.period_start, lang)}</b>{" "}
             {t("reports.payslips.confirmAfterMonth", lang)}{" "}

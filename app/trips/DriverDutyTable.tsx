@@ -14,9 +14,9 @@ import { useMemo } from "react";
 import { Table, TH, TD, StatusPill } from "@/components/ui";
 import { type DriverState } from "@/lib/driver-state";
 import { useApp } from "@/components/AppShell";
-import { t } from "@/lib/i18n";
+import { t, personName } from "@/lib/i18n";
 
-type Driver = { id: string; name: string; status?: string };
+type Driver = { id: string; name: string; name_ar?: string | null; status?: string };
 type TruckLite = { id: string; plate: string; assigned_driver_id: string | null };
 type Duty = { onDuty: number; lastDelivered: string | null };
 
@@ -115,7 +115,7 @@ export default function DriverDutyTable({
                     </span>
                   </TD>
                   <TD className="font-medium">
-                    {d.name}
+                    {personName(d, lang)}
                     {disabled && reason && (
                       <div className="text-[11px] font-normal text-amber-600 dark:text-amber-400">
                         {reason}

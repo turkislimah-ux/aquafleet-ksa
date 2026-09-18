@@ -54,7 +54,7 @@ import LinkedIdField from "@/components/LinkedIdField";
 import PlateInput from "@/components/PlateInput";
 import ScrollLock from "@/components/ScrollLock";
 import { useApp } from "@/components/AppShell";
-import { t } from "@/lib/i18n";
+import { t, personName } from "@/lib/i18n";
 import { foldDigitsInPlace } from "@/lib/digits";
 
 // CAPACITY_OPTIONS_M3 = [33, 18, 6] IS GONE, AND MUST NOT COME BACK (0201).
@@ -276,7 +276,7 @@ export default function TruckFormModal({
                     <option value="">{t("fleet.form.unassigned", lang)}</option>
                     {drivers.map((d) => (
                       <option key={d.id} value={d.id}>
-                        {d.name}
+                        {personName(d, lang)}
                       </option>
                     ))}
                   </select>

@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural } from "@/lib/i18n";
+import { t, fill, plural, personName } from "@/lib/i18n";
 import { cn, formatDate, formatSarExact } from "@/lib/utils";
 import {
   docStatus, expirySummary,
@@ -394,7 +394,7 @@ export default function ArchiveClient({
     return {
       field,
       subjectId: subject.id,
-      subjectName: "name" in subject ? subject.name : subject.plate,
+      subjectName: "name" in subject ? personName(subject, lang) : subject.plate,
       currentNumber: cur.number,
       currentExpiry: cur.expiry,
     };
@@ -423,7 +423,7 @@ export default function ArchiveClient({
       field,
       value: linked.number,
       expiry: linked.expiry,
-      personName: subject ? ("name" in subject ? subject.name : subject.plate) : "",
+      personName: subject ? ("name" in subject ? personName(subject, lang) : subject.plate) : "",
     };
   })();
 
@@ -462,7 +462,7 @@ export default function ArchiveClient({
   }
 
   async function onRestoreDriver(d: ArchiveDriverRow) {
-    if (!confirm(fill(t("archive.confirmRestorePerson", lang), { name: d.name }))) return;
+    if (!confirm(fill(t("archive.confirmRestorePerson", lang), { name: personName(d, lang) }))) return;
     const res = await restoreDriver(d.id);
     if (res.error) {
       setActionError(res.error);
@@ -472,7 +472,7 @@ export default function ArchiveClient({
   }
 
   async function onRestoreStaff(s: ArchiveStaffRow) {
-    if (!confirm(fill(t("archive.confirmRestorePerson", lang), { name: s.name }))) return;
+    if (!confirm(fill(t("archive.confirmRestorePerson", lang), { name: personName(s, lang) }))) return;
     const res = await restoreStaff(s.id);
     if (res.error) {
       setActionError(res.error);

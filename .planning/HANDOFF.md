@@ -7,18 +7,18 @@
   `ibanChecksumOk` WARNS only (Turki 2026-09-17). Server never calls it —
   scripts/iban-check.ts grep-asserts. Company module (lib/bankAccounts.ts)
   has NO checksum (2026-09-05 ruling). Two rulings, deliberate.
-- **PERMIT DECLARATION CLOSED (77b7fd1):** print-only Employee Declaration,
-  part of signature section, every permit, EN+AR verbatim
-  (i18n printDeclaration*). One sanctioned addition beyond the mirror
-  (docvm header). `signatures(items, declaration?)` — no-declaration
-  path byte-identical. Page counts unmoved.
+- **PERMIT DECLARATION CLOSED (77b7fd1):** print-only, signature section,
+  every permit, EN+AR verbatim (i18n printDeclaration*).
+  `signatures(items, declaration?)` — no-declaration path byte-identical.
 - **Shell guard (282050f):** scripts/repo-root-check.sh (INIT_CWD) gates
-  npm test / test:db. Rule in CLAUDE.md §5.
+  npm test / test:db (CLAUDE.md §5).
 - **0202 bank export CLOSED:** `lib/bank-transfer.ts` IS the contract (not
   i18n), CP1256 bytes, frozen money + live routing pair rule, digits fold
   at row boundary. 45 checks in test:money.
 - **ENABLE/EMIT RULE — all nine report exports.** `resolveCsvRegistration`:
   nothing to emit = null = disabled button. Never register a raw builder.
+- **personName() (lib/i18n.ts): person names locale-aware app-side.
+  Group (b) prejoined views pending append-only name_ar cols.**
 - **Vehicles:** grouping/naming/capacity/tabs live in lib/vehicle-groups,
   vehicle-types, capacity, fleet-tabs — never re-derive.
   `v_fleet_state_now` includes operation vehicles ON PURPOSE.

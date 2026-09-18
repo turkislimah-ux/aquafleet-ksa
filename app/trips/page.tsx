@@ -12,7 +12,7 @@ type JoinedTrip = Trip & {
   project: { name: string } | null;
   customer: { name: string } | null;
   truck: { plate: string; capacity_m3: number | null } | null;
-  driver: { name: string } | null;
+  driver: { name: string; name_ar: string | null } | null;
 };
 
 // Project header fields the board needs (header + location).
@@ -135,7 +135,7 @@ export default async function TripsPage() {
       supabase
         .from("trips")
         .select(
-          "*, project:projects(name), customer:customers(name), truck:trucks(plate, capacity_m3), driver:drivers(name)"
+          "*, project:projects(name), customer:customers(name), truck:trucks(plate, capacity_m3), driver:drivers(name, name_ar)"
         )
         .order("created_at", { ascending: false }),
       supabase
@@ -189,7 +189,7 @@ export default async function TripsPage() {
       // duty/roster pickers — filtered at the fetch.
       supabase
         .from("drivers")
-        .select("id, name, status")
+        .select("id, name, name_ar, status")
         .is("terminated_at", null)
         .order("name", { ascending: true }),
       supabase.from("project_drivers").select("project_id, driver_id"),
@@ -271,6 +271,7 @@ export default async function TripsPage() {
     truckPlate: t.truck?.plate ?? null,
     truckCapacityM3: t.truck?.capacity_m3 ?? null,
     driverName: t.driver?.name ?? null,
+    driverNameAr: t.driver?.name_ar ?? null,
     invoiceLocked: t.invoice_id != null && paidInvoiceIds.has(t.invoice_id),
   }));
 
@@ -343,7 +344,7 @@ export default async function TripsPage() {
     assigned_driver_id: string | null;
     last_service_date: string | null;
   }[];
-  const drivers = (driversRes.data ?? []) as { id: string; name: string; status: DriverStatus; active: boolean }[];
+  const drivers = (driversRes.data ?? []) as { id: string; name: string; name_ar: string | null; status: DriverStatus; active: boolean }[];
   const topups = (topupsRes.data ?? []) as TopupRow[];
   const balanceReturns = (balanceReturnsRes.data ?? []) as BalanceReturnRow[];
 

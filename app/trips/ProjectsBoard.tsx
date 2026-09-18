@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural, type Lang } from "@/lib/i18n";
+import { t, fill, plural, personName, type Lang } from "@/lib/i18n";
 import { tripStageLabel, waterTypeLabel } from "@/lib/enum-labels";
 import { cn, formatSar, formatDateLangLocale, monthName, riyadhDayKey, RIYADH_TZ } from "@/lib/utils";
 import { stationBlockedForType, type StationOption, type WaterStationRow } from "@/lib/station-pricing";
@@ -74,6 +74,7 @@ type TripRow = Trip & {
   truckPlate: string | null;
   truckCapacityM3: number | null;
   driverName: string | null;
+  driverNameAr: string | null;
   // Finance bug fix — TRUE iff trip.invoice_id points at a status='paid'
   // invoice (computed server-side in page.tsx from the paid-only id set).
   // Distinct from merely "reserved" (invoice_id set, invoice not yet paid,
@@ -123,6 +124,7 @@ type ProjectHeader = {
 type DriverRow = {
   id: string;
   name: string;
+  name_ar: string | null; // display only — initials stay on the base name
   status: DriverState; // derived (Commit 2), NOT raw stored drivers.status
   truckPlate: string | null;
   tripsDay: number;
@@ -151,7 +153,7 @@ type CustomerOption = {
   email: string | null;
 };
 type TruckOption = { id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null; last_service_date: string | null };
-type DriverOption = { id: string; name: string; status: DriverStatus };
+type DriverOption = { id: string; name: string; name_ar: string | null; status: DriverStatus };
 // Full water_stations row (active + inactive) — feeds the "Manage stations"
 // popup. Imported from lib/station-pricing rather than re-declared: this shape
 // carries the two PRICE columns, and three hand-written copies of it is how a
@@ -556,7 +558,9 @@ function TripCard({
         </span>
       </div>
       <div className="text-xs mt-1">
-        {trip.driverName ?? <span className="muted">—</span>}
+        {trip.driverName || trip.driverNameAr
+          ? personName({ name: trip.driverName ?? "", nameAr: trip.driverNameAr }, lang)
+          : <span className="muted">—</span>}
       </div>
       {phaseRows}
       {action}
@@ -1262,7 +1266,7 @@ function ProjectCard({
                         {initials(r.name)}
                       </div>
                       <div className="min-w-0">
-                        <div className="font-medium text-sm truncate">{r.name}</div>
+                        <div className="font-medium text-sm truncate">{personName(r, lang)}</div>
                         <div className="text-[11px] muted font-mono truncate">#{r.id.slice(0, 8)}</div>
                       </div>
                     </div>
@@ -1493,6 +1497,7 @@ export default function ProjectsBoard({
         rows.push({
           id,
           name: d.name,
+          name_ar: d.name_ar,
           // Derived state (Commit 2), not raw d.status. Fallback "off_duty" if a
           // driver is somehow missing from driverStateById — shouldn't happen
           // (same drivers array feeds both), but degrade to the safe "not

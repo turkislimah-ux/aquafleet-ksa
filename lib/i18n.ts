@@ -11651,6 +11651,35 @@ export function arText(base: string, ar: string | null | undefined, lang: Lang):
   return trimmed ? trimmed : base;
 }
 
+// PERSON names — drivers and staff — follow the UI language EVERYWHERE
+// (Turki's 2026-09-18 directive): tables, cards, headers, pickers, tooltips,
+// toasts, dashboard, reports, search results. This is THE helper for that;
+// group-(a) surfaces call it instead of holding a local pick.
+//
+// It is arText() plus ONE extra rule arText deliberately lacks: an ENGLISH
+// fallback. arText's contract is "EN returns base untouched" so adopting it
+// could never change an English surface; a person name is different — a row
+// holding only an Arabic name should still name the person on the English UI
+// rather than render an empty cell. Both name columns are filled today, so
+// the fallback is belt-and-braces in both directions.
+//
+// Accepts both row shapes in the codebase — DB rows (`name_ar`) and the
+// camelCase view-model rows (`nameAr`, e.g. commission rows, the identity
+// viewer) — so no call site has to remap keys just to name a person.
+//
+// Sorting: a list ordered by person name orders by THIS value (the displayed
+// name), per the same directive. Matching/dedupe/type-to-confirm keys keep
+// the base column — arText's DISPLAY ONLY warning above still applies.
+export function personName(
+  p: { name: string; name_ar?: string | null; nameAr?: string | null },
+  lang: Lang,
+): string {
+  const ar = p.name_ar ?? p.nameAr ?? null;
+  if (lang === "ar") return arText(p.name, ar, lang);
+  const base = p.name.trim();
+  return base ? base : (ar ?? "").trim();
+}
+
 /**
  * Which grammatical form a counted noun takes.
  *

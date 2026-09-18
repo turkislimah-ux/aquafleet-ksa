@@ -99,7 +99,11 @@ export function periodRange(anchor: string, period: DailyPeriod): { from: string
 // INPUT SHAPES — exactly what the server action returns
 // --------------------------------------------------------------------------
 export type ReportProject = { id: string; name: string };
-export type ReportDriver = { id: string; name: string };
+// `name_ar` rides along for the SCREEN's language-following display
+// (lib/i18n personName); optional so fixture builders and the docvm — which
+// still reads base `name` — are untouched. The builder below neither reads
+// nor sorts on it.
+export type ReportDriver = { id: string; name: string; name_ar?: string | null };
 // `vehicle_class` is carried for the PICKER, not for the tables. The project
 // tables below only ever resolve a plate for a trip, and an operation vehicle
 // cannot have a trip (0201's shape check leaves it no driver), so nothing in

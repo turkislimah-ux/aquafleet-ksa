@@ -45,7 +45,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Printer, Plus, Pencil, Trash2, X, Check, AlertTriangle } from "lucide-react";
 import { Btn, PILL_TONE_CLS } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural, type Lang } from "@/lib/i18n";
+import { t, fill, plural, personName, type Lang } from "@/lib/i18n";
 import { cn, formatDayKeyLang } from "@/lib/utils";
 import {
   DAILY_PERIODS, periodRange, buildProjectTables, deferredTotals, validateDeferred,
@@ -199,8 +199,8 @@ export default function DailyTripsTab(
   const defTotals = useMemo(() => deferredTotals(defRows), [defRows]);
 
   const driverName = useMemo(
-    () => new Map((data?.drivers ?? []).map((d) => [d.id, d.name])),
-    [data],
+    () => new Map((data?.drivers ?? []).map((d) => [d.id, personName(d, lang)])),
+    [data, lang],
   );
   const truckPlate = useMemo(
     // `tr`, not `t`: the translator is in scope in this file now, and a map
@@ -573,7 +573,7 @@ export default function DailyTripsTab(
                                   className={cn("px-3 py-2 align-top font-medium", idle && "muted")}
                                   style={CARD_STYLE}
                                 >
-                                  {g.driverName}
+                                  {driverName.get(g.driverId) ?? g.driverName}
                                   {idle && (
                                     <span className="ms-1.5 text-[10px] font-normal muted">
                                       {t("reports.daily.noTrips", lang)}
@@ -663,7 +663,7 @@ export default function DailyTripsTab(
                     >
                       <option value="">{t("reports.daily.choose", lang)}</option>
                       {(data?.drivers ?? []).map((d) => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
+                        <option key={d.id} value={d.id}>{personName(d, lang)}</option>
                       ))}
                     </select>
                   </Field>

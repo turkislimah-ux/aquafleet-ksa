@@ -63,7 +63,7 @@ import {
 // they stay exactly as they are; this page keys off the SAME enums into
 // fleet.truckState / fleet.driverState instead. No other route is affected.
 import { useApp } from "@/components/AppShell";
-import { t, type Lang } from "@/lib/i18n";
+import { t, personName, type Lang } from "@/lib/i18n";
 import { Eye, Filter, Forklift, Pencil, Plus, Truck as TruckIcon, Users, X } from "lucide-react";
 import ScrollLock from "@/components/ScrollLock";
 import { useTabParam } from "@/lib/useTabParam";
@@ -686,7 +686,7 @@ export default function FleetClient({
                       className="inline-flex items-center gap-1.5 -mx-2 rounded-md px-2 py-1 text-start hover:bg-black/5 dark:hover:bg-white/5"
                     >
                       <Users className="h-3.5 w-3.5 muted shrink-0" />
-                      <span>{tr.driverName}</span>
+                      <span>{personName({ name: tr.driverName, nameAr: tr.driverNameAr }, lang)}</span>
                     </button>
                   ) : (
                     <Btn variant="outline" onClick={() => openAssign(tr)}>
@@ -1051,7 +1051,7 @@ export default function FleetClient({
                           : "cursor-pointer hover:bg-black/[0.03] dark:hover:bg-white/[0.04]",
                       )}
                     >
-                      <TD className="font-medium">{d.name}</TD>
+                      <TD className="font-medium">{personName(d, lang)}</TD>
                       <TD>
                         <StatusPill status={state} label={t(`fleet.driverState.${state}`, lang)} />
                       </TD>

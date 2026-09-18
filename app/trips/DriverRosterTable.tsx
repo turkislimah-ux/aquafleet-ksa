@@ -14,10 +14,10 @@ import { Check } from "lucide-react";
 import { Table, TH, TD, StatusPill } from "@/components/ui";
 import { type DriverState } from "@/lib/driver-state";
 import { useApp } from "@/components/AppShell";
-import { t, type Lang } from "@/lib/i18n";
+import { t, personName, type Lang } from "@/lib/i18n";
 import { monthName } from "@/lib/utils";
 
-type Driver = { id: string; name: string; status?: string };
+type Driver = { id: string; name: string; name_ar?: string | null; status?: string };
 type TruckLite = {
   id: string;
   plate: string;
@@ -145,7 +145,7 @@ export default function DriverRosterTable({
                     </span>
                   </TD>
                   <TD className="font-medium">
-                    {d.name}
+                    {personName(d, lang)}
                     {locked && reason && (
                       <div className="text-[11px] font-normal text-amber-600 dark:text-amber-400">
                         {reason}

@@ -45,7 +45,7 @@ import {
 // read them; this page keys off the SAME enums into fleet.truckState /
 // fleet.driverState.
 import { useApp } from "@/components/AppShell";
-import { t, type Lang, type TKey } from "@/lib/i18n";
+import { t, personName, type Lang, type TKey } from "@/lib/i18n";
 import ScrollLock from "@/components/ScrollLock";
 
 // Maintenance work TYPE -> dictionary key. Keyed off the stored type string,
@@ -236,7 +236,7 @@ export default function FleetDetailClient({
   outsourcedJobs: OutsourcedJob[];
   outsourcedJobRepairers: OutsourcedJobRepairer[];
   workshopPayments: WorkshopPayment[];
-  staffNames: { id: string; name: string }[];
+  staffNames: { id: string; name: string; name_ar?: string | null }[];
   repairerNames: { id: string; name: string }[];
   // Rolling-30 utilization for this truck (0130), or null when the view has no
   // row for it. The window's own bounds travel with the row.
@@ -247,7 +247,7 @@ export default function FleetDetailClient({
   const { lang } = useApp();
 
   // ---- Maintenance History (Phase 5) ----
-  const staffNameById = useMemo(() => new Map(staffNames.map((s) => [s.id, s.name])), [staffNames]);
+  const staffNameById = useMemo(() => new Map(staffNames.map((s) => [s.id, personName(s, lang)])), [staffNames, lang]);
   const repairerNameById = useMemo(() => new Map(repairerNames.map((r) => [r.id, r.name])), [repairerNames]);
 
   const partsCountByWo = useMemo(() => {
@@ -611,7 +611,7 @@ export default function FleetDetailClient({
                     {initials(driver.name)}
                   </div>
                   <div>
-                    <div className="font-medium">{driver.name}</div>
+                    <div className="font-medium">{personName(driver, lang)}</div>
                     {(() => {
                       const state = driverStateById[driver.id] ?? "off_duty";
                       return <StatusPill status={state} label={t(`fleet.driverState.${state}`, lang)} />;
@@ -636,7 +636,7 @@ export default function FleetDetailClient({
                     {initials(freedDriver.name)}
                   </div>
                   <div>
-                    <div className="font-medium">{freedDriver.name}</div>
+                    <div className="font-medium">{personName(freedDriver, lang)}</div>
                     {(() => {
                       const state = driverStateById[freedDriver.id] ?? "off_duty";
                       return <StatusPill status={state} label={t(`fleet.driverState.${state}`, lang)} />;
@@ -987,7 +987,7 @@ export default function FleetDetailClient({
                           : "cursor-pointer hover:bg-black/[0.03] dark:hover:bg-white/[0.04]",
                       )}
                     >
-                      <TD className="font-medium">{d.name}</TD>
+                      <TD className="font-medium">{personName(d, lang)}</TD>
                       <TD>
                         <StatusPill status={state} label={t(`fleet.driverState.${state}`, lang)} />
                       </TD>

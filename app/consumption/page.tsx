@@ -68,7 +68,7 @@ export default async function ConsumptionPage() {
     supabase.from("trucks").select("id, plate, vehicle_class, vehicle_type_id")
       .is("terminated_at", null).order("plate"),
     supabase.from("customers").select("id, name").is("archived_at", null).order("name"),
-    supabase.from("staff").select("id, name").is("terminated_at", null).order("name"),
+    supabase.from("staff").select("id, name, name_ar").is("terminated_at", null).order("name"),
     // Open FIFO lots — feeds the DRAFT cost preview only. Ordered exactly as
     // the database walks them (received_on asc, created_at asc), so the
     // preview and the eventual real stamp follow the same rule.

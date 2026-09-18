@@ -43,7 +43,7 @@ import { Stat, StatusPill } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { csvCell, CSV_SEP, CSV_SEP_DIRECTIVE, UTF8_BOM } from "@/lib/csv";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural } from "@/lib/i18n";
+import { t, fill, plural, personName } from "@/lib/i18n";
 import {
   addCommissionSpecial,
   updateCommissionSpecial,
@@ -319,7 +319,7 @@ export default function CommissionsTab({
     return s === "all" ? rows.length : rows.filter((r) => r.payoutStatus === s).length;
   }
 
-  const driverNameById = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers]);
+  const driverNameById = useMemo(() => new Map(drivers.map((d) => [d.id, personName(d, lang)])), [drivers, lang]);
 
   function exportCsv() {
     const header = ["Driver", "Driver ID", "Month", "Base SAR", "Trips", "Projects", "Specials SAR", "Adjustments SAR", "Bonus SAR", "Total SAR", "Payout Status"];
@@ -450,8 +450,8 @@ export default function CommissionsTab({
                         {(r.name.trim().split(/\s+/)[0]?.[0] ?? "?").toUpperCase()}
                       </div>
                       <div>
-                        <div className="font-medium">{r.name}</div>
-                        <div className="text-[11px] muted">{r.nameAr ?? ""}</div>
+                        <div className="font-medium">{personName(r, lang)}</div>
+                        <div className="text-[11px] muted">{(lang === "ar" ? r.name : r.nameAr) ?? ""}</div>
                       </div>
                     </div>
                   </td>
@@ -615,7 +615,7 @@ function BreakdownModal({
 
   // pending → review lines + Approve payout. approved → frozen for pay (Reopen to edit).
   const canReview = payoutStatus === "pending";
-  const driverName = driver?.name ?? driverId;
+  const driverName = driver ? personName(driver, lang) : driverId;
 
   async function run(fn: () => Promise<ActionResult>): Promise<void> {
     setBusy(true);
@@ -669,7 +669,7 @@ function BreakdownModal({
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-semibold">
             {fill(t("drivers.commTab.breakdownTitle", lang), { name: driverName })}
-            {driver?.name_ar ? <span className="muted font-normal"> · {driver.name_ar}</span> : null}
+            {(lang === "ar" ? driver?.name : driver?.name_ar) ? <span className="muted font-normal"> · {lang === "ar" ? driver?.name : driver?.name_ar}</span> : null}
             <span className="muted font-normal"> · {monthLabel(monthKey, lang)}</span>
           </h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>

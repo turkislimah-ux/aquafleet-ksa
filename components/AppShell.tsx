@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell, Sun, Moon, Globe, LogOut, X, Check, Settings } from "lucide-react";
 import type { Lang } from "@/lib/i18n";
-import { t, arText } from "@/lib/i18n";
+import { t, arText, personName } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { signOut } from "@/lib/actions/auth";
 import { NAV, type NavItem } from "@/lib/nav";
@@ -989,11 +989,12 @@ function AccountMenu({
   onSignOut: () => void;
 }) {
   const emailLocal = viewer?.email?.split("@")[0] ?? null;
-  // `?? ""` only feeds arText a string when there is no viewer at all; the
+  // `?? ""` only feeds personName a string when there is no viewer at all; the
   // result is still falsy, so the `|| emailLocal || "—"` chain behaves exactly
-  // as it did before.
+  // as it did before. personName rather than arText: the viewer is a PERSON,
+  // and person names follow the UI language with the EN-side fallback too.
   const displayName =
-    arText(viewer?.name ?? "", viewer?.nameAr, lang) || emailLocal || "—";
+    personName({ name: viewer?.name ?? "", nameAr: viewer?.nameAr }, lang) || emailLocal || "—";
   // Same pairing every other role display uses (StaffTab's `roleName`): the
   // Arabic name in Arabic mode when the role has one, the English label
   // otherwise. A custom role has no Arabic half and reads as typed in both.

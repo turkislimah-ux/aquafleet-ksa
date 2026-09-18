@@ -55,7 +55,7 @@ import type {
   ArchiveStaffRow,
 } from "@/lib/db-types";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
+import { t, fill, plural, arText, personName, type Lang } from "@/lib/i18n";
 import ScrollLock from "@/components/ScrollLock";
 
 export type StaffSubTab = "drivers" | "management" | "commissions" | "deleted";
@@ -187,7 +187,10 @@ export default function ArchiveStaffTab({
         .filter((d) => !d.terminated_at)
         .map((d) => ({
           id: d.id,
-          name: d.name,
+          // The DISPLAYED name, built once here: every render below — row,
+          // tooltip, doc-subject callback — reads Person.name, and the sort
+          // beneath orders by what the reader actually sees.
+          name: personName(d, lang),
           secondary: null,
           iqama_number: d.iqama_number,
           iqama_expiry: d.iqama_expiry,
@@ -195,7 +198,7 @@ export default function ArchiveStaffTab({
           license_expiry: d.license_expiry,
         }))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [drivers],
+    [drivers, lang],
   );
 
   const activeStaff = useMemo<Person[]>(
@@ -204,7 +207,7 @@ export default function ArchiveStaffTab({
         .filter((s) => s.active && !s.terminated_at)
         .map((s) => ({
           id: s.id,
-          name: s.name,
+          name: personName(s, lang),
           secondary: s.role,
           iqama_number: s.iqama_number,
           iqama_expiry: s.iqama_expiry,
@@ -212,7 +215,7 @@ export default function ArchiveStaffTab({
           license_expiry: null,
         }))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [staff],
+    [staff, lang],
   );
 
   const terminatedDrivers = useMemo(
@@ -721,8 +724,8 @@ export default function ArchiveStaffTab({
               {terminatedDrivers.map((d) => (
                 <tr key={d.id}>
                   <TD>
-                    <span className="font-medium">{d.name}</span>
-                    {d.name_ar && <div className="text-[11px] muted">{d.name_ar}</div>}
+                    <span className="font-medium">{personName(d, lang)}</span>
+                    {(lang === "ar" ? d.name : d.name_ar) && <div className="text-[11px] muted">{lang === "ar" ? d.name : d.name_ar}</div>}
                   </TD>
                   <TD className="font-mono text-xs">{d.iqama_number || "—"}</TD>
                   <TD className="text-xs">{fmtDate(d.termination_date)}</TD>
@@ -773,8 +776,8 @@ export default function ArchiveStaffTab({
               {terminatedStaff.map((s) => (
                 <tr key={s.id}>
                   <TD>
-                    <span className="font-medium">{s.name}</span>
-                    {s.name_ar && <div className="text-[11px] muted">{s.name_ar}</div>}
+                    <span className="font-medium">{personName(s, lang)}</span>
+                    {(lang === "ar" ? s.name : s.name_ar) && <div className="text-[11px] muted">{lang === "ar" ? s.name : s.name_ar}</div>}
                   </TD>
                   <TD className="text-xs">{s.role}</TD>
                   <TD className="text-xs">
@@ -868,7 +871,10 @@ function TerminatedPersonDetail({
         >
           <div>
             {/* row.name is USER DATA. */}
-            <h2 className="font-semibold">{row.name}</h2>
+            <h2 className="font-semibold">
+              {personName(row, lang)}
+              {(lang === "ar" ? row.name : row.name_ar) ? <span className="muted font-normal"> · {lang === "ar" ? row.name : row.name_ar}</span> : null}
+            </h2>
             {/* One whole leaf per kind, not a noun spliced into a shared
                 tail: Arabic inflects the whole phrase around the subject. */}
             <p className="text-[11px] muted">

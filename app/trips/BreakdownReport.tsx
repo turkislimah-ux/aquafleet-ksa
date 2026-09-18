@@ -64,7 +64,7 @@ import {
   type ProjectCommissionNowRow,
 } from "@/lib/db-types";
 import { useApp } from "@/components/AppShell";
-import { t, fill, type Lang } from "@/lib/i18n";
+import { t, fill, personName, type Lang } from "@/lib/i18n";
 // Water type, payment method and payment mode all render off the ENUM VALUE.
 // db-types' three `_LABELS` maps stay as they are and are no longer read here.
 import { paymentMethodLabel, paymentModeLabel, waterTypeLabel } from "@/lib/enum-labels";
@@ -122,7 +122,7 @@ export type BreakdownTrip = {
   // a delivered trip is still owed on either kind of customer.
   invoiceLocked?: boolean;
 };
-type DriverLite = { id: string; name: string };
+type DriverLite = { id: string; name: string; name_ar?: string | null };
 type StationLite = { key: string; name: string };
 type ProjectLite = {
   id: string;
@@ -367,9 +367,9 @@ export default function BreakdownReport({
   // Driver id → name (for the two tables).
   const driverName = useMemo(() => {
     const m = new Map<string, string>();
-    for (const d of drivers) m.set(d.id, d.name);
+    for (const d of drivers) m.set(d.id, personName(d, lang));
     return m;
-  }, [drivers]);
+  }, [drivers, lang]);
   const stationName = useMemo(() => {
     const m = new Map<string, string>();
     for (const s of stations) m.set(s.key, s.name);

@@ -19,7 +19,7 @@ import FleetDetailClient from "./FleetDetailClient";
 
 export const dynamic = "force-dynamic";
 
-type JoinedTruck = Truck & { driver: { name: string } | null };
+type JoinedTruck = Truck & { driver: { name: string; name_ar: string | null } | null };
 
 // Fleet Detail. We fetch the full truck list (not just this row) so the
 // Assign Driver modal can compute the busy-lock — a driver already on another
@@ -57,12 +57,12 @@ export default async function FleetDetailPage({
     // Terminated trucks are filtered out here too — a direct URL to a
     // terminated truck's id resolves to `truck: null` below (FleetDetailClient
     // already renders a "Truck not found" fallback for that case; no crash).
-    supabase.from("trucks").select("*, driver:drivers(name)").is("terminated_at", null),
+    supabase.from("trucks").select("*, driver:drivers(name, name_ar)").is("terminated_at", null),
     // Terminated drivers must never reach buildDriverStateMap or the Assign
     // Driver picker — filtered at the fetch.
     supabase
       .from("drivers")
-      .select("id, name, status, safety_score")
+      .select("id, name, name_ar, status, safety_score")
       .is("terminated_at", null)
       .order("name", { ascending: true }),
     supabase.from("trips").select("driver_id, trip_date").gte("trip_date", since),
@@ -100,7 +100,7 @@ export default async function FleetDetailPage({
     // is read-only history display, not a live picker, so a since-left
     // mechanic or a soft-deleted repairer should still resolve to a real
     // name instead of silently vanishing from past records.
-    supabase.from("staff").select("id, name"),
+    supabase.from("staff").select("id, name, name_ar"),
     supabase.from("repairers").select("id, name"),
     // Rolling-30 utilization for THIS truck (0130). A rolling window rather
     // than the calendar month the Fleet list shows: on a detail page the
@@ -128,6 +128,10 @@ export default async function FleetDetailPage({
     driverName:
       t.assigned_driver_id && activeDriverIds.has(t.assigned_driver_id)
         ? t.driver?.name ?? null
+        : null,
+    driverNameAr:
+      t.assigned_driver_id && activeDriverIds.has(t.assigned_driver_id)
+        ? t.driver?.name_ar ?? null
         : null,
   }));
 
@@ -208,7 +212,7 @@ export default async function FleetDetailPage({
   const workOrderParts = (workOrderPartsRes.data ?? []) as WorkOrderPart[];
   const outsourcedJobRepairers = (outsourcedJobRepairersRes.data ?? []) as OutsourcedJobRepairer[];
   const workshopPayments = (workshopPaymentsRes.data ?? []) as WorkshopPayment[];
-  const staffNames = (staffNamesRes.data ?? []) as { id: string; name: string }[];
+  const staffNames = (staffNamesRes.data ?? []) as { id: string; name: string; name_ar: string | null }[];
   const repairerNames = (repairerNamesRes.data ?? []) as { id: string; name: string }[];
 
   const errorMsg =

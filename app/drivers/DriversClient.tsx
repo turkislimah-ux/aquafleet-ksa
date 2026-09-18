@@ -35,7 +35,7 @@ import {
 import OperationStationField from "@/components/OperationStationField";
 import { STAGE_ORDER, type TripStage } from "@/lib/db-types";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural, type Lang } from "@/lib/i18n";
+import { t, fill, plural, personName, type Lang } from "@/lib/i18n";
 import { foldDigitsInPlace } from "@/lib/digits";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { DRIVER_STATE_TONE, type DriverState } from "@/lib/driver-state";
@@ -429,7 +429,10 @@ export default function DriversClient({
   }, [trucks]);
   // Unfiltered — a truck can still point at a just-terminated driver until
   // reassigned, and this also resolves old records elsewhere in this file.
-  const driverNameById = useMemo(() => new Map(allDrivers.map((d) => [d.id, d.name])), [allDrivers]);
+  // DISPLAYED names (personName) — every consumer is a display string (the
+  // reassign confirm below), so the map speaks the UI language. `lang` dep
+  // for the same reason as driverLabelById further down.
+  const driverNameById = useMemo(() => new Map(allDrivers.map((d) => [d.id, personName(d, lang)])), [allDrivers, lang]);
   // uuid -> name, built from ALL operation_stations rows (active + inactive) so
   // a driver/truck already based at a since-deactivated station still resolves
   // to its name here instead of a raw uuid or blank.
@@ -508,10 +511,20 @@ export default function DriversClient({
   // disambiguate only where it is actually ambiguous, or every label turns into
   // a database key).
   const driverLabelById = useMemo(() => {
+    // Ambiguity is judged on the DISPLAYED name (personName): two drivers can
+    // collide in one language and not the other, and the reader can only be
+    // confused by a collision they can see. `lang` is a dependency for the
+    // same reason.
     const seen = new Map<string, number>();
-    for (const d of drivers) seen.set(d.name, (seen.get(d.name) ?? 0) + 1);
-    return new Map(drivers.map((d) => [d.id, (seen.get(d.name) ?? 0) > 1 ? `${d.name} · ${d.id.slice(0, 4)}` : d.name]));
-  }, [drivers]);
+    for (const d of drivers) {
+      const shown = personName(d, lang);
+      seen.set(shown, (seen.get(shown) ?? 0) + 1);
+    }
+    return new Map(drivers.map((d) => {
+      const shown = personName(d, lang);
+      return [d.id, (seen.get(shown) ?? 0) > 1 ? `${shown} · ${d.id.slice(0, 4)}` : shown];
+    }));
+  }, [drivers, lang]);
 
   // Names behind Incidents (12mo). Grouped by driver, because the KPI counts
   // ROWS and a driver can have more than one — the "(2)" suffix is what keeps
@@ -759,8 +772,13 @@ export default function DriversClient({
                         <div className="flex items-center gap-2">
                           <Avatar name={d.name} />
                           <div>
-                            <div className="font-medium">{d.name}</div>
-                            <div className="text-[11px] muted">{d.name_ar ?? ""}</div>
+                            {/* Main line follows the UI language (personName);
+                                the small line carries the OTHER name, so the
+                                pair keeps showing both spellings either way.
+                                Avatar initials stay on the base name — the
+                                preview's own treatment. */}
+                            <div className="font-medium">{personName(d, lang)}</div>
+                            <div className="text-[11px] muted">{(lang === "ar" ? d.name : d.name_ar) ?? ""}</div>
                           </div>
                         </div>
                       </TD>
@@ -1351,7 +1369,7 @@ function DriverDetail({
       <ScrollLock />
       <div className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-semibold">{fill(t("drivers.detail.title", lang), { name: d.name })}</h2>
+          <h2 className="text-lg font-semibold">{fill(t("drivers.detail.title", lang), { name: personName(d, lang) })}</h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
 
@@ -1360,7 +1378,9 @@ function DriverDetail({
           <div className="card p-3 flex items-center gap-3">
             <Avatar name={d.name} size="lg" />
             <div className="flex-1 min-w-0">
-              <div className="font-semibold">{d.name}{d.name_ar ? <span className="muted font-normal"> · {d.name_ar}</span> : null}</div>
+              {/* Displayed name leads; the other-language name trails muted,
+                  so the strip names the person both ways in either UI. */}
+              <div className="font-semibold">{personName(d, lang)}{(lang === "ar" ? d.name : d.name_ar) ? <span className="muted font-normal"> · {lang === "ar" ? d.name : d.name_ar}</span> : null}</div>
               <div className="text-xs muted">{stationName(d.home_station) ?? "—"}</div>
             </div>
             {driverStatePill(state, lang)}
@@ -1413,7 +1433,7 @@ function DriverDetail({
                         be recorded. */}
                     <button
                       type="button"
-                      onClick={() => setSalaryHistoryFor({ id: d.id, name: d.name, salary: d.salary_sar ?? null })}
+                      onClick={() => setSalaryHistoryFor({ id: d.id, name: personName(d, lang), salary: d.salary_sar ?? null })}
                       className="text-brand-600 dark:text-brand-300 hover:underline text-xs inline-flex items-center gap-1"
                       title={t("drivers.salary.openTitle", lang)}
                     >
@@ -1534,7 +1554,7 @@ function DriverDetail({
                   <div className="text-sm">
                     <div className="font-medium">{t("drivers.term.terminateDriver", lang)}</div>
                     <div className="muted text-[11px]">
-                      {fill(t("drivers.term.removes", lang), { name: d.name })}
+                      {fill(t("drivers.term.removes", lang), { name: personName(d, lang) })}
                     </div>
                   </div>
                   <button
@@ -1550,7 +1570,7 @@ function DriverDetail({
                   {/* Two fragments around an inline <b>, not one filled string:
                       the name has to stay a real element so it keeps its bold. */}
                   <p className="text-sm text-rose-700 dark:text-rose-300">
-                    {t("drivers.term.confirmBefore", lang)} <b>{d.name}</b> {t("drivers.term.confirmAfter", lang)}
+                    {t("drivers.term.confirmBefore", lang)} <b>{personName(d, lang)}</b> {t("drivers.term.confirmAfter", lang)}
                   </p>
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="muted">{t("drivers.term.fDate", lang)}</span>

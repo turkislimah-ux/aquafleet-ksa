@@ -110,7 +110,7 @@ export async function fetchDailyTrips(
       supabase.from("projects").select("id, name")
         .eq("status", "active").is("archived_at", null).order("name"),
       supabase.from("project_drivers").select("project_id, driver_id"),
-      supabase.from("drivers").select("id, name").is("terminated_at", null).order("name"),
+      supabase.from("drivers").select("id, name, name_ar").is("terminated_at", null).order("name"),
       // BOTH VEHICLE CLASSES, deliberately unfiltered. This read feeds the
       // manual side-log's picker, and that log exists for work the project
       // tables cannot hold — diesel transport, a yard machine's day. Filtering

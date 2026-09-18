@@ -32,7 +32,7 @@ import {
 } from "@/lib/db-types";
 import VehicleOptGroups from "@/components/VehicleOptGroups";
 import { useApp } from "@/components/AppShell";
-import { t, plural, arText, type Lang, type TKey } from "@/lib/i18n";
+import { t, plural, arText, personName, type Lang, type TKey } from "@/lib/i18n";
 // THE PRINTED PERMIT IS A DOCUMENT, not this DOM with the chrome hidden. The
 // view-model decides every word and figure, the renderer only the look, and
 // printHtml owns the transport — a hidden same-origin iframe the browser prints
@@ -59,6 +59,10 @@ type PartLite = {
   unit: string | null; warehouse_id: string; qty_on_hand: number;
 };
 type NamedLite = { id: string; name: string };
+// Staff rows carry an Arabic name (unlike stations/projects/warehouses, which
+// is why NamedLite stays bare above) — the receiver picker shows whichever
+// matches the UI language via personName.
+type StaffPick = { id: string; name: string; name_ar?: string | null };
 // The destination picker offers BOTH VEHICLE CLASSES (0201) — parts leave the
 // yard on a pickup as readily as on a water truck — so the row carries what it
 // takes to group and name them. Same shape as ConsumptionClient's own TruckLite,
@@ -186,7 +190,7 @@ export function PermitFormModal({
   // destination back cannot name the same vehicle differently.
   vehicleTypeById: ReadonlyMap<string, VehicleType>;
   customers: NamedLite[];
-  staff: NamedLite[];
+  staff: StaffPick[];
   // Handed the freshly created draft so the PARENT can adopt it. Without
   // this the parent stays on "new", keeps passing lines={[]}, and every
   // re-render re-seeds the warehouse from warehouses[0] — the three bugs
@@ -533,7 +537,7 @@ export function PermitFormModal({
           {receiverMode === "staff" ? (
             <select value={receiverStaffId} onChange={(e) => setReceiverStaffId(e.target.value)} className={INPUT} style={INPUT_STYLE}>
               <option value="">{t("consumption.modals.chooseOption", lang)}</option>
-              {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {staff.map((s) => <option key={s.id} value={s.id}>{personName(s, lang)}</option>)}
             </select>
           ) : (
             <input value={receiverName} onChange={(e) => setReceiverName(e.target.value)} placeholder={t("consumption.modals.receiverNamePlaceholder", lang)} className={INPUT} style={INPUT_STYLE} />

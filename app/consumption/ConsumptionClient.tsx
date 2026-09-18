@@ -22,7 +22,7 @@ import {
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
-import { t, arText, type Lang, type TKey } from "@/lib/i18n";
+import { t, arText, personName, type Lang, type TKey } from "@/lib/i18n";
 import {
   permitLineOutstanding, permitOutstanding, permitValueSar, permitWrittenOff,
   isOverdue, daysOverdue,
@@ -61,11 +61,11 @@ export type TruckLite = {
   vehicle_class: VehicleClass;
   vehicle_type_id: string | null;
 };
-export type StaffLite = { id: string; name: string };
-// `name_ar` rides on the PART types only. Warehouses, water stations, projects
-// and trucks have no Arabic column in the schema, so `NamedLite` deliberately
-// stays a bare `{ id, name }` rather than growing an optional field that would
-// be null for most of its users.
+export type StaffLite = { id: string; name: string; name_ar?: string | null };
+// `name_ar` rides on the PART and STAFF types only. Warehouses, water
+// stations, projects and trucks have no Arabic column in the schema, so
+// `NamedLite` deliberately stays a bare `{ id, name }` rather than growing an
+// optional field that would be null for most of its users.
 export type PartLite = {
   id: string; name: string; name_ar: string | null; sku: string; unit: string | null;
   warehouse_id: string; qty_on_hand: number;
@@ -243,10 +243,10 @@ export default function ConsumptionClient({
   }, [stations, projects, trucks, customers, vehicleTypeById, lang]);
 
   const receiverLabel = useMemo(() => {
-    const s = new Map(staff.map((x) => [x.id, x.name]));
+    const s = new Map(staff.map((x) => [x.id, personName(x, lang)]));
     return (p: ExitPermit): string =>
       p.receiver_staff_id ? s.get(p.receiver_staff_id) ?? "—" : p.receiver_name ?? "—";
-  }, [staff]);
+  }, [staff, lang]);
 
   const repairerNameById = useMemo(
     () => new Map(repairers.map((r) => [r.id, r.name])),

@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 import { X, Pencil, Ban, History, Wrench } from "lucide-react";
 import { Btn, Stat } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
+import { t, fill, plural, arText, personName, type Lang } from "@/lib/i18n";
 import { foldDigitsInPlace } from "@/lib/digits";
 import { type BankCode, type Staff, type StaffRole, type OperationStation, type StaffCommission, type StaffCommissionType } from "@/lib/db-types";
 import { onLeaveTodaySet, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
@@ -269,7 +269,7 @@ export default function StaffTab({
   }
 
   async function onTerminate(s: Staff) {
-    if (!confirm(fill(t("drivers.staff.confirmTerminate", lang), { name: arText(s.name, s.name_ar, lang) }))) return;
+    if (!confirm(fill(t("drivers.staff.confirmTerminate", lang), { name: personName(s, lang) }))) return;
     const res = await terminateStaff(s.id);
     if (res.error) {
       alert(res.error);
@@ -375,7 +375,7 @@ export default function StaffTab({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate flex items-center gap-1.5">
-                    <span className="truncate">{arText(p.name, p.name_ar, lang)}</span>
+                    <span className="truncate">{personName(p, lang)}</span>
                     {onLeaveStaff.has(p.id) && (
                       <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
                         {t("drivers.staff.onLeavePill", lang)}
@@ -441,8 +441,14 @@ export default function StaffTab({
                     {roleName(p.role)}{stationName(p.station) ? ` · ${stationName(p.station)}` : ""}
                   </div>
                   {/* A phone number is an identifier — fixed LTR, not `auto`,
-                      so a leading "+" cannot flip it. */}
-                  <div className="text-[11px] muted truncate" dir="ltr">{p.phone ?? "—"}</div>
+                      so a leading "+" cannot flip it. The dir sits on an INLINE
+                      span, not the block: `dir` on a block resets text-align's
+                      `start` to the block's OWN direction, which shoved the
+                      number to the card's far left in Arabic. The span isolates
+                      the digits; the line itself keeps the card's alignment,
+                      stacked with the email below (preview/pages-1.js:1214 —
+                      no dir on the block there either). */}
+                  <div className="text-[11px] muted truncate"><span dir="ltr">{p.phone ?? "—"}</span></div>
                   {p.email && <div className="text-[11px] muted truncate">{p.email}</div>}
                 </div>
               </button>
@@ -468,8 +474,10 @@ export default function StaffTab({
                   {initials(detail.name)}
                 </div>
                 <div className="flex-1 min-w-0">
+                  {/* Displayed name leads; the other-language name trails
+                      muted — same pairing as the driver detail strip. */}
                   <div className="font-semibold">
-                    {detail.name}{detail.name_ar ? <span className="muted font-normal"> · {detail.name_ar}</span> : null}
+                    {personName(detail, lang)}{(lang === "ar" ? detail.name : detail.name_ar) ? <span className="muted font-normal"> · {lang === "ar" ? detail.name : detail.name_ar}</span> : null}
                   </div>
                   <div className="text-xs muted" dir="auto">{roleName(detail.role)}</div>
                 </div>
@@ -511,7 +519,7 @@ export default function StaffTab({
                     <button
                       type="button"
                       onClick={() => setSalaryHistoryFor({
-                        id: detail.id, name: detail.name, salary: detail.monthly_salary_sar ?? null,
+                        id: detail.id, name: personName(detail, lang), salary: detail.monthly_salary_sar ?? null,
                       })}
                       className="text-brand-600 dark:text-brand-300 hover:underline text-xs inline-flex items-center gap-1"
                       title={t("drivers.salary.openTitle", lang)}

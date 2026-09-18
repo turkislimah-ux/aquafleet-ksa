@@ -23,7 +23,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Eye, X, Printer, History as HistoryIcon } from "lucide-react";
 import { Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
+import { t, fill, plural, personName, type Lang } from "@/lib/i18n";
 import { formatDateTimeLang, formatSar } from "@/lib/utils";
 import {
   buildHistoryRows,
@@ -102,7 +102,7 @@ export default function HistoryTab({
   }, [drivers]);
   const displayName = (id: string) => {
     const d = driverById.get(id);
-    return d ? arText(d.name, d.name_ar, lang) : "—";
+    return d ? personName(d, lang) : "—";
   };
 
   // Only months that a record actually settled — this is history, so unlike the
@@ -164,7 +164,7 @@ export default function HistoryTab({
             >
               <option value="all">{t("drivers.hist.allDrivers", lang)}</option>
               {dropdownDrivers.map((d) => (
-                <option key={d.id} value={d.id}>{arText(d.name, d.name_ar, lang)}</option>
+                <option key={d.id} value={d.id}>{personName(d, lang)}</option>
               ))}
             </select>
           </div>
@@ -370,7 +370,7 @@ function PayoutDetail({
           <div className="flex items-baseline justify-between gap-3 flex-wrap">
             <div>
               <div className="text-lg font-semibold">{driverName}</div>
-              {snap?.nameAr && <div className="text-sm muted">{snap.nameAr}</div>}
+              {(lang === "ar" ? snap?.name : snap?.nameAr) && <div className="text-sm muted">{lang === "ar" ? snap?.name : snap?.nameAr}</div>}
             </div>
             <div className="text-end">
               {/* The month settled leads; the run caption sits under it as the

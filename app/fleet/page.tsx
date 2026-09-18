@@ -11,11 +11,12 @@ export const dynamic = "force-dynamic";
 
 // Truck row joined with the assigned driver's name (single source of truth lives
 // on trucks.assigned_driver_id; the driver name is denormalised for the table).
-type JoinedTruck = Truck & { driver: { name: string } | null };
-export type TruckRow = Truck & { driverName: string | null };
+type JoinedTruck = Truck & { driver: { name: string; name_ar: string | null } | null };
+export type TruckRow = Truck & { driverName: string | null; driverNameAr: string | null };
 export type DriverLite = {
   id: string;
   name: string;
+  name_ar: string | null;
   status: string;
   active: boolean;
   safety_score: number | null;
@@ -56,14 +57,14 @@ export default async function FleetPage() {
     // truck's assigned_driver_id simply never enters it -> off_duty.
     supabase
       .from("trucks")
-      .select("*, driver:drivers(name)")
+      .select("*, driver:drivers(name, name_ar)")
       .is("terminated_at", null)
       .order("created_at", { ascending: false }),
     // Terminated drivers must never reach buildDriverStateMap or the Assign
     // Driver picker — filtered at the fetch.
     supabase
       .from("drivers")
-      .select("id, name, status, safety_score")
+      .select("id, name, name_ar, status, safety_score")
       .is("terminated_at", null)
       .order("name", { ascending: true }),
     supabase
@@ -126,6 +127,10 @@ export default async function FleetPage() {
     driverName:
       t.assigned_driver_id && activeDriverIds.has(t.assigned_driver_id)
         ? t.driver?.name ?? null
+        : null,
+    driverNameAr:
+      t.assigned_driver_id && activeDriverIds.has(t.assigned_driver_id)
+        ? t.driver?.name_ar ?? null
         : null,
   }));
 
