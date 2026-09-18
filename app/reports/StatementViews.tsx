@@ -44,7 +44,7 @@ import { Table, TH, TD, Btn } from "@/components/ui";
 // input and cannot be tested against fixed data.
 import { cn, formatSar, formatSarExact, formatNum, monthLabel } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural, arText, personName, type Lang } from "@/lib/i18n";
+import { t, fill, plural, arText, personNameById, type Lang } from "@/lib/i18n";
 // WATER_TYPE_LABELS stays ENGLISH this batch, deliberately. It lives in
 // lib/db-types.ts and is read by 20+ call sites across app/trips/**,
 // lib/invoiceDisplay.ts and a server action — exactly one of them is in
@@ -1153,16 +1153,26 @@ type DriverCol = {
 
 export function OperationsStatement({
   operations, byDriver, periodStart, periodEnd, label, multiMonth,
+  driverNames,
   registerCsv, registerPrint,
 }: {
   operations: OperationsRow[];
   byDriver: OperationsByDriverRow[];
   periodStart: string; periodEnd: string; label: string;
   multiMonth: boolean;
+  // Group (b) — the page's drivers rows (id/name/name_ar); the SCREEN's
+  // driver cells resolve their display name through these per UI language.
+  // The view's prejoined driver_name stays the fallback, and the ONLY name
+  // the CSV and the printed sheet ever see.
+  driverNames: { id: string; name: string; name_ar: string | null }[];
   registerCsv?: RegisterCsv;
   registerPrint?: RegisterPrint;
 }) {
   const { lang } = useApp();
+  const displayNameById = useMemo(
+    () => personNameById(driverNames, lang),
+    [driverNames, lang],
+  );
   const rows = monthsIn(operations, periodStart, periodEnd);
 
   const trips = sumOver(rows, (r) => r.trips_total);
@@ -1233,7 +1243,10 @@ export function OperationsStatement({
    */
   const driverCell = (d: DriverCol) => (
     <TD>
-      <span className="block font-medium">{d.name ?? t("reports.ops.unassigned", lang)}</span>
+      {/* `d.key` is the driver_id (or "__unassigned__", which no map holds
+          — that falls through to the null name and its label, unchanged).
+          Display name only: the CSV and printed sheet keep `d.name`. */}
+      <span className="block font-medium">{displayNameById.get(d.key) ?? d.name ?? t("reports.ops.unassigned", lang)}</span>
       <span className="block text-[10px] muted">{d.plate ?? "—"}</span>
       {/* `{n}` stays RAW — this count was interpolated directly and passing it
           through formatNum would add a separator the phrase never had. The
@@ -1904,9 +1917,10 @@ export function PayslipsStatement({
   // carries name_ar) rather than the basis view's prejoined driver_name —
   // the view stays untouched, and the screen's name follows the UI language.
   // Fallback to the view's own name covers a basis row whose driver the list
-  // no longer holds.
+  // no longer holds. Shared with the commission-review table below: ONE map
+  // per page (personNameById's rule).
   const displayNameById = useMemo(
-    () => new Map(drivers.map((d) => [d.id, personName(d, lang)])),
+    () => personNameById(drivers, lang),
     [drivers, lang],
   );
   const rows = useMemo(
@@ -2203,6 +2217,7 @@ export function PayslipsStatement({
       <CommissionReviewTable
         rows={commission}
         periodStart={periodStart} periodEnd={periodEnd} label={label}
+        displayNameById={displayNameById}
       />
     </>
   );
@@ -3286,10 +3301,14 @@ function PayslipDocument({
 // ---------------------------------------------------------------------------
 
 function CommissionReviewTable({
-  rows, periodStart, periodEnd, label,
+  rows, periodStart, periodEnd, label, displayNameById,
 }: {
   rows: DriverCommissionByProjectRow[];
   periodStart: string; periodEnd: string; label: string;
+  // The payslips statement's own map (ONE per page) — screen names follow the
+  // UI language; the view's prejoined driver_name stays the fallback and the
+  // only name the printed document ever sees.
+  displayNameById: Map<string, string>;
 }) {
   const { lang } = useApp();
   const drivers = useMemo(() => {
@@ -3332,11 +3351,17 @@ function CommissionReviewTable({
   // carry different money. Only ambiguous names get a discriminator, so the
   // common case stays clean: the app has no per-driver display code beyond the
   // name, and inventing one for every row would be noise.
+  // Counted over the DISPLAYED names: ambiguity is a property of what the
+  // reader sees. Two English names that collide may have distinct Arabic
+  // names (or the reverse), so the set rebuilds with the language.
   const duplicateNames = useMemo(() => {
     const seen = new Map<string, number>();
-    for (const d of drivers) seen.set(d.name, (seen.get(d.name) ?? 0) + 1);
+    for (const d of drivers) {
+      const shown = displayNameById.get(d.driverId) ?? d.name;
+      seen.set(shown, (seen.get(shown) ?? 0) + 1);
+    }
     return new Set([...seen.entries()].filter(([, n]) => n > 1).map(([k]) => k));
-  }, [drivers]);
+  }, [drivers, displayNameById]);
 
   const totals = drivers.reduce(
     (a, d) => ({ trips: a.trips + d.trips, commission: a.commission + d.commission }),
@@ -3429,11 +3454,13 @@ function CommissionReviewTable({
               </tr>
             </thead>
             <tbody>
-              {drivers.map((d) => (
+              {drivers.map((d) => {
+                const shown = displayNameById.get(d.driverId) ?? d.name;
+                return (
                 <tr key={d.driverId}>
                   <TD className="font-medium align-top">
-                    {d.name}
-                    {duplicateNames.has(d.name) && (
+                    {shown}
+                    {duplicateNames.has(shown) && (
                       <span className="ms-1.5 font-mono text-[10px] muted font-normal">
                         #{d.driverId.slice(0, 4)}
                       </span>
@@ -3462,7 +3489,8 @@ function CommissionReviewTable({
                     {formatSar(d.commission)}
                   </TD>
                 </tr>
-              ))}
+                );
+              })}
               <tr className="border-t-2">
                 <TD className="font-semibold">{t("reports.th.total", lang)}</TD>
                 <TD className="text-end tabular-nums font-semibold">{formatNum(totals.trips)}</TD>

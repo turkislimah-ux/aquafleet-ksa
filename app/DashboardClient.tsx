@@ -36,7 +36,7 @@ import { useApp } from "@/components/AppShell";
 import { useHeroDock, useSearchDock } from "@/components/SearchDock";
 import { ComboChart, PieChart } from "@/components/Charts";
 import { cn, formatSar } from "@/lib/utils";
-import { t, type Lang } from "@/lib/i18n";
+import { t, personNameById, type Lang } from "@/lib/i18n";
 import {
   utilizationBand, utilizationBarWidth, formatUtilization,
   UTILIZATION_BAND, type FleetUtilizationRow,
@@ -114,7 +114,7 @@ function fill(s: string, tokens: Record<string, string | number>): string {
 export default function DashboardClient({
   actionItems, feed, state, truckState, headlines, charts, dailyOps, deliveredRevenue,
   delivery, monthlyOnly,
-  projectStages, costComposition, driverOps, drift, fleetUtilization,
+  projectStages, costComposition, driverOps, driverNames, drift, fleetUtilization,
   liveTrips, widgetOptions, errorMsg,
 }: {
   actionItems: ActionItemRow[];
@@ -134,6 +134,10 @@ export default function DashboardClient({
   // percentages. It follows the same month stepper as the daily charts.
   fleetUtilization: FleetUtilizationRow[];
   driverOps: DriverOps[];
+  // Group (b) — the page's one drivers read; ops board + drift panel resolve
+  // display names through it (personNameById), falling back to the view's
+  // prejoined English name for anyone absent.
+  driverNames: { id: string; name: string; name_ar: string | null }[];
   drift: DriverStateDrift;
   liveTrips: LiveTrip[];
   widgetOptions: WidgetDef[];
@@ -143,6 +147,12 @@ export default function DashboardClient({
   // A failed read means we do not KNOW the state of anything, so no section
   // may claim to be empty. "Every queue is clear" after an error is a lie.
   const failed = !!errorMsg;
+
+  // ONE map per page (lib rule) — both person-name surfaces below read it.
+  const driverNameById = useMemo(
+    () => personNameById(driverNames, lang),
+    [driverNames, lang],
+  );
 
   // ---- batch-1 search-bar intro: RESTORED ------------------------------
   const heroRef = useRef<HTMLDivElement>(null);
@@ -313,7 +323,7 @@ export default function DashboardClient({
       )}
 
       {/* Renders NOTHING unless the two definitions of driver state disagree. */}
-      <DriftBanner lang={lang} drift={drift} />
+      <DriftBanner lang={lang} drift={drift} nameById={driverNameById} />
 
       {/* ---- KPI ROW — always above the charts ------------------------- */}
       <section aria-labelledby="dash-kpi">
@@ -647,7 +657,7 @@ export default function DashboardClient({
               {t("dashboard.driversOps.allLink", lang)}
             </Link>
           </div>
-          <DriversOpsTable lang={lang} rows={driverOps} failed={failed} />
+          <DriversOpsTable lang={lang} rows={driverOps} failed={failed} nameById={driverNameById} />
         </section>
       </div>
 
@@ -935,7 +945,9 @@ function DailyCostDisclosure({
  * would train everyone to dismiss this banner — which costs more than the bug
  * it watches for.
  */
-function DriftBanner({ lang, drift }: { lang: Lang; drift: DriverStateDrift }) {
+function DriftBanner({ lang, drift, nameById }: {
+  lang: Lang; drift: DriverStateDrift; nameById: Map<string, string>;
+}) {
   if (drift.ok || !drift.reachable) return null;
   return (
     <div role="alert"
@@ -949,7 +961,10 @@ function DriftBanner({ lang, drift }: { lang: Lang; drift: DriverStateDrift }) {
       <ul className="mt-1 space-y-0.5 ps-5 muted">
         {drift.mismatches.map((m) => (
           <li key={m.driverId}>
-            <span className="font-medium">{m.name}</span>
+            {/* Display name per UI language; the mismatch's own `name` (the
+                view's English) is the fallback and stays the diagnostic key
+                the sql/ts values refer to. */}
+            <span className="font-medium">{nameById.get(m.driverId) ?? m.name}</span>
             {" — "}
             {t("dashboard.drift.view", lang)}: {m.sql} · {t("dashboard.drift.app", lang)}: {m.ts}
           </li>
@@ -1303,11 +1318,16 @@ const DRIVER_STATE_DOT: Record<DriverOpsState, string> = {
  * blurring those cards.
  */
 function DriversOpsTable({
-  lang, rows, failed,
+  lang, rows, failed, nameById,
 }: {
-  lang: Lang; rows: DriverOps[]; failed: boolean;
+  lang: Lang; rows: DriverOps[]; failed: boolean; nameById: Map<string, string>;
 }) {
-  const sorted = useMemo(() => sortDriverOps(rows), [rows]);
+  // The name tiebreaker sorts by the DISPLAYED name (Turki's 2026-09-18
+  // directive) — compliance/state/conflict ranks above it are untouched.
+  const sorted = useMemo(
+    () => sortDriverOps(rows, (r) => nameById.get(r.driverId) ?? r.name),
+    [rows, nameById],
+  );
 
   if (sorted.length === 0) {
     return (
@@ -1327,7 +1347,7 @@ function DriversOpsTable({
             <li key={d.driverId} className="px-3 py-2">
               <div className="flex items-center gap-2">
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", DRIVER_STATE_DOT[d.state])} aria-hidden />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{d.name}</span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{nameById.get(d.driverId) ?? d.name}</span>
                 <span className={cn(
                   "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset",
                   COMPLIANCE_PILL[d.compliance]

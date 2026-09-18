@@ -1131,6 +1131,9 @@ export default function StatementsTab({
           byDriver={opsByDriver}
           periodStart={current.period_start} periodEnd={current.period_end}
           label={periodLabel(current, lang)} multiMonth={multiMonth}
+          // Same page-level drivers rows the payslips statement reads — the
+          // screen's driver cells localize through them (group b).
+          driverNames={payslipDrivers}
           registerCsv={registerCsv} registerPrint={registerPrint}
         />
       )}

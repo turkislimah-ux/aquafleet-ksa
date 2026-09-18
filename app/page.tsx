@@ -55,7 +55,8 @@ export default async function DashboardPage() {
     actionsRes, feedRes, stateRes, pnlRes, opsRes, revenueRes,
     collectionsRes, receivablesRes, liveTripsRes, dictRes,
     dailyRes, monthlyOnlyRes, deliveryRes,
-    projectsRes, fleetUtilRes, costCompRes, driverOpsRes, deliveredRevRes, drift,
+    projectsRes, fleetUtilRes, costCompRes, driverOpsRes, deliveredRevRes,
+    driverNamesRes, drift,
   ] = await Promise.all([
     supabase.from("v_dashboard_action_items").select("*"),
     supabase.from("v_activity_feed").select("*").order("occurred_at", { ascending: false }).limit(FEED_LIMIT),
@@ -65,7 +66,8 @@ export default async function DashboardPage() {
     supabase.from("v_revenue_monthly").select("*").order("month", { ascending: false }).limit(1),
     supabase.from("v_collections_monthly").select("*").order("month", { ascending: false }).limit(1),
     supabase.from("v_receivables_open").select("outstanding_sar"),
-    // Records, not a metric — the only base-table read on this page.
+    // Records, not a metric — one of the page's two base-table reads (the
+    // other is the drivers name lookup below).
     supabase
       .from("trips")
       .select("id, ref, stage, trip_date, truck:trucks(plate), project:projects(name)")
@@ -98,6 +100,12 @@ export default async function DashboardPage() {
     // construction, so the two zip by day without inventing or dropping one.
     supabase.from("v_delivered_revenue_daily").select("*")
       .order("day", { ascending: false }).limit(DAILY_DAYS),
+    // Group (b) name localization — the ONE drivers read this page makes.
+    // Unfiltered on purpose: the ops board and drift panel resolve display
+    // names through this list (personNameById), and a terminated driver the
+    // views still name must resolve too; anyone truly absent falls back to
+    // the view's prejoined English name.
+    supabase.from("drivers").select("id, name, name_ar"),
     // The drift guard runs with the rest rather than after, so a page that
     // already makes a dozen round trips does not grow a serial one.
     checkDriverStateDrift(),
@@ -251,6 +259,14 @@ export default async function DashboardPage() {
     conflicts: r.state_conflicts_with_trips === true,
   }));
 
+  // Group (b) — the drivers name-lookup rows the client localizes person
+  // names through. Deliberately NOT in the page's error chain: a failed read
+  // leaves an empty list and every surface falls back to the view's own
+  // prejoined English name, which is the pre-localization behaviour.
+  const driverNames = (driverNamesRes.data ?? []) as {
+    id: string; name: string; name_ar: string | null;
+  }[];
+
   // ---- charts: every series is a column read straight off a view --------
   //
   // THE FIVE OPERATIONAL COST BUCKETS, current month. Station fill (0112) is
@@ -396,6 +412,7 @@ export default async function DashboardPage() {
       costComposition={costComposition}
       fleetUtilization={fleetUtilization}
       driverOps={driverOps}
+      driverNames={driverNames}
       drift={drift}
       liveTrips={liveTrips}
       widgetOptions={widgetOptions}

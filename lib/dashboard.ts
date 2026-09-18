@@ -529,14 +529,20 @@ const STATE_RANK: Record<DriverOpsState, number> = {
   active: 0, idle: 1, off_duty: 2, on_leave: 3,
 };
 
-export function sortDriverOps(rows: DriverOps[]): DriverOps[] {
+export function sortDriverOps(
+  rows: DriverOps[],
+  // The name TIEBREAKER only — callers showing a localized name pass the
+  // resolver so the list orders by what the reader sees (Turki 2026-09-18).
+  // The ranks above it never move; default keeps the view's own name.
+  nameOf: (r: DriverOps) => string = (r) => r.name,
+): DriverOps[] {
   return [...rows].sort((a, b) =>
     COMPLIANCE_RANK[a.compliance] - COMPLIANCE_RANK[b.compliance] ||
     STATE_RANK[a.state] - STATE_RANK[b.state] ||
     // A contradicting row outranks a quiet one at the same state — it is the
     // thing most worth looking at on this board.
     Number(b.conflicts) - Number(a.conflicts) ||
-    a.name.localeCompare(b.name)
+    nameOf(a).localeCompare(nameOf(b))
   );
 }
 

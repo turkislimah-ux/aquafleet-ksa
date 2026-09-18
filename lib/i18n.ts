@@ -11680,6 +11680,25 @@ export function personName(
   return base ? base : (ar ?? "").trim();
 }
 
+// GROUP (b) — screens whose ROWS come from a DB view that prejoined an
+// English driver_name (v_drivers_ops_now, v_driver_state_now,
+// v_operations_by_driver_monthly, v_driver_commission_by_project_monthly,
+// v_driver_payslip_basis). The views are NOT touched (0203 cancelled);
+// instead each page resolves the display name from the drivers rows it
+// already fetches, through this ONE map builder, and keeps the view's
+// prejoined string as the fallback — a terminated driver whose row has
+// left the page's drivers list still renders under the name the view
+// froze for him.
+//
+// Usage: build ONCE per page/component inside a useMemo keyed on
+// [rows, lang], then `map.get(id) ?? row.driver_name`.
+export function personNameById(
+  rows: readonly { id: string; name: string; name_ar?: string | null; nameAr?: string | null }[],
+  lang: Lang,
+): Map<string, string> {
+  return new Map(rows.map((r) => [r.id, personName(r, lang)]));
+}
+
 /**
  * Which grammatical form a counted noun takes.
  *
