@@ -66,7 +66,7 @@
 // Purity: no React, no fs, no Supabase, no `process`, no `new Date()` —
 // `generatedAt` is passed in, so the same input always renders the same sheet.
 
-import { fill, plural, t, type Lang } from "../i18n";
+import { fill, personNameById, plural, t, type Lang } from "../i18n";
 import type { IssuedPayslipRow, PayslipBasisRow } from "../reports";
 import { formatDateLang, formatNum, formatSar, monthLabel } from "../utils";
 import { DOC_COMPANY, docGeneratedMeta } from "./reportDoc";
@@ -94,6 +94,14 @@ export type PayslipRegisterDocInput = {
   rows: readonly PayslipBasisRow[];
   /** Every issued payslip in hand. The row's frozen figures win where one exists. */
   issued: readonly IssuedPayslipRow[];
+  /**
+   * The drivers the PAGE already fetched (id, name, name_ar) — threaded in so
+   * the sheet resolves each name in ITS OWN language through personNameById.
+   * The basis row's prejoined `driver_name` stays the fallback. THE ROW ORDER
+   * ABOVE IS UNTOUCHED: the register keeps the screen's sort; only the
+   * rendered string changes.
+   */
+  driverNames: readonly { id: string; name: string; name_ar?: string | null }[];
 };
 
 // ---------------------------------------------------------------------------
@@ -225,6 +233,9 @@ export function buildPayslipRegisterVm(
       ].join(" · ")
     : null;
 
+  // THE SHEET'S LANGUAGE PICKS THE NAME — see `driverNames` on the input.
+  const displayName = personNameById(input.driverNames, lang);
+
   const docRow = (r: PayslipBasisRow): PayslipRegisterDocRow => {
     // AN ISSUED SLIP'S FROZEN FIGURES WIN, exactly as the cells on screen
     // choose them: a document that exists is what was paid, and a fresh preview
@@ -237,7 +248,7 @@ export function buildPayslipRegisterVm(
       (d ? d.commission_settled : r.commission_settled);
 
     return {
-      driver: r.driver_name,
+      driver: displayName.get(r.driver_id) ?? r.driver_name,
       month: monthLabel(r.period_start, lang),
       salary: money(d ? d.base_salary_sar : r.base_salary_sar),
       commission: money(commission),

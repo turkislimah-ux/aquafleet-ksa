@@ -32,7 +32,7 @@
 // `generatedAt` is passed in, so the same input always renders the same sheet.
 
 import { DASH, numPlain } from "../docPrimitives";
-import { fill, plural, t, type Lang } from "../i18n";
+import { fill, personNameById, plural, t, type Lang } from "../i18n";
 import { formatShare } from "../reports";
 import { formatDateLang } from "../utils";
 import { DOC_COMPANY, docGeneratedMeta } from "./reportDoc";
@@ -44,6 +44,13 @@ import { DOC_COMPANY, docGeneratedMeta } from "./reportDoc";
 /** One driver column, exactly as the `drivers` memo produced it — including its
  *  sort, which is scheduled-descending with the no-driver bucket last. */
 export type OpsDocDriver = {
+  /**
+   * The memo's KEY — the driver_id, or NULL for the no-driver bucket (the
+   * caller maps `__unassigned__` to null so the memo's sentinel never leaves
+   * the component). It joins `driverNames` below, which is how the sheet
+   * resolves the name in its own language.
+   */
+  id: string | null;
   /**
    * NULL is a driver whose record carries no name. It stays null all the way to
    * here for the reason the memo keeps it null: resolving it there would put a
@@ -110,6 +117,13 @@ export type OpsDocInput = {
 
   months: readonly OpsDocMonth[];
   drivers: readonly OpsDocDriver[];
+  /**
+   * The drivers the PAGE already fetched (id, name, name_ar) — threaded in so
+   * the sheet resolves each name in ITS OWN language through personNameById.
+   * The rollup's `name` stays the fallback: a terminated driver absent from
+   * this list still prints, under the base name.
+   */
+  driverNames: readonly { id: string; name: string; name_ar?: string | null }[];
   /** The two share denominators, summed off `drivers` by the component. */
   driverScheduled: number;
   driverDelivered: number;
@@ -290,6 +304,11 @@ export function buildOpsVm(input: OpsDocInput): OpsDocVm {
    * screen interpolates this count directly, and adding a thousands separator
    * now would change a figure rather than translate it.
    */
+  // THE SHEET'S LANGUAGE PICKS THE NAME. Resolved off the id where the page's
+  // driver list holds one; the rollup's own `name` is the fallback, and the
+  // no-driver bucket (null id, null name) still lands on unassignedLabel.
+  const displayName = personNameById(input.driverNames, lang);
+
   const driverCell = (d: OpsDocDriver): OpsDocDriverCell => {
     const parts = [d.plate ?? DASH];
     if (d.trucksUsed > 1) {
@@ -297,7 +316,10 @@ export function buildOpsVm(input: OpsDocInput): OpsDocVm {
         fill(t(`reports.ops.droveTrucks.${plural(d.trucksUsed)}`, lang), { n: d.trucksUsed }),
       );
     }
-    return { name: d.name ?? unassignedLabel, sub: parts.join(" · ") };
+    return {
+      name: (d.id ? displayName.get(d.id) : null) ?? d.name ?? unassignedLabel,
+      sub: parts.join(" · "),
+    };
   };
 
   // The two shares, over the PERIOD denominators the component computed. Same

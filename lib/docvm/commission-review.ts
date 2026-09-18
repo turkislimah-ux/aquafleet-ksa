@@ -82,7 +82,7 @@
 // Purity: no React, no fs, no Supabase, no `process`, no `new Date()` —
 // `generatedAt` is passed in, so the same input always renders the same sheet.
 
-import { fill, t, type Lang } from "../i18n";
+import { fill, personNameById, t, type Lang } from "../i18n";
 import type { DriverCommissionByProjectRow } from "../reports";
 import { formatDateLang, formatNum, formatSar } from "../utils";
 import { DOC_COMPANY, DOC_SAR, docGeneratedMeta } from "./reportDoc";
@@ -104,6 +104,13 @@ export type CommissionReviewDocInput = {
   periodStart: string;
   periodEnd: string;
   rows: readonly DriverCommissionByProjectRow[];
+  /**
+   * The drivers the PAGE already fetched (id, name, name_ar) — threaded in so
+   * the sheet resolves each name in ITS OWN language through personNameById.
+   * The view's prejoined `driver_name` stays the fallback: a terminated driver
+   * absent from this list still prints, under the base name.
+   */
+  driverNames: readonly { id: string; name: string; name_ar?: string | null }[];
 };
 
 // ---------------------------------------------------------------------------
@@ -190,10 +197,16 @@ export function buildCommissionReviewVm(
     }
   >();
 
+  // THE SHEET'S LANGUAGE PICKS THE NAME — resolved here, at the grouping's
+  // door, so the duplicate-name test below runs on what the reader will see:
+  // two drivers whose ARABIC names collide are ambiguous on the Arabic sheet
+  // even when their English names differ, and vice versa.
+  const displayName = personNameById(input.driverNames, lang);
+
   for (const r of inPeriod) {
     const e = byDriver.get(r.driver_id) ?? {
       driverId: r.driver_id,
-      name: r.driver_name,
+      name: displayName.get(r.driver_id) ?? r.driver_name,
       trips: 0,
       commission: 0,
       projects: new Map<string, { name: string | null; trips: number }>(),

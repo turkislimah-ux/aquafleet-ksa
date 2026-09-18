@@ -1343,6 +1343,9 @@ export function OperationsStatement({
             permits: r.exit_permits,
           })),
           drivers: drivers.map((d) => ({
+            // The memo's key IS the driver_id — mapped to null for the
+            // no-driver bucket so the sentinel never leaves this component.
+            id: d.key === "__unassigned__" ? null : d.key,
             name: d.name,
             unassigned: d.key === "__unassigned__",
             plate: d.plate,
@@ -1352,12 +1355,16 @@ export function OperationsStatement({
             notDelivered: d.notDelivered,
             completion: d.completion,
           })),
+          // The page's own driver rows (name + name_ar) — the sheet resolves
+          // the printed name in ITS language inside the view-model.
+          driverNames,
           driverScheduled,
           driverDelivered,
         }),
       ),
     [
-      lang, label, multiMonth, rows, drivers, driverScheduled, driverDelivered,
+      lang, label, multiMonth, rows, drivers, driverNames,
+      driverScheduled, driverDelivered,
       trips, delivered, workOrders, osJobs, maintenanceEvents, permits,
       peakTrucks, completion,
     ],
@@ -2010,6 +2017,9 @@ export function PayslipsStatement({
         bank: resolvePayslipBank(
           drivers.find((d) => d.id === selected.driver_id), bankCodes,
         ),
+        // The page's own driver rows (name + name_ar) — the sheet resolves
+        // the printed name in ITS language inside the view-model.
+        driverNames: drivers,
       }));
     }
     return buildPayslipRegisterHtml(buildPayslipRegisterVm({
@@ -2018,6 +2028,8 @@ export function PayslipsStatement({
       // sorted. Re-deriving it inside the view-model would be a second
       // definition of which months the register covers.
       rows, issued,
+      // Same rows the screen's displayNameById map is built from.
+      driverNames: drivers,
     }));
     // `currentMonthStart` is what `isRunning` closes over, and it is derived
     // from `today` — so `today` is the dep, not the function.
@@ -2218,6 +2230,7 @@ export function PayslipsStatement({
         rows={commission}
         periodStart={periodStart} periodEnd={periodEnd} label={label}
         displayNameById={displayNameById}
+        driverNames={drivers}
       />
     </>
   );
@@ -3301,14 +3314,18 @@ function PayslipDocument({
 // ---------------------------------------------------------------------------
 
 function CommissionReviewTable({
-  rows, periodStart, periodEnd, label, displayNameById,
+  rows, periodStart, periodEnd, label, displayNameById, driverNames,
 }: {
   rows: DriverCommissionByProjectRow[];
   periodStart: string; periodEnd: string; label: string;
   // The payslips statement's own map (ONE per page) — screen names follow the
-  // UI language; the view's prejoined driver_name stays the fallback and the
-  // only name the printed document ever sees.
+  // UI language; the view's prejoined driver_name stays the fallback.
   displayNameById: Map<string, string>;
+  // The RAW driver rows behind that map, threaded to the printed document so
+  // the VM builder can resolve names in the SHEET's language — which is the
+  // document's own choice, not this screen's. The map above cannot serve: it
+  // is already collapsed to one language.
+  driverNames: { id: string; name: string; name_ar?: string | null }[];
 }) {
   const { lang } = useApp();
   const drivers = useMemo(() => {
@@ -3391,6 +3408,7 @@ function CommissionReviewTable({
           periodStart,
           periodEnd,
           rows,
+          driverNames,
         }),
       ),
     );

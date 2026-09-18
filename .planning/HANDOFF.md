@@ -17,8 +17,8 @@
   at row boundary. 45 checks in test:money.
 - **ENABLE/EMIT RULE — all nine report exports.** `resolveCsvRegistration`:
   nothing to emit = null = disabled button. Never register a raw builder.
-- **Person names locale-aware app-wide (personName / personNameById,
-  lib/i18n.ts). Views untouched.**
+- **Person names locale-aware app-wide, screens + printed sheets
+  (personName / personNameById, lib/i18n.ts). Views untouched.**
 - **Vehicles:** grouping/naming/capacity/tabs live in lib/vehicle-groups,
   vehicle-types, capacity, fleet-tabs — never re-derive.
   `v_fleet_state_now` includes operation vehicles ON PURPOSE.

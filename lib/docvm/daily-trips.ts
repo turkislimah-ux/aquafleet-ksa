@@ -66,7 +66,7 @@ import {
   type ReportTruck,
 } from "../daily-trips";
 import { DASH, num2 } from "../docPrimitives";
-import { fill, plural, t, type Lang } from "../i18n";
+import { fill, personNameById, plural, t, type Lang } from "../i18n";
 import { formatDateLang, formatDayKeyLang } from "../utils";
 import { DOC_COMPANY, docGeneratedMeta } from "./reportDoc";
 
@@ -246,7 +246,12 @@ export function buildDailyDocVm(input: DailyDocInput): DailyDocVm {
   // `driver_id` / `truck_id`, and the screen resolves them through two `useMemo`
   // Maps. A printable that re-built those Maps client-side would leave the
   // document's wording half-decided in a React hook — the names ARE the wording.
-  const driverName = new Map(data.drivers.map((d) => [d.id, d.name]));
+  //
+  // THE SHEET'S LANGUAGE PICKS THE NAME. personNameById resolves each driver
+  // through personName with THIS document's `lang` — the Arabic sheet prints
+  // the Arabic name, the English sheet the English one — and a driver with no
+  // `name_ar` falls back to the base column inside the helper itself.
+  const driverName = personNameById(data.drivers, lang);
   // `tr`, not `t`: the translator is in scope and a map parameter named `t`
   // would shadow it. The screen renamed it for the same reason.
   const truckPlate = new Map(data.trucks.map((tr) => [tr.id, tr.plate]));
@@ -292,7 +297,11 @@ export function buildDailyDocVm(input: DailyDocInput): DailyDocVm {
         n: tbl.drivers.length,
       }),
       groups: tbl.drivers.map((g): DailyDocDriverGroup => ({
-        driver: g.driverName,
+        // GROUP ORDER IS THE TABLE'S OWN — buildProjectTables sorted by the
+        // base name and that order stands on both sheets; only the rendered
+        // string is resolved here. `g.driverName` already holds the "—"
+        // fallback for a driver the fetch no longer returns.
+        driver: driverName.get(g.driverId) ?? g.driverName,
         // IDLE IS A PROPERTY OF THE DRIVER, NOT OF A ROW — the screen tests
         // `g.totals.trips === 0`, so a driver with two trucks and no trips is
         // idle once, not twice.

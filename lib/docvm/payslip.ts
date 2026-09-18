@@ -93,7 +93,7 @@
 // Purity: no React, no fs, no Supabase, no `process`, no `new Date()` —
 // `generatedAt` is passed in, so the same input always renders the same sheet.
 
-import { arText, fill, plural, t, type Lang } from "../i18n";
+import { arText, fill, personNameById, plural, t, type Lang } from "../i18n";
 import type { IssuedPayslipRow, PayslipBasisRow } from "../reports";
 import {
   inMonth,
@@ -140,6 +140,14 @@ export type PayslipDocInput = {
    * the pair is missing — the resolver owns that rule.
    */
   bank: PayslipBankLine | null;
+  /**
+   * The drivers the PAGE already fetched (id, name, name_ar) — threaded in so
+   * the sheet writes the driver's name in ITS OWN language through
+   * personNameById. LIVE like the bank line, and for the same reason: the name
+   * answers "who is this person", not "what was owed". The basis row's
+   * prejoined `driver_name` stays the fallback.
+   */
+  driverNames: readonly { id: string; name: string; name_ar?: string | null }[];
 };
 
 /**
@@ -403,6 +411,10 @@ function docFines(input: {
 
 export function buildPayslipVm(input: PayslipDocInput): PayslipDocVm {
   const { lang, row, doc } = input;
+
+  // THE SHEET'S LANGUAGE PICKS THE NAME — see `driverNames` on the input.
+  const driverDisplayName =
+    personNameById(input.driverNames, lang).get(row.driver_id) ?? row.driver_name;
   const generated = formatDateLang(input.generatedAt, lang, {
     year: "numeric",
     month: "short",
@@ -529,7 +541,7 @@ export function buildPayslipVm(input: PayslipDocInput): PayslipDocVm {
     // a dialog title reading "Payslip —" with nothing after it is worse than one
     // that never promised a number.
     docTitle: fill(t("reports.doc.payslip.docTitle", lang), {
-      d: row.driver_name,
+      d: driverDisplayName,
       m: month,
     }),
 
@@ -538,11 +550,12 @@ export function buildPayslipVm(input: PayslipDocInput): PayslipDocVm {
       title: doc
         ? `${t("reports.payslips.payslipWord", lang)} ${doc.payslip_number}`
         : t("reports.payslips.payslipWord", lang),
-      // The driver's name is entity data with no `_ar` column, so it renders as
-      // stored in both languages. The month beside it does NOT: a month name is
-      // a label and monthLabel writes it in the reader's language. The middot is
-      // the screen's own.
-      subtitle: `${row.driver_name} · ${month}`,
+      // The driver's name follows the SHEET'S language — resolved above from
+      // the page's own driver rows, with the basis row's prejoined name as the
+      // fallback. The month beside it too: a month name is a label and
+      // monthLabel writes it in the reader's language. The middot is the
+      // screen's own.
+      subtitle: `${driverDisplayName} · ${month}`,
       // The bank pair sits FIRST, directly under the driver's name — it is
       // about him; "generated" is about the sheet. One line, two pairs, and
       // `num: true` on the IBAN so "SA03…" never reorders on an Arabic sheet.

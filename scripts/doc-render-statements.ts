@@ -782,9 +782,26 @@ const driver = (
   name: string, plate: string | null, trucksUsed: number,
   scheduled: number, delivered: number, notDelivered: number,
 ): OpsDocDriver => ({
+  // Fixture ids are DERIVED, not typed per row: name·plate is unique across
+  // every roster below (the duplicate names sit on different plates), and
+  // `opsInput` derives `driverNames` from the same rows, so the id join the
+  // sheet resolves names through always lands.
+  id: `${name}·${plate ?? "solo"}`,
   name, unassigned: false, plate, trucksUsed, scheduled, delivered, notDelivered,
   completion: scheduled > 0 ? (delivered / scheduled) * 100 : null,
 });
+
+// Arabic names for the ops rosters, keyed on the Latin first token — every
+// name below uses one of these five bases, so the AR corpus prints an Arabic
+// name in every lead cell (the numeric suffix rides along unchanged).
+const AR_DRIVER_NAME: Record<string, string> = {
+  mohammed: "محمد", Khalid: "خالد", Fahad: "فهد", Turki: "تركي", Abdullah: "عبدالله",
+};
+const arDriverName = (name: string): string | null => {
+  const [first, ...rest] = name.split(" ");
+  const ar = AR_DRIVER_NAME[first];
+  return ar ? [ar, ...rest].join(" ") : null;
+};
 
 const opsInput = (
   lang: Lang,
@@ -824,6 +841,12 @@ const opsInput = (
       permits: r.exit_permits,
     })),
     drivers,
+    // The page threads its fetched (id, name, name_ar) rows; the fixture
+    // derives the same set from the roster it was handed. The unassigned
+    // bucket (null id, null name) contributes nothing, same as live.
+    driverNames: drivers.flatMap((d) =>
+      d.id && d.name ? [{ id: d.id, name: d.name, name_ar: arDriverName(d.name) }] : [],
+    ),
     driverScheduled: sumOver(drivers, (d) => d.scheduled),
     driverDelivered: sumOver(drivers, (d) => d.delivered),
   };
@@ -883,7 +906,7 @@ const DRIVERS_LONG: OpsDocDriver[] = [
       i % 11,
     ),
   ),
-  { ...driver("__ignored__", null, 0, 17, 12, 5), name: null, unassigned: true },
+  { ...driver("__ignored__", null, 0, 17, 12, 5), id: null, name: null, unassigned: true },
 ];
 
 // SYNTHETIC PERIOD — May 2026, which the operations view does not cover at all.
@@ -1051,18 +1074,21 @@ const DT_PROJECTS: ReportProject[] = [
 // but kept as IDS for one substantive reason: two DISTINCT drivers are both
 // named "Fahad 2" (one terminated) and two more names repeat across rosters, so
 // a fixture keyed on names would silently merge people the report separates.
+// `name_ar` mirrors the live column. Khan alone keeps it NULL on purpose:
+// the AR sheet must fall back to the base name for a driver whose Arabic
+// name was never entered, and deleting the case would hide it.
 const DT_DRIVERS: ReportDriver[] = [
-  { id: "a9157ee2", name: "Fahad" },
-  { id: "8e46a311", name: "Fahad 2" },
-  { id: "cc2eff9e", name: "Fahad 3" },
-  { id: "d4f3fed1", name: "Khalid 1" },
-  { id: "e3352262", name: "Khalid 2" },
-  { id: "2326d261", name: "Khalid 3" },
-  { id: "4215eb40", name: "Khan" },
-  { id: "9f0a2bb3", name: "mohammed 1" },
-  { id: "13823f47", name: "mohammed 2" },
-  { id: "98fdb0bb", name: "mohammed 3" },
-  { id: "234baa37", name: "Turki" },
+  { id: "a9157ee2", name: "Fahad", name_ar: "فهد" },
+  { id: "8e46a311", name: "Fahad 2", name_ar: "فهد 2" },
+  { id: "cc2eff9e", name: "Fahad 3", name_ar: "فهد 3" },
+  { id: "d4f3fed1", name: "Khalid 1", name_ar: "خالد 1" },
+  { id: "e3352262", name: "Khalid 2", name_ar: "خالد 2" },
+  { id: "2326d261", name: "Khalid 3", name_ar: "خالد 3" },
+  { id: "4215eb40", name: "Khan", name_ar: null },
+  { id: "9f0a2bb3", name: "mohammed 1", name_ar: "محمد 1" },
+  { id: "13823f47", name: "mohammed 2", name_ar: "محمد 2" },
+  { id: "98fdb0bb", name: "mohammed 3", name_ar: "محمد 3" },
+  { id: "234baa37", name: "Turki", name_ar: "تركي" },
 ];
 
 // Thirteen live plates. BBB-1115 (302bcce5) is DELIBERATELY ABSENT — it is
@@ -1409,6 +1435,16 @@ const PS_DOC_NOBANK: IssuedPayslipRow = {
   snapshot: { driver_name: "Tariq Al-Dossari", salary_at_issue: 3200, commission_basis: "none", payout_count: 0 },
 };
 
+// The page's own driver rows (id, name, name_ar), as PayslipsStatement
+// threads them — the AR slip prints the Arabic name in the masthead and
+// subtitle while the EN slip keeps the Latin one.
+const PS_DRIVER_NAMES = [
+  { id: "ps-d1", name: "Omar Al-Harbi", name_ar: "عمر الحربي" },
+  { id: "ps-d2", name: "Fahd Al-Qahtani", name_ar: "فهد القحطاني" },
+  { id: "ps-d3", name: "Tariq Al-Dossari", name_ar: "طارق الدوسري" },
+  { id: "ps-d4", name: "Nasser Al-Shammari", name_ar: "ناصر الشمري" },
+];
+
 const psInput = (lang: Lang, over: Partial<PayslipDocInput>): PayslipDocInput => ({
   lang,
   generatedAt: AT,
@@ -1418,6 +1454,7 @@ const psInput = (lang: Lang, over: Partial<PayslipDocInput>): PayslipDocInput =>
   violationTypes: PS_VTYPES,
   running: false,
   bank: null,
+  driverNames: PS_DRIVER_NAMES,
   ...over,
 });
 
