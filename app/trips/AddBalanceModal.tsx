@@ -27,6 +27,7 @@ import { X, Plus, Image as ImageIcon } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar, todayKey } from "@/lib/utils";
 import { recordTopup, getTopupProofSignedUrl } from "@/lib/actions/finance";
+import { prepareUploadFiles } from "@/lib/upload-image";
 import ScrollLock from "@/components/ScrollLock";
 import { useApp } from "@/components/AppShell";
 import { t, fill } from "@/lib/i18n";
@@ -78,7 +79,11 @@ export default function AddBalanceModal({
   const [date, setDate] = useState(todayKey());
   const [note, setNote] = useState("");
   const [reference, setReference] = useState("");
-  const [hasPhoto, setHasPhoto] = useState(false);
+  // The PREPARED file (image → WebP, compressed; PDF/other untouched), not the
+  // raw pick — the raw bytes never leave the browser. photoKey remounts the
+  // input when a pick is rejected, so the same file can be re-picked.
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoKey, setPhotoKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -93,7 +98,8 @@ export default function AddBalanceModal({
     setDate(todayKey());
     setNote("");
     setReference("");
-    setHasPhoto(false);
+    setPhoto(null);
+    setPhotoKey((k) => k + 1);
     setError(null);
   }, [open, fixedCustomer]);
 
@@ -105,7 +111,7 @@ export default function AddBalanceModal({
     // ETF ref + photo are only REQUIRED for bank_transfer — cash may carry
     // them optionally (cash can still be bank-deposited) but isn't blocked
     // without them.
-    (method === "cash" || (reference.trim() !== "" && hasPhoto));
+    (method === "cash" || (reference.trim() !== "" && photo !== null));
 
   function close() {
     if (saving) return;
@@ -132,7 +138,8 @@ export default function AddBalanceModal({
     setDate(todayKey());
     setNote("");
     setReference("");
-    setHasPhoto(false);
+    setPhoto(null);
+    setPhotoKey((k) => k + 1);
     setError(null);
     setView("form");
   }
@@ -152,21 +159,32 @@ export default function AddBalanceModal({
     // Sent as-entered for BOTH methods now — cash keeps whatever ETF ref it
     // was given instead of being blanked (Batch B follow-up).
     form.set("reference", reference);
-    const res = await recordTopup(form);
-    setSaving(false);
-    if (res.error) {
-      setError(res.error);
-      return;
-    }
-    if (fixedCustomer) {
-      // Back to history, not fully closed — mirrors the invoice list
-      // reappearing after a detail action, lets Turki see the new row land.
-      setView("list");
+    // The PREPARED file replaces the input's own raw-bytes entry — what
+    // uploads is exactly what the state (and the gates) saw.
+    if (photo) form.set("photoFile", photo);
+    else form.delete("photoFile");
+    // try/catch: a network drop mid-await otherwise leaves the button stuck
+    // on busy with no message — the finally owns the busy flag now.
+    try {
+      const res = await recordTopup(form);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      if (fixedCustomer) {
+        // Back to history, not fully closed — mirrors the invoice list
+        // reappearing after a detail action, lets Turki see the new row land.
+        setView("list");
+        router.refresh();
+        return;
+      }
+      close();
       router.refresh();
-      return;
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSaving(false);
     }
-    close();
-    router.refresh();
   }
 
   if (!open) return null;
@@ -367,10 +385,32 @@ export default function AddBalanceModal({
                     : t("trips.addBalance.suffixOptional", lang)}
                 </span>
                 <input
+                  key={photoKey}
                   type="file"
                   name="photoFile"
                   required={method === "bank_transfer"}
-                  onChange={(e) => setHasPhoto(!!e.target.files?.length)}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    if (!f) {
+                      setPhoto(null);
+                      setError(null);
+                      return;
+                    }
+                    // Prepared at PICK time: image → compressed WebP
+                    // (orientation kept), PDF/other untouched; undecodable or
+                    // still-over-10MB is refused HERE, by name, not after Save.
+                    void (async () => {
+                      const r = await prepareUploadFiles([f]);
+                      if (!r.ok) {
+                        setPhoto(null);
+                        setError(fill(t(r.errorKey, lang), { name: r.name }));
+                        setPhotoKey((k) => k + 1);
+                        return;
+                      }
+                      setError(null);
+                      setPhoto(r.files[0] ?? null);
+                    })();
+                  }}
                   className={INPUT}
                   style={INPUT_STYLE}
                 />

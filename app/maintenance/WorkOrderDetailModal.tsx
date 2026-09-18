@@ -28,7 +28,8 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { X, CheckSquare, Square, Play, Check, Pencil, Trash2, AlertTriangle, ImagePlus } from "lucide-react";
-import { t, arText } from "@/lib/i18n";
+import { t, arText, fill } from "@/lib/i18n";
+import { prepareUploadFiles } from "@/lib/upload-image";
 import { cn, formatDate, formatSar } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
@@ -186,50 +187,78 @@ export default function WorkOrderDetailModal({
   async function onUploadPhoto(lineId: string, file: File | undefined) {
     if (!file) return;
     setPhotoError(null);
-    if (file.size > MAX_PHOTO_BYTES) {
-      setPhotoError(t("mt.photoTooLarge", lang));
-      return;
-    }
-    if ((photosByLine.get(lineId)?.length ?? 0) >= MAX_PHOTOS_PER_LINE) {
-      setPhotoError(t("mt.photoCapReached", lang));
-      return;
-    }
     setBusyLineId(lineId);
-    const fd = new FormData();
-    fd.set("workOrderPartId", lineId);
-    fd.set("file", file);
-    const res = await uploadWorkOrderPartPhoto(fd);
-    setBusyLineId(null);
-    if (res.error) {
-      setPhotoError(res.error);
-      return;
+    // try/catch: a network drop mid-await otherwise leaves the picker stuck
+    // on busy with no message — the finally owns the busy flag now.
+    try {
+      // Prepare (WebP, 2000px long edge) BEFORE the 2 MB check so the gate
+      // runs on the compressed result — a 3-4 MB camera photo now fits the
+      // cap that used to reject it. The 2 MB cap itself STAYS (preview
+      // parity, and the server enforces the same figure).
+      const r = await prepareUploadFiles([file]);
+      if (!r.ok) {
+        setPhotoError(fill(t(r.errorKey, lang), { name: r.name }));
+        return;
+      }
+      const prepared = r.files[0];
+      if (!prepared) return;
+      if (prepared.size > MAX_PHOTO_BYTES) {
+        setPhotoError(t("mt.photoTooLarge", lang));
+        return;
+      }
+      if ((photosByLine.get(lineId)?.length ?? 0) >= MAX_PHOTOS_PER_LINE) {
+        setPhotoError(t("mt.photoCapReached", lang));
+        return;
+      }
+      const fd = new FormData();
+      fd.set("workOrderPartId", lineId);
+      fd.set("file", prepared);
+      const res = await uploadWorkOrderPartPhoto(fd);
+      if (res.error) {
+        setPhotoError(res.error);
+        return;
+      }
+      router.refresh();
+    } catch {
+      setPhotoError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusyLineId(null);
     }
-    router.refresh();
   }
 
   async function onRemovePhoto(photoId: string) {
     setPhotoError(null);
     setBusyLineId(photoId);
-    const res = await removeWorkOrderPartPhoto(photoId);
-    setBusyLineId(null);
-    if (res.error) {
-      setPhotoError(res.error);
-      return;
+    try {
+      const res = await removeWorkOrderPartPhoto(photoId);
+      if (res.error) {
+        setPhotoError(res.error);
+        return;
+      }
+      router.refresh();
+    } catch {
+      setPhotoError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusyLineId(null);
     }
-    router.refresh();
   }
 
   async function onToggleTask(task: WorkOrderTask) {
     if (!tasksEditable || busyTaskId) return;
     setBusyTaskId(task.id);
     setError(null);
-    const res = await toggleWorkOrderTask(task.id, !task.done);
-    setBusyTaskId(null);
-    if (res.error) {
-      setError(res.error);
-      return;
+    try {
+      const res = await toggleWorkOrderTask(task.id, !task.done);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusyTaskId(null);
     }
-    router.refresh();
   }
 
   function startEditingNotes() {
@@ -240,38 +269,53 @@ export default function WorkOrderDetailModal({
   async function onSaveNotes() {
     setSavingNotes(true);
     setError(null);
-    const res = await saveWorkOrderNotes(workOrder.id, draftNotes);
-    setSavingNotes(false);
-    if (res.error) {
-      setError(res.error);
-      return;
+    try {
+      const res = await saveWorkOrderNotes(workOrder.id, draftNotes);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setEditingNotes(false);
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSavingNotes(false);
     }
-    setEditingNotes(false);
-    router.refresh();
   }
 
   async function onStart() {
     setLifecycleBusy(true);
     setError(null);
-    const res = await startWorkOrder(workOrder.id);
-    setLifecycleBusy(false);
-    if (res.error) {
-      setError(res.error);
-      return;
+    try {
+      const res = await startWorkOrder(workOrder.id);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setLifecycleBusy(false);
     }
-    router.refresh();
   }
 
   async function onComplete() {
     setLifecycleBusy(true);
     setError(null);
-    const res = await completeWorkOrder(workOrder.id);
-    setLifecycleBusy(false);
-    if (res.error) {
-      setError(res.error);
-      return;
+    try {
+      const res = await completeWorkOrder(workOrder.id);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setLifecycleBusy(false);
     }
-    router.refresh();
   }
 
   // Polish P2 item 1 — permanent delete. Server-side gate
@@ -283,14 +327,19 @@ export default function WorkOrderDetailModal({
     if (!confirm(t("mt.confirmDeleteWorkOrder", lang))) return;
     setLifecycleBusy(true);
     setError(null);
-    const res = await deleteWorkOrder(workOrder.id);
-    setLifecycleBusy(false);
-    if (res.error) {
-      setError(res.error);
-      return;
+    try {
+      const res = await deleteWorkOrder(workOrder.id);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      onClose();
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setLifecycleBusy(false);
     }
-    onClose();
-    router.refresh();
   }
 
   return (

@@ -495,7 +495,10 @@ export async function getExitPermitFileUrls(
 ): Promise<{ error: string | null; urls?: Record<string, string> }> {
   if (paths.length === 0) return { error: null, urls: {} };
   const supabase = createClient();
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(paths, 60 * 10);
+  // 300s, matching every other private bucket in the app (archive, proofs,
+  // topups) — this was the one 600s outlier. Signed on every open, never
+  // cached, so the shorter life costs nothing.
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(paths, 300);
   if (error) return { error: error.message };
   const urls: Record<string, string> = {};
   for (const row of data ?? []) {

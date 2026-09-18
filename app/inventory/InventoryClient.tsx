@@ -2058,11 +2058,11 @@ function ReceivePartsModal({
     for (const original of picked) {
       const result = await prepareUploadImage(original);
       if (!result.ok) {
-        setError(fill(t("inventory.shared.fileUnreadable", lang), { name: result.fileName }));
+        setError(fill(t("shared.upload.fileUnreadable", lang), { name: result.fileName }));
         return;
       }
       if (result.file.size > MAX_PREPARED_FILE_BYTES) {
-        setError(fill(t("inventory.shared.fileTooLarge", lang), { name: result.file.name }));
+        setError(fill(t("shared.upload.fileTooLarge", lang), { name: result.file.name }));
         return;
       }
       prepared.push(result.file);
@@ -2099,7 +2099,7 @@ function ReceivePartsModal({
     // serverActions body limit kills the request before the action runs and
     // the user sees nothing.
     if (batchBytes(files) > MAX_BATCH_BYTES) {
-      setError(t("inventory.shared.batchTooLarge", lang));
+      setError(t("shared.upload.batchTooLarge", lang));
       return;
     }
 
@@ -2122,7 +2122,7 @@ function ReceivePartsModal({
       // Network drop / framework-layer rejection — the action never ran, so
       // nothing was written. Without this catch the throw skipped
       // setSaving(false) and the button stuck on "Saving…" forever.
-      setError(t("inventory.shared.saveFailedNetwork", lang));
+      setError(t("shared.upload.saveFailedNetwork", lang));
       return;
     } finally {
       setSaving(false);

@@ -1,9 +1,8 @@
 # SESSION HANDOFF
 
 ## State
-- **Uploads:** 15mb body limit, WebP compression via
-  lib/upload-image.ts, receipt invoice viewer (ReceiptInvoiceFiles);
-  other upload surfaces pending.
+- **Uploads CLOSED:** 15mb body; lib/upload-image.ts; all 11 surfaces
+  hardened (compress, gates, try/catch, 300s TTL).
 - **DB at 0202, PROD + TEST.** Migration FILES authoritative. Repo
   UNLINKED = no `db push`.
 - **IBAN CLOSED (bf3dedd):** driver/staff shape HARD (SA+22, DB), mod-97

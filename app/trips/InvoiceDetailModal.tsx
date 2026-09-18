@@ -26,6 +26,7 @@ import { invoiceStatusLabel, paymentMethodLabel, waterTypeLabel } from "@/lib/en
 // English — see the note there.
 import { formatDate, formatDateLang, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
+import { prepareUploadFiles } from "@/lib/upload-image";
 import { round2 } from "@/lib/vat";
 import { groupInvoiceLines } from "@/lib/invoiceDisplay";
 import { buildBankBlock, type VmBankBlock } from "@/lib/invoiceViewModel";
@@ -486,14 +487,22 @@ export default function InvoiceDetailModal({
   async function runAction(fn: () => Promise<{ error: string | null }>) {
     setBusy(true);
     setActionError(null);
-    const res = await fn();
-    setBusy(false);
-    if (res.error) {
-      setActionError(res.error);
+    // try/catch: a network drop mid-await otherwise leaves the button stuck
+    // on busy with no message — the finally owns the busy flag now.
+    try {
+      const res = await fn();
+      if (res.error) {
+        setActionError(res.error);
+        return false;
+      }
+      await refresh();
+      return true;
+    } catch {
+      setActionError(t("shared.upload.saveFailedNetwork", lang));
       return false;
+    } finally {
+      setBusy(false);
     }
-    await refresh();
-    return true;
   }
 
   // Two-step when an image is staged (create the charge, then upload against
@@ -507,36 +516,75 @@ export default function InvoiceDetailModal({
     if (!invoiceId || !chargeLabel.trim() || qty <= 0 || price < 0) return;
     setAddingCharge(true);
     setActionError(null);
-    const res = await addSpecialCharge(invoiceId, chargeLabel.trim(), chargeDate || null, qty, price);
-    if (res.error || !res.data) {
+    // try/catch: a network drop mid-await otherwise leaves the button stuck
+    // on busy with no message — the finally owns the busy flag now.
+    try {
+      const res = await addSpecialCharge(invoiceId, chargeLabel.trim(), chargeDate || null, qty, price);
+      if (res.error || !res.data) {
+        setActionError(res.error ?? t("trips.invoice.errAddCharge", lang));
+        return;
+      }
+      if (chargeImageFile) {
+        // Already PREPARED at pick time (onPickChargeImage) — this is the
+        // compressed WebP, not the raw camera bytes.
+        const form = new FormData();
+        form.set("imageFile", chargeImageFile);
+        const imgRes = await uploadSpecialChargeImage(invoiceId, res.data.id, form);
+        if (imgRes.error) {
+          // Charge itself was added fine — surface the image failure but don't
+          // discard the successful add; the row can still get an image later.
+          setActionError(fill(t("trips.invoice.errChargeImage", lang), { err: imgRes.error }));
+        }
+      }
+      setChargeLabel("");
+      setChargeDate(todayKey());
+      setChargeQty("1");
+      setChargePrice("");
+      setChargeImageFile(null);
+      setChargeImageInputKey((k) => k + 1);
+      await refresh();
+    } catch {
+      setActionError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
       setAddingCharge(false);
-      setActionError(res.error ?? t("trips.invoice.errAddCharge", lang));
+    }
+  }
+
+  // Pick-time preparation for the add-charge form's staged image: compress to
+  // WebP (orientation kept), refuse undecodable or still-over-10MB picks by
+  // name, and remount the input so the same file can be re-picked. Passed to
+  // SpecialChargesSection as its setChargeImageFile — the child stays dumb.
+  function onPickChargeImage(f: File | null) {
+    if (!f) {
+      setChargeImageFile(null);
       return;
     }
-    if (chargeImageFile) {
-      const form = new FormData();
-      form.set("imageFile", chargeImageFile);
-      const imgRes = await uploadSpecialChargeImage(invoiceId, res.data.id, form);
-      if (imgRes.error) {
-        // Charge itself was added fine — surface the image failure but don't
-        // discard the successful add; the row can still get an image later.
-        setActionError(fill(t("trips.invoice.errChargeImage", lang), { err: imgRes.error }));
+    void (async () => {
+      const r = await prepareUploadFiles([f]);
+      if (!r.ok) {
+        setChargeImageFile(null);
+        setChargeImageInputKey((k) => k + 1);
+        setActionError(fill(t(r.errorKey, lang), { name: r.name }));
+        return;
       }
-    }
-    setAddingCharge(false);
-    setChargeLabel("");
-    setChargeDate(todayKey());
-    setChargeQty("1");
-    setChargePrice("");
-    setChargeImageFile(null);
-    setChargeImageInputKey((k) => k + 1);
-    await refresh();
+      setActionError(null);
+      setChargeImageFile(r.files[0] ?? null);
+    })();
   }
 
   async function onUploadChargeImage(chargeId: string, file: File) {
     if (!invoiceId) return;
+    // The row-attach path hands over the RAW pick — prepare it here before it
+    // travels (compress image, refuse undecodable/oversize by name).
+    const r = await prepareUploadFiles([file]);
+    if (!r.ok) {
+      setActionError(fill(t(r.errorKey, lang), { name: r.name }));
+      return;
+    }
+    const prepared = r.files[0];
+    if (!prepared) return;
     const form = new FormData();
-    form.set("imageFile", file);
+    form.set("imageFile", prepared);
     await runAction(() => uploadSpecialChargeImage(invoiceId, chargeId, form));
   }
 
@@ -560,14 +608,19 @@ export default function InvoiceDetailModal({
     }
     setSavingPeriod(true);
     setPeriodError(null);
-    const res = await updateDraftInvoicePeriod(invoiceId, periodStartInput, periodEndInput);
-    setSavingPeriod(false);
-    if (res.error) {
-      setPeriodError(res.error);
-      return;
+    try {
+      const res = await updateDraftInvoicePeriod(invoiceId, periodStartInput, periodEndInput);
+      if (res.error) {
+        setPeriodError(res.error);
+        return;
+      }
+      setEditingPeriod(false);
+      await refresh();
+    } catch {
+      setPeriodError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSavingPeriod(false);
     }
-    setEditingPeriod(false);
-    await refresh();
   }
 
   async function onViewProof() {
@@ -589,14 +642,19 @@ export default function InvoiceDetailModal({
     if (!invoiceId) return;
     setBusy(true);
     setActionError(null);
-    const res = await deleteDraftInvoice(invoiceId);
-    setBusy(false);
-    if (res.error) {
-      setActionError(res.error);
-      return;
+    try {
+      const res = await deleteDraftInvoice(invoiceId);
+      if (res.error) {
+        setActionError(res.error);
+        return;
+      }
+      onMutated();
+      onBack();
+    } catch {
+      setActionError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusy(false);
     }
-    onMutated();
-    onBack();
   }
 
   async function onMarkPaid(e: React.FormEvent<HTMLFormElement>) {
@@ -606,14 +664,36 @@ export default function InvoiceDetailModal({
     form.set("invoiceId", invoiceId);
     setBusy(true);
     setActionError(null);
-    const res = await markInvoicePaid(form);
-    setBusy(false);
-    if (res.error) {
-      setActionError(res.error);
-      return;
+    // try/catch: a network drop mid-await otherwise leaves the button stuck
+    // on busy with no message — the finally owns the busy flag now.
+    try {
+      // The proof input is uncontrolled (read straight off the form), so the
+      // image is prepared HERE, at submit: compressed WebP replaces the raw
+      // bytes in the FormData; a PDF slip passes through untouched; an
+      // undecodable or still-over-10MB file is refused by name before any
+      // network leaves.
+      const proof = form.get("proofFile");
+      if (proof instanceof File && proof.size > 0) {
+        const r = await prepareUploadFiles([proof]);
+        if (!r.ok) {
+          setActionError(fill(t(r.errorKey, lang), { name: r.name }));
+          return;
+        }
+        const prepared = r.files[0];
+        if (prepared) form.set("proofFile", prepared);
+      }
+      const res = await markInvoicePaid(form);
+      if (res.error) {
+        setActionError(res.error);
+        return;
+      }
+      setPayingOpen(false);
+      await refresh();
+    } catch {
+      setActionError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusy(false);
     }
-    setPayingOpen(false);
-    await refresh();
   }
 
   // Prepaid "Pay with Balance" (Batch 1) — no cash/bank choice (prepaid never
@@ -648,14 +728,19 @@ export default function InvoiceDetailModal({
     form.set("paymentMethod", "balance");
     setBusy(true);
     setActionError(null);
-    const res = await markInvoicePaid(form);
-    setBusy(false);
-    if (res.error) {
-      setActionError(res.error);
-      return;
+    try {
+      const res = await markInvoicePaid(form);
+      if (res.error) {
+        setActionError(res.error);
+        return;
+      }
+      setPayingOpen(false);
+      await refresh();
+    } catch {
+      setActionError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusy(false);
     }
-    setPayingOpen(false);
-    await refresh();
   }
 
   if (!open || !invoiceId || !mounted) return null;
@@ -1078,7 +1163,7 @@ export default function InvoiceDetailModal({
                     chargePrice={chargePrice}
                     setChargePrice={setChargePrice}
                     chargeAmountPreview={chargeAmountPreview}
-                    setChargeImageFile={setChargeImageFile}
+                    setChargeImageFile={onPickChargeImage}
                     chargeImageInputKey={chargeImageInputKey}
                   />
                 )}
@@ -1182,7 +1267,7 @@ export default function InvoiceDetailModal({
                     chargePrice={chargePrice}
                     setChargePrice={setChargePrice}
                     chargeAmountPreview={chargeAmountPreview}
-                    setChargeImageFile={setChargeImageFile}
+                    setChargeImageFile={onPickChargeImage}
                     chargeImageInputKey={chargeImageInputKey}
                   />
                 )}

@@ -39,6 +39,7 @@ import {
   VIOLATION_IMAGE_ACCEPT,
   type ViolationType,
 } from "@/lib/violations";
+import { prepareUploadImage, MAX_PREPARED_FILE_BYTES } from "@/lib/upload-image";
 import {
   addViolationType,
   removeDriverViolationImage,
@@ -119,7 +120,7 @@ export type PhotoDraft = {
  *
  * NOTHING HERE TOUCHES STORAGE. This is what Save WILL do, so Cancel cancels.
  */
-export function usePhotoDraft(): PhotoDraft {
+export function usePhotoDraft(lang: Lang): PhotoDraft {
   const [file, setFile] = useState<File | null>(null);
   const [cleared, setCleared] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -134,6 +135,11 @@ export function usePhotoDraft(): PhotoDraft {
      * Validated HERE for the immediate no, and again on the server, which is
      * the actual gate. Same shared allow-list on both sides — `accept` on the
      * input is a filter in the file dialog, not a check.
+     *
+     * The pick is prepared FIRST (prepareUploadImage: EXIF-upright, ≤2000px,
+     * WebP) and every check below runs on the PREPARED file — so the 5 MB
+     * violation cap now judges what will actually be uploaded, not the
+     * camera original.
      */
     pick(f) {
       if (!f) {
@@ -141,19 +147,34 @@ export function usePhotoDraft(): PhotoDraft {
         setError(null);
         return;
       }
-      const bad = validateViolationImage(f);
-      if (bad) {
-        setFile(null);
-        setError(bad);
-        // The <input type="file"> holds its own DOM value; remounting it is the
-        // only way to make a rejected pick actually go away.
-        setInputKey((k) => k + 1);
-        return;
-      }
-      setError(null);
-      setFile(f);
-      // Picking a replacement supersedes a pending removal.
-      setCleared(false);
+      void (async () => {
+        const prepared = await prepareUploadImage(f);
+        if (!prepared.ok) {
+          setFile(null);
+          setError(fill(t("shared.upload.fileUnreadable", lang), { name: prepared.fileName }));
+          // The <input type="file"> holds its own DOM value; remounting it is
+          // the only way to make a rejected pick actually go away.
+          setInputKey((k) => k + 1);
+          return;
+        }
+        if (prepared.file.size > MAX_PREPARED_FILE_BYTES) {
+          setFile(null);
+          setError(fill(t("shared.upload.fileTooLarge", lang), { name: prepared.file.name }));
+          setInputKey((k) => k + 1);
+          return;
+        }
+        const bad = validateViolationImage(prepared.file);
+        if (bad) {
+          setFile(null);
+          setError(bad);
+          setInputKey((k) => k + 1);
+          return;
+        }
+        setError(null);
+        setFile(prepared.file);
+        // Picking a replacement supersedes a pending removal.
+        setCleared(false);
+      })();
     },
     clear() {
       setCleared(true);

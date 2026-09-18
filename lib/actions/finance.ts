@@ -24,6 +24,11 @@ export type ActionResult<T = undefined> = { error: string | null; data?: T };
 
 const PHOTO_BUCKET = "topup-proofs";
 
+// Server backstop matching app/archive/actions.ts — the client compresses
+// images and gates at this same figure BEFORE submit; this is the layer that
+// holds when the client is bypassed or stale.
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
 export async function recordTopup(formData: FormData): Promise<ActionResult> {
   const supabase = createClient();
 
@@ -55,6 +60,7 @@ export async function recordTopup(formData: FormData): Promise<ActionResult> {
 
   let photoPath: string | null = null;
   if (file instanceof File && file.size > 0) {
+    if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
     const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
     const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
     photoPath = `${customerId}/topup-${Date.now()}.${ext}`;
@@ -139,6 +145,7 @@ export async function returnCustomerBalance(formData: FormData): Promise<ActionR
 
   let photoPath: string | null = null;
   if (file instanceof File && file.size > 0) {
+    if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
     const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
     const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
     photoPath = `${customerId}/return-${Date.now()}.${ext}`;

@@ -38,6 +38,10 @@ export type ActionResult<T = undefined> = { error: string | null; data?: T };
 
 const PROOF_BUCKET = "invoice-proofs";
 const PDF_BUCKET = "invoice-pdfs";
+// Server backstop matching app/archive/actions.ts — the client compresses
+// images and gates at this same figure BEFORE submit; this is the layer that
+// holds when the client is bypassed or stale.
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // THE CACHE KEY CARRIES A TEMPLATE VERSION, AND THAT IS THE ONLY INVALIDATION
 // A LAYOUT CHANGE CAN HAVE. getInvoicePdf() caches paid/void bytes on 0027's
 // premise that an issued document never changes — true of its DATA and false of
@@ -515,6 +519,7 @@ export async function uploadSpecialChargeImage(invoiceId: string, chargeId: stri
   }
   const file = formData.get("imageFile");
   if (!(file instanceof File) || file.size === 0) return { error: "No image file provided." };
+  if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
 
   const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
   const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
@@ -1057,6 +1062,7 @@ export async function markInvoicePaid(formData: FormData): Promise<ActionResult>
     }
     if (!reference) return { error: "bank_transfer requires a payment reference." };
     if (!paymentDate) return { error: "bank_transfer requires a payment date." };
+    if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
     const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
     const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
     proofPath = `${invoiceId}/proof-${Date.now()}.${ext}`;

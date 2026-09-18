@@ -2543,7 +2543,7 @@ function PayslipDocument({
   // The draft state machine is the drivers screen's, literally — usePhotoDraft
   // in ViolationForm.tsx. `photo.error` is the FILE-VALIDATION message, which is
   // why it is not `photoError` above: that one is a photo that would not OPEN.
-  const photo = usePhotoDraft();
+  const photo = usePhotoDraft(lang);
   // Amber, not rose: the fine saved and only its attachment did not.
   const [photoNotice, setPhotoNotice] = useState<string | null>(null);
 
@@ -2594,34 +2594,40 @@ function PayslipDocument({
     setRowBusy(true);
     setRowError(null);
     setPhotoNotice(null);
-    // THE SAME ACTION THE DRIVERS SCREEN CALLS. No second write path, so the
-    // date floor, the validation and the freeze guard are all the ones already
-    // in force there.
-    const res = await updateDriverViolation(id, draftToForm(row.driver_id, draft));
-    if (res.error) {
+    // try/catch: a network drop mid-await otherwise leaves the row stuck on
+    // busy with no message — the finally owns the busy flag now.
+    try {
+      // THE SAME ACTION THE DRIVERS SCREEN CALLS. No second write path, so the
+      // date floor, the validation and the freeze guard are all the ones already
+      // in force there.
+      const res = await updateDriverViolation(id, draftToForm(row.driver_id, draft));
+      if (res.error) {
+        setRowError(res.error);
+        return;
+      }
+
+      // ---- past this line the fine IS saved; nothing below may undo it -------
+      // The shared tail. `cleared` needs no guard here the way it does on the
+      // drivers screen: this surface only ever edits, so there is always a stored
+      // photo the removal could be about.
+      const warn = await applyPhotoChanges(
+        row.driver_id,
+        id,
+        { file: photo.file, cleared: photo.cleared },
+        lang,
+      );
+
+      closeRowForms();
+      setPhotoNotice(warn);
+      // The preview reads v_driver_payslip_basis, which recomputes the deduction
+      // and the net from the live fines. Refreshing the route is what makes the
+      // breakdown above this table agree with the row just edited.
+      router.refresh();
+    } catch {
+      setRowError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
       setRowBusy(false);
-      setRowError(res.error);
-      return;
     }
-
-    // ---- past this line the fine IS saved; nothing below may undo it -------
-    // The shared tail. `cleared` needs no guard here the way it does on the
-    // drivers screen: this surface only ever edits, so there is always a stored
-    // photo the removal could be about.
-    const warn = await applyPhotoChanges(
-      row.driver_id,
-      id,
-      { file: photo.file, cleared: photo.cleared },
-      lang,
-    );
-
-    setRowBusy(false);
-    closeRowForms();
-    setPhotoNotice(warn);
-    // The preview reads v_driver_payslip_basis, which recomputes the deduction
-    // and the net from the live fines. Refreshing the route is what makes the
-    // breakdown above this table agree with the row just edited.
-    router.refresh();
   }
 
   async function confirmVoid() {

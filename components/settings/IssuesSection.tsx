@@ -48,7 +48,8 @@ import {
   categoryLabel, statusMeta, statusRank, validateIssueDraft, validateAttachmentFile,
   type IssueRow,
 } from "@/lib/issues";
-import { t, type Lang } from "@/lib/i18n";
+import { t, fill, type Lang } from "@/lib/i18n";
+import { prepareUploadFiles } from "@/lib/upload-image";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -191,13 +192,20 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
     if (file) fd.append("file", file);
 
     setSubmitting(true);
-    const res = await createIssue(fd);
-    setSubmitting(false);
-    // Narrow on `id`, not on `error`.
-    if (!res.id) { setFormError(res.error); return; }
-    setSubmitted(true);
-    resetForm();
-    await load();
+    // try/catch: a network drop mid-await otherwise leaves Submit stuck on
+    // busy with no message — the finally owns the busy flag now.
+    try {
+      const res = await createIssue(fd);
+      // Narrow on `id`, not on `error`.
+      if (!res.id) { setFormError(res.error); return; }
+      setSubmitted(true);
+      resetForm();
+      await load();
+    } catch {
+      setFormError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function onExpand(row: IssueRow) {
@@ -211,11 +219,17 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
     if (row.attachment_path) {
       // Lazily, per ticket. Signing every attachment at load would be N storage
       // round trips for images nobody has asked to see, and the URLs would
-      // start expiring while the list sat open.
+      // start expiring while the list sat open. Signed on EVERY open, never
+      // cached.
       setAttachmentLoading(true);
-      const url = await fetchAttachmentUrl(row.attachment_path);
-      setAttachmentUrl(url);
-      setAttachmentLoading(false);
+      try {
+        const url = await fetchAttachmentUrl(row.attachment_path);
+        setAttachmentUrl(url);
+      } catch {
+        setRowError(t("shared.upload.saveFailedNetwork", lang));
+      } finally {
+        setAttachmentLoading(false);
+      }
     }
   }
 
@@ -223,11 +237,16 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
     setRowError(null);
     setRowSaved(null);
     setSavingId(row.id);
-    const res = await updateIssue({ id: row.id, status: draftStatus, resolutionNote: draftNote });
-    setSavingId(null);
-    if (res.error) { setRowError(res.error); return; }
-    setRowSaved(row.id);
-    await load();
+    try {
+      const res = await updateIssue({ id: row.id, status: draftStatus, resolutionNote: draftNote });
+      if (res.error) { setRowError(res.error); return; }
+      setRowSaved(row.id);
+      await load();
+    } catch {
+      setRowError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSavingId(null);
+    }
   }
 
   const rows = queue?.rows ?? [];
@@ -358,11 +377,23 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                 // change event — otherwise a rejected file cannot be retried.
                 e.target.value = "";
                 setFormError(null);
-                if (f) {
-                  const bad = validateAttachmentFile(f);
-                  if (bad) { setFormError(bad); return; }
-                }
-                setFile(f);
+                if (!f) { setFile(null); return; }
+                void (async () => {
+                  // Prepare (image → WebP/2000px) BEFORE the existing
+                  // validator, so the 5 MB gate runs on the compressed
+                  // result — a full-screen PNG now fits with room to spare.
+                  const r = await prepareUploadFiles([f]);
+                  if (!r.ok) {
+                    setFormError(fill(t(r.errorKey, lang), { name: r.name }));
+                    return;
+                  }
+                  const prepared = r.files[0] ?? null;
+                  if (prepared) {
+                    const bad = validateAttachmentFile(prepared);
+                    if (bad) { setFormError(bad); return; }
+                  }
+                  setFile(prepared);
+                })();
               }}
             />
             {file ? (

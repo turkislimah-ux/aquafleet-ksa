@@ -18,6 +18,7 @@ import { Btn } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText } from "@/lib/i18n";
 import { toLatinDigits } from "@/lib/digits";
+import { prepareUploadFiles } from "@/lib/upload-image";
 import { cn, formatDate } from "@/lib/utils";
 import {
   ARCHIVE_GROUP_COLORS, ARCHIVE_STATUS_PILL, archiveStatusLabel, docStatus, groupDot,
@@ -830,29 +831,47 @@ export function DocumentModal({
     if (!editingDocument) return;
     setUploading(true);
     setError(null);
-    for (const file of picked) {
-      const fd = new FormData();
-      fd.set("documentId", editingDocument.id);
-      fd.set("file", file);
-      const res = await uploadArchiveDocumentFile(fd);
-      if (res.error) {
-        setError(`${file.name}: ${res.error}`);
-        break;
+    // try/catch: a network drop mid-await otherwise leaves the picker stuck
+    // on busy with no message. Uploads are one file per request, so a batch
+    // gate is not needed here — no single request can exceed the body limit.
+    try {
+      const r = await prepareUploadFiles(picked);
+      if (!r.ok) {
+        setError(fill(t(r.errorKey, lang), { name: r.name }));
+        return;
       }
+      for (const file of r.files) {
+        const fd = new FormData();
+        fd.set("documentId", editingDocument.id);
+        fd.set("file", file);
+        const res = await uploadArchiveDocumentFile(fd);
+        if (res.error) {
+          setError(`${file.name}: ${res.error}`);
+          break;
+        }
+      }
+      onSaved();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
-    onSaved();
   }
 
   async function onRemoveFile(fileId: string) {
     setBusyFileId(fileId);
-    const res = await removeArchiveDocumentFile(fileId);
-    setBusyFileId(null);
-    if (res.error) {
-      setError(res.error);
-      return;
+    try {
+      const res = await removeArchiveDocumentFile(fileId);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      onSaved();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusyFileId(null);
     }
-    onSaved();
   }
 
   async function submit() {
@@ -869,6 +888,10 @@ export function DocumentModal({
     setSaving(true);
     setError(null);
 
+    // try/catch: a network drop mid-await otherwise leaves Save stuck on
+    // busy with no message — the finally owns the busy flag now.
+    try {
+
     // The subject's number is saved FIRST for a linked document — but ONLY
     // on EDIT. On CREATE the fields are locked and pulled (Turki's UX lock):
     // Add means "attach a document to the number that already exists", not
@@ -880,7 +903,6 @@ export function DocumentModal({
         expiry: personExpiry || null,
       });
       if (res.error) {
-        setSaving(false);
         setError(res.error);
         return;
       }
@@ -919,7 +941,6 @@ export function DocumentModal({
 
     if (isEdit) {
       const res = await updateArchiveDocument(editingDocument!.id, input);
-      setSaving(false);
       if (res.error) {
         setError(res.error);
         return;
@@ -931,7 +952,6 @@ export function DocumentModal({
     // CREATE — row first, then the staged files against its new id.
     const res = await createArchiveDocument(input);
     if (res.error || !res.document) {
-      setSaving(false);
       setError(res.error ?? t("archive.docModal.errCreate", lang));
       return;
     }
@@ -944,7 +964,6 @@ export function DocumentModal({
       const up = await uploadArchiveDocumentFile(fd);
       if (up.error) failed.push(sf.file.name);
     }
-    setSaving(false);
 
     // The document IS saved either way — report the upload failures by name
     // and keep the popup open so the user can retry, rather than closing and
@@ -959,6 +978,11 @@ export function DocumentModal({
       return;
     }
     onSaved();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -1222,7 +1246,20 @@ export function DocumentModal({
       ) : (
         <StagedFilePicker
           staged={staged}
-          onAdd={(picked) => setStaged((prev) => [...prev, ...picked.map((f) => ({ id: newStagedId(), file: f }))])}
+          onAdd={(picked) => {
+            // Prepared BEFORE staging: images land in the list already
+            // compressed (and the size shown is the size that will upload);
+            // PDFs/Office files pass through untouched.
+            void (async () => {
+              const r = await prepareUploadFiles(picked);
+              if (!r.ok) {
+                setError(fill(t(r.errorKey, lang), { name: r.name }));
+                return;
+              }
+              setError(null);
+              setStaged((prev) => [...prev, ...r.files.map((f) => ({ id: newStagedId(), file: f }))]);
+            })();
+          }}
           onRemove={(id) => setStaged((prev) => prev.filter((sf) => sf.id !== id))}
           hint={t("archive.fileHintStaged", lang)}
         />
@@ -1284,6 +1321,11 @@ export function RenewModal({
   async function submit() {
     setSaving(true);
     setError(null);
+
+    // try/catch: a network drop mid-await otherwise leaves Save stuck on
+    // busy with no message — the finally owns the busy flag now.
+    try {
+
     const res = await renewArchiveDocument(doc.id, {
       reference_no: referenceNo || null,
       issue_date: issueDate || null,
@@ -1303,7 +1345,6 @@ export function RenewModal({
         : undefined,
     });
     if (res.error) {
-      setSaving(false);
       setError(res.error);
       return;
     }
@@ -1316,7 +1357,6 @@ export function RenewModal({
       const up = await uploadArchiveDocumentFile(fd);
       if (up.error) failed.push(sf.file.name);
     }
-    setSaving(false);
 
     // The renewal itself succeeded — say so, name what failed, and stay open
     // rather than closing on a half-done state.
@@ -1330,6 +1370,11 @@ export function RenewModal({
       return;
     }
     onSaved();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -1415,7 +1460,20 @@ export function RenewModal({
         <label className="text-xs muted block mb-1">{t("archive.renewModal.fNewFiles", lang)}</label>
         <StagedFilePicker
           staged={staged}
-          onAdd={(picked) => setStaged((prev) => [...prev, ...picked.map((f) => ({ id: newStagedId(), file: f }))])}
+          onAdd={(picked) => {
+            // Prepared BEFORE staging: images land in the list already
+            // compressed (and the size shown is the size that will upload);
+            // PDFs/Office files pass through untouched.
+            void (async () => {
+              const r = await prepareUploadFiles(picked);
+              if (!r.ok) {
+                setError(fill(t(r.errorKey, lang), { name: r.name }));
+                return;
+              }
+              setError(null);
+              setStaged((prev) => [...prev, ...r.files.map((f) => ({ id: newStagedId(), file: f }))]);
+            })();
+          }}
           onRemove={(id) => setStaged((prev) => prev.filter((sf) => sf.id !== id))}
           hint={t("archive.renewModal.fileHint", lang)}
         />

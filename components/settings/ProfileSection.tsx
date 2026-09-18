@@ -47,7 +47,8 @@ import { Check, Trash2, Upload, UserRound, KeyRound } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { NAV, isLandingRoute } from "@/lib/nav";
-import { t } from "@/lib/i18n";
+import { t, fill } from "@/lib/i18n";
+import { prepareUploadFiles, AVATAR_LONG_EDGE_PX } from "@/lib/upload-image";
 import {
   fetchProfile, saveProfile, changePassword, uploadAvatar, removeAvatar,
   type ProfileData,
@@ -176,42 +177,70 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
     setSaving(true);
     setSaved(false);
     setSaveError(null);
-    const res = await saveProfile({ accountDisplayName: accountName, fields: draft });
-    setSaving(false);
-    if (res.error) { setSaveError(res.error); return; }
-    setSaved(true);
-    await load();
-    // The header's name comes from the server (app/layout.tsx -> getViewer), so
-    // the top bar only picks up a new display name once the tree re-renders.
-    router.refresh();
+    // try/catch: a network drop mid-await otherwise leaves Save stuck on
+    // busy with no message — the finally owns the busy flag now.
+    try {
+      const res = await saveProfile({ accountDisplayName: accountName, fields: draft });
+      if (res.error) { setSaveError(res.error); return; }
+      setSaved(true);
+      await load();
+      // The header's name comes from the server (app/layout.tsx -> getViewer), so
+      // the top bar only picks up a new display name once the tree re-renders.
+      router.refresh();
+    } catch {
+      setSaveError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function onPickAvatar(file: File) {
     setAvatarError(null);
-    // Checked here for instant feedback; the server checks the same thing again,
-    // because a client-side check is an affordance and not a control.
-    const bad = validateAvatarFile(file);
-    if (bad) { setAvatarError(bad); return; }
-
     setAvatarBusy(true);
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await uploadAvatar(fd);
-    setAvatarBusy(false);
-    // Narrow on `url`, not on `error`.
-    if (!res.url) { setAvatarError(res.error); return; }
-    setAvatarUrl(res.url);
-    router.refresh();
+    try {
+      // Prepare at the AVATAR long edge (512px) — a head-and-shoulders photo
+      // never needs 2000px. Same helper as every other surface, only the
+      // size parameter differs. The 2 MB validator then runs on the
+      // compressed result, so a 3-4 MB camera photo now passes it.
+      const r = await prepareUploadFiles([file], { longEdgePx: AVATAR_LONG_EDGE_PX });
+      if (!r.ok) {
+        setAvatarError(fill(t(r.errorKey, lang), { name: r.name }));
+        return;
+      }
+      const prepared = r.files[0];
+      if (!prepared) return;
+      // Checked here for instant feedback; the server checks the same thing
+      // again, because a client-side check is an affordance and not a control.
+      const bad = validateAvatarFile(prepared);
+      if (bad) { setAvatarError(bad); return; }
+
+      const fd = new FormData();
+      fd.append("file", prepared);
+      const res = await uploadAvatar(fd);
+      // Narrow on `url`, not on `error`.
+      if (!res.url) { setAvatarError(res.error); return; }
+      setAvatarUrl(res.url);
+      router.refresh();
+    } catch {
+      setAvatarError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setAvatarBusy(false);
+    }
   }
 
   async function onRemoveAvatar() {
     setAvatarError(null);
     setAvatarBusy(true);
-    const res = await removeAvatar();
-    setAvatarBusy(false);
-    if (res.error) { setAvatarError(res.error); return; }
-    setAvatarUrl(null);
-    router.refresh();
+    try {
+      const res = await removeAvatar();
+      if (res.error) { setAvatarError(res.error); return; }
+      setAvatarUrl(null);
+      router.refresh();
+    } catch {
+      setAvatarError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setAvatarBusy(false);
+    }
   }
 
   async function onChangePassword(e: React.FormEvent) {
@@ -224,17 +253,22 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
     if (problem) { setPwError(problem); return; }
 
     setPwSaving(true);
-    const res = await changePassword({
-      currentPassword: pw.current,
-      newPassword: pw.next,
-      confirmPassword: pw.confirm,
-    });
-    setPwSaving(false);
-    if (res.error) { setPwError(res.error); return; }
-    setPwDone(true);
-    // Cleared on success so the new password is not left sitting in three
-    // inputs behind an open dialog.
-    setPw({ current: "", next: "", confirm: "" });
+    try {
+      const res = await changePassword({
+        currentPassword: pw.current,
+        newPassword: pw.next,
+        confirmPassword: pw.confirm,
+      });
+      if (res.error) { setPwError(res.error); return; }
+      setPwDone(true);
+      // Cleared on success so the new password is not left sitting in three
+      // inputs behind an open dialog.
+      setPw({ current: "", next: "", confirm: "" });
+    } catch {
+      setPwError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setPwSaving(false);
+    }
   }
 
   const emailWarn = !looksLikeEmail(draft.personal_email);

@@ -1,5 +1,6 @@
 // Guards lib/upload-image.ts — the ONE shared upload-preparation path for
-// both inventory receive flows (Add Parts + Receive PO).
+// every upload surface (inventory receive, violations, archive, finance
+// photos, consumption permits, maintenance, settings).
 //
 // Runs under plain Node (24.x has a global File): the non-image branch of
 // prepareUploadImage returns BEFORE any DOM API, so it is exercised for real
@@ -14,12 +15,14 @@
 
 import {
   prepareUploadImage,
+  prepareUploadFiles,
   isImageFile,
   webpName,
   batchBytes,
   MAX_PREPARED_FILE_BYTES,
   MAX_BATCH_BYTES,
   LONG_EDGE_PX,
+  AVATAR_LONG_EDGE_PX,
   WEBP_QUALITY,
 } from "../lib/upload-image";
 
@@ -50,6 +53,15 @@ async function main() {
   const noTypeResult = await prepareUploadImage(noType);
   check("typeless file passes through unchanged", noTypeResult.ok === true && noTypeResult.file === noType);
 
+  // longEdgePx param must NOT change the non-image contract: a PDF passes
+  // through byte-identical no matter what edge is requested. (The param only
+  // steers the browser-only image branch.)
+  const pdfSmallEdge = await prepareUploadImage(pdf, { longEdgePx: AVATAR_LONG_EDGE_PX });
+  check(
+    "longEdgePx param leaves non-images untouched (same File object)",
+    pdfSmallEdge.ok === true && pdfSmallEdge.file === pdf
+  );
+
   // NEGATIVE control: an image file must NOT take the pass-through branch.
   // In Node there is no createImageBitmap, so the image branch must land in
   // the undecodable error — if this ever comes back ok===true with the same
@@ -62,6 +74,36 @@ async function main() {
       fakeJpegResult.reason === "undecodable" &&
       fakeJpegResult.fileName === "photo.jpg"
   );
+
+  // --- prepareUploadFiles (batch wrapper, real function, real Files) -------
+  const batchOk = await prepareUploadFiles([pdf, noType]);
+  check(
+    "batch of non-images passes through in order, same File objects",
+    batchOk.ok === true && batchOk.files.length === 2 && batchOk.files[0] === pdf && batchOk.files[1] === noType
+  );
+  // NEGATIVE control: one undecodable image poisons the WHOLE batch
+  // (all-or-nothing), and the error names the file + the i18n key.
+  const batchBad = await prepareUploadFiles([pdf, fakeJpeg]);
+  check(
+    "batch refuses on undecodable image, names file + fileUnreadable key",
+    batchBad.ok === false &&
+      batchBad.errorKey === "shared.upload.fileUnreadable" &&
+      batchBad.name === "photo.jpg"
+  );
+  // NEGATIVE control: a non-image over the per-file ceiling is refused with
+  // the fileTooLarge key (non-images are never compressed, so the ceiling is
+  // the only thing standing between an 11 MB PDF and the body limit).
+  const hugePdf = new File([new Uint8Array(1)], "huge.pdf", { type: "application/pdf" });
+  Object.defineProperty(hugePdf, "size", { value: MAX_PREPARED_FILE_BYTES + 1 });
+  const batchHuge = await prepareUploadFiles([hugePdf]);
+  check(
+    "batch refuses a file over the ceiling, names file + fileTooLarge key",
+    batchHuge.ok === false &&
+      batchHuge.errorKey === "shared.upload.fileTooLarge" &&
+      batchHuge.name === "huge.pdf"
+  );
+  const batchEmpty = await prepareUploadFiles([]);
+  check("empty pick prepares to an empty batch", batchEmpty.ok === true && batchEmpty.files.length === 0);
 
   // --- isImageFile ---------------------------------------------------------
   check("isImageFile: image/jpeg -> true", isImageFile(fakeJpeg) === true);
@@ -95,6 +137,10 @@ async function main() {
 
   // --- Image-pipeline constants (browser-only branch, checked as config) ---
   check("long edge is 2000px", LONG_EDGE_PX === 2000);
+  check("avatar long edge is 512px", AVATAR_LONG_EDGE_PX === 512);
+  // NEGATIVE-ish control: avatar edge must stay STRICTLY under the default —
+  // if someone "unifies" them the avatar payload win silently dies.
+  check("avatar edge strictly smaller than default edge", AVATAR_LONG_EDGE_PX < LONG_EDGE_PX);
   check("WebP quality is 0.85", WEBP_QUALITY === 0.85);
 
   if (failures > 0) {

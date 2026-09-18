@@ -120,7 +120,7 @@ export default function TrafficViolationsSection({
   // The state machine itself is shared with the payslip surface — see
   // usePhotoDraft in ViolationForm.tsx. `photo.error` is the FILE-VALIDATION
   // message, and it is the only photo message that belongs under the control.
-  const photo = usePhotoDraft();
+  const photo = usePhotoDraft(lang);
 
   // THREE MESSAGES, THREE MEANINGS, AND THEY MUST NOT SHARE A CHANNEL.
   //
@@ -232,44 +232,49 @@ export default function TrafficViolationsSection({
     setError(null);
     setNotice(null);
 
-    const fd = draftToForm(driverId, draft);
-    let violationId: string | null = editingId;
+    // try/catch: a network drop mid-await otherwise leaves the button stuck
+    // on busy with no message — the finally owns the busy flag now.
+    try {
+      const fd = draftToForm(driverId, draft);
+      let violationId: string | null = editingId;
 
-    if (editingId) {
-      const res = await updateDriverViolation(editingId, fd);
-      if (res.error) {
-        setBusy(false);
-        setError(res.error);
-        return;
+      if (editingId) {
+        const res = await updateDriverViolation(editingId, fd);
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+      } else {
+        const res = await addDriverViolation(fd);
+        if (res.error || !res.id) {
+          setError(res.error ?? t("drivers.viol.addNoId", lang));
+          return;
+        }
+        violationId = res.id;
       }
-    } else {
-      const res = await addDriverViolation(fd);
-      if (res.error || !res.id) {
-        setBusy(false);
-        setError(res.error ?? t("drivers.viol.addNoId", lang));
-        return;
-      }
-      violationId = res.id;
+
+      // ---- past this line the violation IS saved; nothing below may undo it ---
+      // `cleared` only means anything on an EDIT: a row created a moment ago has
+      // no stored photo to drop, and asking the server to remove one would be a
+      // call whose only possible answer is "there was none".
+      const warn = violationId
+        ? await applyPhotoChanges(
+          driverId,
+          violationId,
+          { file: photo.file, cleared: photo.cleared && editingId != null },
+          lang,
+        )
+        : null;
+
+      resetForms();
+      setNotice(warn);
+      setViewing(null);
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusy(false);
     }
-
-    // ---- past this line the violation IS saved; nothing below may undo it ---
-    // `cleared` only means anything on an EDIT: a row created a moment ago has
-    // no stored photo to drop, and asking the server to remove one would be a
-    // call whose only possible answer is "there was none".
-    const warn = violationId
-      ? await applyPhotoChanges(
-        driverId,
-        violationId,
-        { file: photo.file, cleared: photo.cleared && editingId != null },
-        lang,
-      )
-      : null;
-
-    setBusy(false);
-    resetForms();
-    setNotice(warn);
-    setViewing(null);
-    router.refresh();
   }
 
   /**

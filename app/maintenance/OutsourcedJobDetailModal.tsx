@@ -37,7 +37,8 @@ import { createPortal } from "react-dom";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { X, CheckSquare, Square, Play, Check, Pencil, FileText, Trash2, Upload } from "lucide-react";
-import { t, arText } from "@/lib/i18n";
+import { t, arText, fill } from "@/lib/i18n";
+import { prepareUploadFiles } from "@/lib/upload-image";
 import { cn, formatDate, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
@@ -169,28 +170,45 @@ export default function OutsourcedJobDetailModal({
     if (!tasksEditable || busyTaskId) return;
     setBusyTaskId(task.id);
     setError(null);
-    const res = await toggleOutsourcedJobTask(task.id, !task.done);
-    setBusyTaskId(null);
-    if (res.error) { setError(res.error); return; }
-    router.refresh();
+    // try/catch: a network drop mid-await otherwise leaves the checkbox
+    // stuck on busy with no message — the finally owns the busy flag now.
+    try {
+      const res = await toggleOutsourcedJobTask(task.id, !task.done);
+      if (res.error) { setError(res.error); return; }
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusyTaskId(null);
+    }
   }
 
   async function onDispatch() {
     setLifecycleBusy(true);
     setError(null);
-    const res = await dispatchOutsourcedJob(job.id);
-    setLifecycleBusy(false);
-    if (res.error) { setError(res.error); return; }
-    router.refresh();
+    try {
+      const res = await dispatchOutsourcedJob(job.id);
+      if (res.error) { setError(res.error); return; }
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setLifecycleBusy(false);
+    }
   }
 
   async function onComplete() {
     setLifecycleBusy(true);
     setError(null);
-    const res = await completeOutsourcedJob(job.id);
-    setLifecycleBusy(false);
-    if (res.error) { setError(res.error); return; }
-    router.refresh();
+    try {
+      const res = await completeOutsourcedJob(job.id);
+      if (res.error) { setError(res.error); return; }
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setLifecycleBusy(false);
+    }
   }
 
   // Polish P2 item 1 — permanent delete. Server-side gate
@@ -206,14 +224,19 @@ export default function OutsourcedJobDetailModal({
     if (!confirm(t("mt.confirmDeleteOutsourcedJob", lang))) return;
     setLifecycleBusy(true);
     setDeleteBlockMessage(null);
-    const res = await deleteOutsourcedJob(job.id);
-    setLifecycleBusy(false);
-    if (res.error) {
-      setDeleteBlockMessage(res.error);
-      return;
+    try {
+      const res = await deleteOutsourcedJob(job.id);
+      if (res.error) {
+        setDeleteBlockMessage(res.error);
+        return;
+      }
+      onClose();
+      router.refresh();
+    } catch {
+      setDeleteBlockMessage(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setLifecycleBusy(false);
     }
-    onClose();
-    router.refresh();
   }
 
   // ---- Notes (beside Work Performed) ----
@@ -229,17 +252,26 @@ export default function OutsourcedJobDetailModal({
   async function onSaveNotes() {
     setSavingNotes(true);
     setError(null);
-    const res = await saveOutsourcedJobNotes(job.id, draftNotes);
-    setSavingNotes(false);
-    if (res.error) { setError(res.error); return; }
-    setEditingNotes(false);
-    router.refresh();
+    try {
+      const res = await saveOutsourcedJobNotes(job.id, draftNotes);
+      if (res.error) { setError(res.error); return; }
+      setEditingNotes(false);
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSavingNotes(false);
+    }
   }
 
   // ---- Payment form (add + edit share this) ----
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [form, setForm] = useState(() => ({ ...emptyPaymentForm, repairerId: jobRepairers[0]?.id ?? "" }));
+  // The PREPARED file (image → WebP/2000px; PDF passes through untouched).
+  // pendingFileKey remounts the input when a pick is rejected, so re-picking
+  // the same file fires onChange again.
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFileKey, setPendingFileKey] = useState(0);
   const [savingPayment, setSavingPayment] = useState(false);
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
 
@@ -269,63 +301,82 @@ export default function OutsourcedJobDetailModal({
     if (!form.repairerId || !(form.subtotal > 0) || savingPayment) return;
     setSavingPayment(true);
     setError(null);
+    // try/catch: a network drop mid-await otherwise leaves Save stuck on
+    // busy with no message — the finally owns the busy flag now.
+    try {
+      const input = {
+        outsourced_job_id: job.id,
+        repairer_id: form.repairerId,
+        invoice_number: form.invoiceNumber || null,
+        invoice_date: form.invoiceDate || null,
+        subtotal_sar: form.subtotal,
+        discount_sar: form.discount,
+        note: form.note || null,
+      };
 
-    const input = {
-      outsourced_job_id: job.id,
-      repairer_id: form.repairerId,
-      invoice_number: form.invoiceNumber || null,
-      invoice_date: form.invoiceDate || null,
-      subtotal_sar: form.subtotal,
-      discount_sar: form.discount,
-      note: form.note || null,
-    };
+      const res = isPaymentEdit
+        ? await updateWorkshopPayment(editingPaymentId!, input)
+        : await addWorkshopPayment(input);
 
-    const res = isPaymentEdit
-      ? await updateWorkshopPayment(editingPaymentId!, input)
-      : await addWorkshopPayment(input);
-
-    if (res.error || !res.payment) {
-      setSavingPayment(false);
-      setError(res.error ?? t("mt.errSavePayment", lang));
-      return;
-    }
-    if (pendingFile) {
-      const fd = new FormData();
-      fd.set("paymentId", res.payment.id);
-      fd.set("file", pendingFile);
-      const fileRes = await uploadWorkshopPaymentFile(fd);
-      if (fileRes.error) {
-        setSavingPayment(false);
-        setError(fileRes.error);
+      if (res.error || !res.payment) {
+        setError(res.error ?? t("mt.errSavePayment", lang));
         return;
       }
+      if (pendingFile) {
+        // Already PREPARED at pick time (the file input's onChange).
+        const fd = new FormData();
+        fd.set("paymentId", res.payment.id);
+        fd.set("file", pendingFile);
+        const fileRes = await uploadWorkshopPaymentFile(fd);
+        if (fileRes.error) {
+          setError(fileRes.error);
+          return;
+        }
+      }
+      resetPaymentForm();
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSavingPayment(false);
     }
-    setSavingPayment(false);
-    resetPaymentForm();
-    router.refresh();
   }
 
   async function confirmDeletePayment(paymentId: string) {
     if (!window.confirm(t("mt.confirmDeletePayment", lang))) return;
     setDeletingPaymentId(paymentId);
     setError(null);
-    const res = await deleteWorkshopPayment(paymentId);
-    setDeletingPaymentId(null);
-    if (res.error) { setError(res.error); return; }
-    if (editingPaymentId === paymentId) resetPaymentForm();
-    router.refresh();
+    try {
+      const res = await deleteWorkshopPayment(paymentId);
+      if (res.error) { setError(res.error); return; }
+      if (editingPaymentId === paymentId) resetPaymentForm();
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setDeletingPaymentId(null);
+    }
   }
 
   async function openInvoiceFile(path: string) {
-    const res = await getWorkshopPaymentFileSignedUrls([path]);
-    const url = res.urls?.[path];
-    if (url) window.open(url, "_blank");
+    // Signed on EVERY open (300s TTL), never cached.
+    try {
+      const res = await getWorkshopPaymentFileSignedUrls([path]);
+      const url = res.urls?.[path];
+      if (url) window.open(url, "_blank");
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    }
   }
 
   async function onRemoveFile(fileId: string) {
-    const res = await removeWorkshopPaymentFile(fileId);
-    if (res.error) { setError(res.error); return; }
-    router.refresh();
+    try {
+      const res = await removeWorkshopPaymentFile(fileId);
+      if (res.error) { setError(res.error); return; }
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    }
   }
 
   return (
@@ -577,9 +628,24 @@ export default function OutsourcedJobDetailModal({
                   <Upload className="h-3.5 w-3.5" />
                   {pendingFile ? pendingFile.name : t("mt.uploadInvoice", lang)}
                   <input
+                    key={pendingFileKey}
                     type="file"
                     accept="image/*,application/pdf"
-                    onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null;
+                      if (!f) { setPendingFile(null); setError(null); return; }
+                      void (async () => {
+                        const r = await prepareUploadFiles([f]);
+                        if (!r.ok) {
+                          setPendingFile(null);
+                          setError(fill(t(r.errorKey, lang), { name: r.name }));
+                          setPendingFileKey((k) => k + 1);
+                          return;
+                        }
+                        setError(null);
+                        setPendingFile(r.files[0] ?? null);
+                      })();
+                    }}
                     className="hidden"
                   />
                 </label>

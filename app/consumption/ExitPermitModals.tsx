@@ -33,6 +33,7 @@ import {
 import VehicleOptGroups from "@/components/VehicleOptGroups";
 import { useApp } from "@/components/AppShell";
 import { t, plural, arText, personName, type Lang, type TKey } from "@/lib/i18n";
+import { prepareUploadFiles } from "@/lib/upload-image";
 // THE PRINTED PERMIT IS A DOCUMENT, not this DOM with the chrome hidden. The
 // view-model decides every word and figure, the renderer only the look, and
 // printHtml owns the transport — a hidden same-origin iframe the browser prints
@@ -348,38 +349,44 @@ export function PermitFormModal({
 
   async function saveHeader() {
     setSaving(true); setError(null);
-    const input = buildInput();
+    // try/catch: a network drop mid-await otherwise leaves Save stuck on
+    // busy with no message — the finally owns the busy flag now.
+    try {
+      const input = buildInput();
 
-    if (permitId) {
-      const res = await updateExitPermitDraft(permitId, input, lang);
-      const failed = res.error
-        ? null
-        : (await flushPending(permitId)) ?? (await flushFiles(permitId));
-      setSaving(false);
-      if (res.error) { setError(res.error); return false; }
-      onRefresh();
+      if (permitId) {
+        const res = await updateExitPermitDraft(permitId, input, lang);
+        const failed = res.error
+          ? null
+          : (await flushPending(permitId)) ?? (await flushFiles(permitId));
+        if (res.error) { setError(res.error); return false; }
+        onRefresh();
+        if (failed) { setError(failed); return false; }
+        return true;
+      }
+
+      const res = await createExitPermitDraft(input, lang);
+      // createExitPermitDraft returns the new row; updateExitPermitDraft does
+      // not. Narrow on the property rather than on which branch ran, so the
+      // types stay honest about what each action actually returns.
+      const created = (res as { permit?: ExitPermit }).permit;
+      if (res.error || !created) {
+        setError(res.error ?? t("consumption.modals.createFailed", lang));
+        return false;
+      }
+
+      const failed = (await flushPending(created.id)) ?? (await flushFiles(created.id));
+      // The permit EXISTS regardless of what happened to the items, so the
+      // parent adopts it before any error is shown.
+      onDraftCreated(created);
       if (failed) { setError(failed); return false; }
       return true;
-    }
-
-    const res = await createExitPermitDraft(input, lang);
-    // createExitPermitDraft returns the new row; updateExitPermitDraft does
-    // not. Narrow on the property rather than on which branch ran, so the
-    // types stay honest about what each action actually returns.
-    const created = (res as { permit?: ExitPermit }).permit;
-    if (res.error || !created) {
-      setSaving(false);
-      setError(res.error ?? t("consumption.modals.createFailed", lang));
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
       return false;
+    } finally {
+      setSaving(false);
     }
-
-    const failed = (await flushPending(created.id)) ?? (await flushFiles(created.id));
-    setSaving(false);
-    // The permit EXISTS regardless of what happened to the items, so the
-    // parent adopts it before any error is shown.
-    onDraftCreated(created);
-    if (failed) { setError(failed); return false; }
-    return true;
   }
 
   async function onAddLine() {
@@ -399,12 +406,17 @@ export function PermitFormModal({
     }
 
     setBusyLine(true);
-    const res = await addExitPermitLine(permitId, newPartId, qty, newNote || null, lang);
-    setBusyLine(false);
-    if (res.error) { setError(res.error); return; }
-    setNewPartId(""); setNewQty(""); setNewNote("");
-    // Stay open — adding an item is not finishing with the permit.
-    onRefresh();
+    try {
+      const res = await addExitPermitLine(permitId, newPartId, qty, newNote || null, lang);
+      if (res.error) { setError(res.error); return; }
+      setNewPartId(""); setNewQty(""); setNewNote("");
+      // Stay open — adding an item is not finishing with the permit.
+      onRefresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusyLine(false);
+    }
   }
 
   return (
@@ -625,8 +637,12 @@ export function PermitFormModal({
                         onBlur={async (e) => {
                           const q = Number(e.target.value);
                           if (q === Number(saved.qty)) return;
-                          const res = await updateExitPermitLineQty(permitId, saved.id, q, lang);
-                          if (res.error) setError(res.error); else onRefresh();
+                          try {
+                            const res = await updateExitPermitLineQty(permitId, saved.id, q, lang);
+                            if (res.error) setError(res.error); else onRefresh();
+                          } catch {
+                            setError(t("shared.upload.saveFailedNetwork", lang));
+                          }
                         }}
                         className={cn(INPUT, "w-24")}
                         style={INPUT_STYLE}
@@ -668,8 +684,12 @@ export function PermitFormModal({
                             setPending((s) => s.filter((x) => x.key !== row.key));
                             return;
                           }
-                          const res = await removeExitPermitLine(permitId, saved.id, lang);
-                          if (res.error) setError(res.error); else onRefresh();
+                          try {
+                            const res = await removeExitPermitLine(permitId, saved.id, lang);
+                            if (res.error) setError(res.error); else onRefresh();
+                          } catch {
+                            setError(t("shared.upload.saveFailedNetwork", lang));
+                          }
                         }}
                         className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
                         title={t("consumption.modals.removeItem", lang)}
@@ -771,8 +791,12 @@ function PermitFiles({
               <span className="truncate flex-1">{f.file_name}</span>
               <button
                 onClick={async () => {
-                  const res = await removeExitPermitFile(f.id);
-                  if (res.error) onError(res.error); else onChanged();
+                  try {
+                    const res = await removeExitPermitFile(f.id);
+                    if (res.error) onError(res.error); else onChanged();
+                  } catch {
+                    onError(t("shared.upload.saveFailedNetwork", lang));
+                  }
                 }}
                 className="p-1 rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
                 aria-label={t("consumption.modals.removeFile", lang)}
@@ -810,17 +834,37 @@ function PermitFiles({
             const picked = Array.from(e.target.files ?? []);
             e.target.value = "";
             if (picked.length === 0) return;
-            if (!permitId) { onStage(picked); return; }
             setBusy(true);
-            for (const file of picked) {
-              const fd = new FormData();
-              fd.set("permitId", permitId);
-              fd.set("file", file);
-              const res = await uploadExitPermitFile(fd, lang);
-              if (res.error) { onError(`${file.name}: ${res.error}`); setBusy(false); return; }
+            // try/catch: a network drop mid-await otherwise leaves the picker
+            // stuck on busy with no message — the finally owns the flag now.
+            try {
+              // Prepared BEFORE staging or uploading: images land compressed
+              // (WebP, orientation kept), PDFs/other pass through untouched;
+              // an undecodable or still-over-10MB pick is refused by name.
+              // Uploads stay ONE FILE PER REQUEST below, so each request is
+              // ≤10MB — no whole-batch gate needed against the 15MB body cap.
+              const r = await prepareUploadFiles(picked);
+              if (!r.ok) {
+                // This file's LOCAL fill (key, lang, token, value) — not the
+                // i18n module's map-based one, which a same-name import would
+                // shadow-conflict with.
+                onError(fill(r.errorKey, lang, "{name}", r.name));
+                return;
+              }
+              if (!permitId) { onStage(r.files); return; }
+              for (const file of r.files) {
+                const fd = new FormData();
+                fd.set("permitId", permitId);
+                fd.set("file", file);
+                const res = await uploadExitPermitFile(fd, lang);
+                if (res.error) { onError(`${file.name}: ${res.error}`); return; }
+              }
+              onChanged();
+            } catch {
+              onError(t("shared.upload.saveFailedNetwork", lang));
+            } finally {
+              setBusy(false);
             }
-            setBusy(false);
-            onChanged();
           }}
         />
       </label>
@@ -859,10 +903,15 @@ export function ConfirmExitModal({
             disabled={busy || lines.length === 0 || short.length > 0}
             onClick={async () => {
               setBusy(true); setError(null);
-              const res = await confirmExitPermit(permit.id, lang);
-              setBusy(false);
-              if (res.error) { setError(res.error); return; }
-              onClose();
+              try {
+                const res = await confirmExitPermit(permit.id, lang);
+                if (res.error) { setError(res.error); return; }
+                onClose();
+              } catch {
+                setError(t("shared.upload.saveFailedNetwork", lang));
+              } finally {
+                setBusy(false);
+              }
             }}
           >
             {t(busy ? "consumption.modals.confirming" : "consumption.shared.confirmExit", lang)}
@@ -996,10 +1045,15 @@ export function ReturnModal({
               const payload = open
                 .map((l) => ({ line_id: l.id, qty: Number(qtys[l.id] ?? 0) }))
                 .filter((x) => x.qty > 0);
-              const res = await recordExitPermitReturn(permit.id, payload, returnedOn, note || null, lang);
-              setBusy(false);
-              if (res.error) { setError(res.error); return; }
-              onClose();
+              try {
+                const res = await recordExitPermitReturn(permit.id, payload, returnedOn, note || null, lang);
+                if (res.error) { setError(res.error); return; }
+                onClose();
+              } catch {
+                setError(t("shared.upload.saveFailedNetwork", lang));
+              } finally {
+                setBusy(false);
+              }
             }}
           >
             {t(busy ? "common.recording" : "consumption.modals.recordReturn", lang)}
@@ -1148,10 +1202,15 @@ export function VoidModal({
             disabled={busy}
             onClick={async () => {
               setBusy(true); setError(null);
-              const res = await voidExitPermit(permit.id, reason || null, lang);
-              setBusy(false);
-              if (res.error) { setError(res.error); return; }
-              onClose();
+              try {
+                const res = await voidExitPermit(permit.id, reason || null, lang);
+                if (res.error) { setError(res.error); return; }
+                onClose();
+              } catch {
+                setError(t("shared.upload.saveFailedNetwork", lang));
+              } finally {
+                setBusy(false);
+              }
             }}
           >
             {t(busy ? "consumption.modals.voiding" : "consumption.shared.voidPermit", lang)}
@@ -1276,12 +1335,17 @@ export function WriteOffModal({
               const payload = open
                 .map((l) => ({ line_id: l.id, qty: Number(qtys[l.id] ?? 0) }))
                 .filter((x) => x.qty > 0);
-              const res = await writeOffExitPermitLines(
-                permit.id, payload, reason, writeOffDate, note || null, lang,
-              );
-              setBusy(false);
-              if (res.error) { setError(res.error); return; }
-              onClose();
+              try {
+                const res = await writeOffExitPermitLines(
+                  permit.id, payload, reason, writeOffDate, note || null, lang,
+                );
+                if (res.error) { setError(res.error); return; }
+                onClose();
+              } catch {
+                setError(t("shared.upload.saveFailedNetwork", lang));
+              } finally {
+                setBusy(false);
+              }
             }}
           >
             {t(busy ? "common.recording" : "consumption.modals.writeOffBtn", lang)}
@@ -1462,10 +1526,15 @@ export function ReverseWriteOffModal({
             disabled={busy || !reason.trim()}
             onClick={async () => {
               setBusy(true); setError(null);
-              const res = await reverseExitPermitWriteOff(writeOff.id, reason, lang);
-              setBusy(false);
-              if (res.error) { setError(res.error); return; }
-              onClose();
+              try {
+                const res = await reverseExitPermitWriteOff(writeOff.id, reason, lang);
+                if (res.error) { setError(res.error); return; }
+                onClose();
+              } catch {
+                setError(t("shared.upload.saveFailedNetwork", lang));
+              } finally {
+                setBusy(false);
+              }
             }}
           >
             {t(busy ? "common.recording" : "consumption.modals.reverseWriteOffBtn", lang)}

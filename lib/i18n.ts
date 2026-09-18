@@ -966,6 +966,18 @@ export const dict = {
       switchToLight: { en: "Switch to light mode", ar: "التبديل إلى الوضع الفاتح" },
     },
 
+    // Upload preparation (lib/upload-image.ts) — the ONE vocabulary for every
+    // file-upload surface: inventory receive, violations, archive documents,
+    // finance photos, exit permits, maintenance, settings. Moved here from
+    // inventory.shared when Batch 2 spread the pipeline app-wide. Receipt-
+    // viewer-specific strings (invoiceFiles, fileOpenFailed) stay in inventory.
+    upload: {
+      fileUnreadable: { en: "Could not read {name} — the browser cannot decode this image (HEIC?). Convert it to JPEG and try again.", ar: "تعذر قراءة {name} — المتصفح لا يستطيع فك ترميز هذه الصورة (HEIC؟). حوّلها إلى JPEG وحاول مرة أخرى." },
+      fileTooLarge: { en: "{name} is still over 10 MB after compression. Choose a smaller file.", ar: "{name} ما زال أكبر من 10 م.ب بعد الضغط. اختر ملفاً أصغر." },
+      batchTooLarge: { en: "The attached files together exceed the upload limit. Remove a file and try again.", ar: "الملفات المرفقة مجتمعةً تتجاوز حد الرفع. أزل ملفاً وحاول مرة أخرى." },
+      saveFailedNetwork: { en: "Saving failed before reaching the server — check your connection and try again. Nothing was saved.", ar: "فشل الحفظ قبل الوصول إلى الخادم — تحقق من اتصالك وحاول مرة أخرى. لم يُحفظ أي شيء." },
+    },
+
     // BankFields (0202) — the bank picker + IBAN pair on the driver AND staff
     // forms, plus the payslip surfaces that render the same pair. ONE
     // vocabulary: the word on the form is the word on the slip. Bank NAMES are
@@ -11041,10 +11053,10 @@ export const dict = {
       addInvoice: { en: "Add invoice", ar: "إضافة فاتورة" },
       uploadLeastOne: { en: "Upload at least one invoice image or PDF. Drag a file or click to browse.", ar: "ارفع صورة فاتورة أو PDF واحداً على الأقل. اسحب ملفاً أو اضغط للاستعراض." },
       invoicesAttachedSuffix: { en: "invoices attached", ar: "فاتورة مرفقة" },
-      fileUnreadable: { en: "Could not read {name} — the browser cannot decode this image (HEIC?). Convert it to JPEG and try again.", ar: "تعذر قراءة {name} — المتصفح لا يستطيع فك ترميز هذه الصورة (HEIC؟). حوّلها إلى JPEG وحاول مرة أخرى." },
-      fileTooLarge: { en: "{name} is still over 10 MB after compression. Choose a smaller file.", ar: "{name} ما زال أكبر من 10 م.ب بعد الضغط. اختر ملفاً أصغر." },
-      batchTooLarge: { en: "The attached files together exceed the upload limit. Remove a file and try again.", ar: "الملفات المرفقة مجتمعةً تتجاوز حد الرفع. أزل ملفاً وحاول مرة أخرى." },
-      saveFailedNetwork: { en: "Saving failed before reaching the server — check your connection and try again. Nothing was saved.", ar: "فشل الحفظ قبل الوصول إلى الخادم — تحقق من اتصالك وحاول مرة أخرى. لم يُحفظ أي شيء." },
+      // fileUnreadable / fileTooLarge / batchTooLarge / saveFailedNetwork
+      // moved to shared.upload — every upload surface uses them now, not
+      // just inventory. invoiceFiles + fileOpenFailed stay here: their
+      // wording is receipt-viewer-specific (ReceiptInvoiceFiles).
       invoiceFiles: { en: "Invoice files", ar: "ملفات الفاتورة" },
       fileOpenFailed: { en: "Could not open this file — close and reopen the receipt to try again.", ar: "تعذر فتح هذا الملف — أغلق الإيصال وأعد فتحه للمحاولة مرة أخرى." },
       optionalHint: { en: "optional", ar: "اختياري" },

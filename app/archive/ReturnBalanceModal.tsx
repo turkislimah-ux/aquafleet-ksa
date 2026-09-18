@@ -25,9 +25,10 @@ import { X } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { formatSar, todayKey } from "@/lib/utils";
 import { returnCustomerBalance } from "@/lib/actions/finance";
+import { prepareUploadFiles } from "@/lib/upload-image";
 import type { ArchiveCustomerRow, CustomerAmountPayableRow } from "@/lib/db-types";
 import { useApp } from "@/components/AppShell";
-import { t } from "@/lib/i18n";
+import { t, fill } from "@/lib/i18n";
 import ScrollLock from "@/components/ScrollLock";
 
 const INPUT =
@@ -53,7 +54,11 @@ export default function ReturnBalanceModal({
   const [returnedOn, setReturnedOn] = useState(todayKey());
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
-  const [hasPhoto, setHasPhoto] = useState(false);
+  // The PREPARED file (image → WebP, compressed; PDF/other untouched), not the
+  // raw pick — the raw bytes never leave the browser. photoKey remounts the
+  // input when a pick is rejected, so the same file can be re-picked.
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoKey, setPhotoKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,7 +71,8 @@ export default function ReturnBalanceModal({
     setReturnedOn(todayKey());
     setReference("");
     setNote("");
-    setHasPhoto(false);
+    setPhoto(null);
+    setPhotoKey((k) => k + 1);
     setSaving(false);
     setError(null);
   }, [open, customer]);
@@ -78,7 +84,7 @@ export default function ReturnBalanceModal({
   const canSubmit =
     method !== "" &&
     returnedOn !== "" &&
-    (method === "cash" || (reference.trim() !== "" && hasPhoto));
+    (method === "cash" || (reference.trim() !== "" && photo !== null));
 
   function close() {
     if (saving) return;
@@ -98,14 +104,25 @@ export default function ReturnBalanceModal({
     form.set("customerId", customer.id);
     form.set("returnedOn", returnedOn);
     form.set("reference", reference);
-    const res = await returnCustomerBalance(form);
-    setSaving(false);
-    if (res.error) {
-      setError(res.error);
-      return;
+    // The PREPARED file replaces the input's own raw-bytes entry — what
+    // uploads is exactly what the state (and the gates) saw.
+    if (photo) form.set("photoFile", photo);
+    else form.delete("photoFile");
+    // try/catch: a network drop mid-await otherwise leaves the button stuck
+    // on busy with no message — the finally owns the busy flag now.
+    try {
+      const res = await returnCustomerBalance(form);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      onClose();
+      router.refresh();
+    } catch {
+      setError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setSaving(false);
     }
-    onClose();
-    router.refresh();
   }
 
   if (!open || !customer) return null;
@@ -215,10 +232,32 @@ export default function ReturnBalanceModal({
               )}
             </span>
             <input
+              key={photoKey}
               type="file"
               name="photoFile"
               required={method === "bank_transfer"}
-              onChange={(e) => setHasPhoto(!!e.target.files?.length)}
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                if (!f) {
+                  setPhoto(null);
+                  setError(null);
+                  return;
+                }
+                // Prepared at PICK time: image → compressed WebP (orientation
+                // kept), PDF/other untouched; undecodable or still-over-10MB
+                // is refused HERE, by name, not after Save.
+                void (async () => {
+                  const r = await prepareUploadFiles([f]);
+                  if (!r.ok) {
+                    setPhoto(null);
+                    setError(fill(t(r.errorKey, lang), { name: r.name }));
+                    setPhotoKey((k) => k + 1);
+                    return;
+                  }
+                  setError(null);
+                  setPhoto(r.files[0] ?? null);
+                })();
+              }}
               className={INPUT}
               style={INPUT_STYLE}
             />

@@ -300,15 +300,25 @@ export default function ConsumptionClient({
 
   async function onDeleteDraft(p: ExitPermit) {
     if (!confirm(t("consumption.client.deleteDraftConfirm", lang))) return;
-    const res = await deleteExitPermitDraft(p.id, lang);
-    if (res.error) { setActionError(res.error); return; }
-    router.refresh();
+    try {
+      const res = await deleteExitPermitDraft(p.id, lang);
+      if (res.error) { setActionError(res.error); return; }
+      router.refresh();
+    } catch {
+      setActionError(t("shared.upload.saveFailedNetwork", lang));
+    }
   }
 
+  // Signed on EVERY open (300s TTL), never cached — a stale URL is a broken
+  // photo at the exact moment someone at the gate needs it.
   async function openFile(path: string) {
-    const res = await getExitPermitFileUrls([path]);
-    if (res.error || !res.urls?.[path]) { setActionError(res.error ?? t("consumption.client.fileOpenFailed", lang)); return; }
-    window.open(res.urls[path], "_blank", "noopener,noreferrer");
+    try {
+      const res = await getExitPermitFileUrls([path]);
+      if (res.error || !res.urls?.[path]) { setActionError(res.error ?? t("consumption.client.fileOpenFailed", lang)); return; }
+      window.open(res.urls[path], "_blank", "noopener,noreferrer");
+    } catch {
+      setActionError(t("shared.upload.saveFailedNetwork", lang));
+    }
   }
 
   function closeAll() {
