@@ -22,7 +22,16 @@ import CustomersTab from "./CustomersTab";
 import FinanceTab from "./FinanceTab";
 import NewProjectModal from "./NewProjectModal";
 import WaterStationsModal from "./WaterStationsModal";
-import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { TopupRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { CompanySettings } from "@/lib/db-types";
+import type {
+  CustomerLedgerBalanceRow,
+  CustomerUninvoicedRow,
+  CustomerAvailableRow,
+  LedgerEntryRow,
+  LedgerCorrectionRow,
+  LedgerCorrectionVoteRow,
+} from "@/lib/customer-ledger";
 import { useApp } from "@/components/AppShell";
 import { t, fill, type Lang } from "@/lib/i18n";
 
@@ -54,16 +63,35 @@ function headerFor(tab: Tab, lang: Lang): { title: string; subtitle: string } {
 export default function TripsTabs({
   error,
   topups,
-  balanceReturns,
   specialCharges,
   paidInvoices,
+  ledgerBalances,
+  ledgerUninvoiced,
+  ledgerAvailable,
+  ledgerEntries,
+  ledgerCorrections,
+  ledgerCorrectionVotes,
+  uninvoicedTripCounts,
+  company,
+  currentUserEmail,
   ...boardProps
 }: ProjectsBoardProps & {
   error: string | null;
   topups: TopupRow[];
-  balanceReturns: BalanceReturnRow[];
   specialCharges: SpecialChargeRow[];
   paidInvoices: PaidInvoiceRow[];
+  // Prepaid ledger model (0203) — pass-through to FinanceTab, fetched in
+  // page.tsx through lib/customer-ledger.ts (the only reader).
+  ledgerBalances: CustomerLedgerBalanceRow[];
+  ledgerUninvoiced: CustomerUninvoicedRow[];
+  ledgerAvailable: CustomerAvailableRow[];
+  ledgerEntries: LedgerEntryRow[];
+  ledgerCorrections: LedgerCorrectionRow[];
+  ledgerCorrectionVotes: LedgerCorrectionVoteRow[];
+  // Plain Record, not a Map — Maps cannot cross the RSC boundary.
+  uninvoicedTripCounts: Record<string, number>;
+  company: CompanySettings | null;
+  currentUserEmail: string | null;
 }) {
   const router = useRouter();
   const { lang } = useApp();
@@ -184,9 +212,17 @@ export default function TripsTabs({
           projects={boardProps.projects}
           trips={boardProps.trips}
           topups={topups}
-          balanceReturns={balanceReturns}
           specialCharges={specialCharges}
           paidInvoices={paidInvoices}
+          ledgerBalances={ledgerBalances}
+          ledgerUninvoiced={ledgerUninvoiced}
+          ledgerAvailable={ledgerAvailable}
+          ledgerEntries={ledgerEntries}
+          ledgerCorrections={ledgerCorrections}
+          ledgerCorrectionVotes={ledgerCorrectionVotes}
+          uninvoicedTripCounts={uninvoicedTripCounts}
+          company={company}
+          currentUserEmail={currentUserEmail}
         />
       )}
     </div>

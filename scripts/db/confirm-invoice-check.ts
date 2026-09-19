@@ -188,8 +188,8 @@ async function main(): Promise<void> {
     //      has nothing to do with the totals.
     seeded.customer = (
       await c.query(
-        `insert into public.customers (name, customer_type)
-         values ('DBCHK HARNESS CUSTOMER', 'construction') returning id`,
+        `insert into public.customers (name, customer_type, payment_mode)
+         values ('DBCHK HARNESS CUSTOMER', 'construction', 'postpaid') returning id`,
       )
     ).rows[0].id;
 

@@ -1,9 +1,21 @@
 import { createClient } from "@/lib/supabase/server";
 import { type SelectableStation, type WaterStationRow } from "@/lib/station-pricing";
-import type { Trip, WaterType, ProjectStatus, DriverStatus, ProjectDriver, PaymentMode, InvoicePaymentMethod, ProjectCommissionNowRow } from "@/lib/db-types";
+import type { Trip, WaterType, ProjectStatus, DriverStatus, ProjectDriver, PaymentMode, InvoicePaymentMethod, ProjectCommissionNowRow, CompanySettings } from "@/lib/db-types";
 import type { LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { todayKey } from "@/lib/utils";
+// Prepaid rebuild (0203) — the ONLY reader of the ledger model. Balance /
+// Uninvoiced / Available are VIEW COLUMNS fetched here and passed through;
+// nothing on this page or below it computes a prepaid figure.
+import {
+  fetchLedgerBalances,
+  fetchUninvoiced,
+  fetchAvailable,
+  fetchLedgerEntries,
+  fetchLedgerCorrections,
+  fetchLedgerCorrectionVotes,
+  fetchUninvoicedTripCounts,
+} from "@/lib/customer-ledger";
 import TripsTabs from "./TripsTabs";
 
 export const dynamic = "force-dynamic";
@@ -60,20 +72,10 @@ export type TopupRow = {
   photo_path: string | null;
 };
 
-// customer_balance_returns row (0139), customer-tagged for the Finance tab.
-// Narrow on purpose — only what the money engine needs. The Archive surface
-// reads the richer set (method, reference, photo, note) off
-// v_customer_amount_payable; nothing on Trips renders those, and carrying a
-// field nothing renders is how two versions of one number start to drift.
-//
-// Since 0142 this is a DEBIT input to lib/prepaid.ts, not a display flag: a
-// refund that is not passed into the balance math reads as spendable credit.
-export type BalanceReturnRow = {
-  id: string;
-  customer_id: string;
-  amount_sar: number;
-  returned_on: string;
-};
+// `BalanceReturnRow` + the customer_balance_returns fetch are GONE from this
+// page (prepaid rebuild, 0203): the Finance tab's prepaid figures now come from
+// the ledger views, which already carry refunds as signed rows. The table and
+// its Archive surface are untouched — they keep serving Batch 2–3 until 0204.
 
 // v3 cutover — every special charge belonging to a NON-VOID invoice, across
 // the whole app (not just one invoice's own charges): every charge from a
@@ -129,7 +131,8 @@ export default async function TripsPage() {
     tripsRes, projectsRes, commissionNowRes, customersRes, trucksRes, driversRes,
     assignmentsRes, stationsRes, allStationsRes, leavePeriodsRes,
     terminatedDriversRes, topupsRes, paidInvoicesRes, specialChargesRes,
-    balanceReturnsRes,
+    ledgerBalancesRes, ledgerUninvoicedRes, ledgerAvailableRes, ledgerEntriesRes,
+    ledgerCorrectionsRes, ledgerVotesRes, uninvoicedCountsRes, companyRes, authRes,
   ] =
     await Promise.all([
       supabase
@@ -247,14 +250,25 @@ export default async function TripsPage() {
       supabase
         .from("invoice_special_charges")
         .select("id, label, amount_sar, charge_date, created_at, invoice:invoices(customer_id, status)"),
-      // v3 Finance ledger source (3 of 3) — recorded refunds of prepaid credit
-      // (customer_balance_returns, 0139). Since 0142 a refund is a DEBIT on the
-      // pool, so every balance the Finance tab derives needs it; without it a
-      // refunded customer's money would read as spendable a second time. Small
-      // table — at most one row per customer, enforced by a unique index.
-      supabase
-        .from("customer_balance_returns")
-        .select("id, customer_id, amount_sar, returned_on"),
+      // ---- Prepaid rebuild (0203): the ledger model, read ONLY through ----
+      // ---- lib/customer-ledger.ts. Three view figures + the raw ledger ----
+      // ---- rows + the correction gate's state. No arithmetic anywhere. ----
+      fetchLedgerBalances(supabase),
+      fetchUninvoiced(supabase),
+      fetchAvailable(supabase),
+      fetchLedgerEntries(supabase),
+      fetchLedgerCorrections(supabase),
+      fetchLedgerCorrectionVotes(supabase),
+      // COUNT of uninvoiced deliveries per customer (the statement footer's
+      // "{n} deliveries"); the AMOUNT beside it is always the view's.
+      fetchUninvoicedTripCounts(supabase),
+      // Letterhead for the printable RCT/CN sheets — same fetch shape as the
+      // invoice sheet's (invoiceActions.ts). maybeSingle: a missing row prints
+      // a sheet with no letterhead rather than refusing (lib/docvm/ledgerDoc.ts).
+      supabase.from("company_settings").select("*").eq("id", true).maybeSingle(),
+      // Signed-in user — the correction gate hides vote controls from the
+      // proposer and from anyone who already voted, which needs the email.
+      supabase.auth.getUser(),
     ]);
 
   // Paid-invoice lock (Finance bug fix): a trip is LOCKED when its invoice_id
@@ -346,7 +360,22 @@ export default async function TripsPage() {
   }[];
   const drivers = (driversRes.data ?? []) as { id: string; name: string; name_ar: string | null; status: DriverStatus; active: boolean }[];
   const topups = (topupsRes.data ?? []) as TopupRow[];
-  const balanceReturns = (balanceReturnsRes.data ?? []) as BalanceReturnRow[];
+
+  // ---- Prepaid ledger model (0203) ----------------------------------------
+  // Already typed by lib/customer-ledger.ts's .returns<…>() — no casts here.
+  const ledgerBalances = ledgerBalancesRes.data ?? [];
+  const ledgerUninvoiced = ledgerUninvoicedRes.data ?? [];
+  const ledgerAvailable = ledgerAvailableRes.data ?? [];
+  const ledgerEntries = ledgerEntriesRes.data ?? [];
+  const ledgerCorrections = ledgerCorrectionsRes.data ?? [];
+  const ledgerCorrectionVotes = ledgerVotesRes.data ?? [];
+  // Map -> plain Record: a Map cannot cross the RSC serialization boundary.
+  const uninvoicedTripCounts: Record<string, number> = {};
+  for (const [customerId, n] of uninvoicedCountsRes.data ?? new Map<string, number>()) {
+    uninvoicedTripCounts[customerId] = n;
+  }
+  const company = (companyRes.data ?? null) as CompanySettings | null;
+  const currentUserEmail = authRes.data.user?.email ?? null;
 
   // v3 — flatten the invoice-joined charge rows into customer-tagged,
   // void-excluded entries. `invoice` comes back as a single joined object
@@ -419,11 +448,18 @@ export default async function TripsPage() {
     // an empty queue".
     paidInvoicesRes.error ||
     specialChargesRes.error ||
-    // Same rule as paidInvoicesRes above, and it bites harder here: falling back
-    // to [] would drop every refund from the balance math, so a refunded
-    // customer would silently render the money we already paid back as credit
-    // they can still spend. A read failure must surface, never degrade.
-    balanceReturnsRes.error;
+    // The ledger reads (0203). Same rule as every entry above — a Balance /
+    // Available column falling back to [] would render "0.00" where the truth
+    // is "the read failed", and 0 is exactly the figure a refund cap would
+    // then wrongly enforce. companyRes is deliberately NOT here: a missing
+    // letterhead prints an unheaded sheet, it does not block the Finance tab.
+    ledgerBalancesRes.error ||
+    ledgerUninvoicedRes.error ||
+    ledgerAvailableRes.error ||
+    ledgerEntriesRes.error ||
+    ledgerCorrectionsRes.error ||
+    ledgerVotesRes.error ||
+    uninvoicedCountsRes.error;
 
   return (
     <TripsTabs
@@ -442,9 +478,17 @@ export default async function TripsPage() {
       leavePeriods={leavePeriods}
       leaveLoadFailed={leaveLoadFailed}
       topups={topups}
-      balanceReturns={balanceReturns}
       specialCharges={specialCharges}
       paidInvoices={paidInvoices}
+      ledgerBalances={ledgerBalances}
+      ledgerUninvoiced={ledgerUninvoiced}
+      ledgerAvailable={ledgerAvailable}
+      ledgerEntries={ledgerEntries}
+      ledgerCorrections={ledgerCorrections}
+      ledgerCorrectionVotes={ledgerCorrectionVotes}
+      uninvoicedTripCounts={uninvoicedTripCounts}
+      company={company}
+      currentUserEmail={currentUserEmail}
     />
   );
 }

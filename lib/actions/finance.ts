@@ -1,26 +1,47 @@
 "use server";
 
-// Finance Commit 2 — prepaid top-up recording. Minimal write-side surface;
-// the derived-balance/statement READ side is pure (lib/prepaid.ts) and
-// computed client-side from already-fetched trips/projects/topups (see
-// app/trips/CustomersTab.tsx), mirroring the existing revenue-KPI pattern.
+// Finance — prepaid customer ledger write surface (0203).
 //
-// Add Balance restructure (Batch B, migration 0040) — brings this in line
-// with invoice payment (app/trips/invoiceActions.ts's markInvoicePaid):
-// FormData instead of a plain object, so a proof photo can ride along.
-// bank_transfer requires an ETF ref. number AND a photo (same reasoning
-// pay_invoice() applies to invoice proof-of-payment).
+// Every mutation here is an RPC call: record_topup / record_refund /
+// propose_ledger_correction / vote_ledger_correction are SECURITY DEFINER
+// functions and the ONLY writers of customer_ledger and ledger_corrections.
+// No direct table insert survives in the top-up path — customer_topups is a
+// legacy table now, still read by Batch 2–3 surfaces until 0204 drops it.
 //
-// Batch B follow-up: cash is NOT stripped of ref/photo anymore — cash can be
-// bank-deposited too (ETF ref + slip may exist), so both fields are simply
-// optional for cash and kept as-entered. Only bank_transfer enforces them as
-// required. Storage key is app-generated (topup-proofs bucket, 0040) — never
-// the raw filename — for either method, whenever a file is actually provided.
+// p_actor is always the signed-in user's email (never a form field); a blank
+// actor is the RPC's problem — it raises 'Actor identity is required.' and we
+// surface that verbatim, like every other RPC error in this file.
+//
+// Photo rules (top-up only — record_refund has NO photo column, deliberate):
+// bank_transfer requires an ETF ref. number AND a photo; cash keeps both
+// optional-but-recorded. Storage key is app-generated (topup-proofs bucket,
+// 0040) — never the raw filename.
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
 export type ActionResult<T = undefined> = { error: string | null; data?: T };
+
+// The slice of the returned customer_ledger row a fresh document print needs.
+export type LedgerDocResult = {
+  docNumber: string;
+  amountSar: number;
+  method: string;
+  reference: string | null;
+  note: string | null;
+  createdAt: string;
+  createdBy: string | null;
+};
+
+type LedgerRpcRow = {
+  doc_number: string | null;
+  amount_sar: number;
+  method: string | null;
+  reference: string | null;
+  note: string | null;
+  created_at: string;
+  created_by: string | null;
+};
 
 const PHOTO_BUCKET = "topup-proofs";
 
@@ -29,12 +50,11 @@ const PHOTO_BUCKET = "topup-proofs";
 // holds when the client is bypassed or stale.
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
-export async function recordTopup(formData: FormData): Promise<ActionResult> {
+export async function recordTopup(formData: FormData): Promise<ActionResult<LedgerDocResult>> {
   const supabase = createClient();
 
   const customerId = String(formData.get("customerId") ?? "");
   const amountSar = Number(formData.get("amountSar"));
-  const topupDate = String(formData.get("topupDate") ?? "").trim();
   const method = String(formData.get("method") ?? "");
   const note = String(formData.get("note") ?? "").trim() || null;
   const reference = String(formData.get("reference") ?? "").trim() || null;
@@ -44,7 +64,6 @@ export async function recordTopup(formData: FormData): Promise<ActionResult> {
   if (!Number.isFinite(amountSar) || amountSar <= 0) {
     return { error: "Add Balance amount must be a positive number." };
   }
-  if (!topupDate) return { error: "Add Balance date is required." };
   if (method !== "cash" && method !== "bank_transfer") {
     return { error: "Method must be cash or bank transfer." };
   }
@@ -70,20 +89,145 @@ export async function recordTopup(formData: FormData): Promise<ActionResult> {
     if (uploadErr) return { error: `Photo upload failed: ${uploadErr.message}` };
   }
 
-  // entered_by is the authenticated user's email — same pattern as
-  // commission_periods.approved_by (app/drivers/actions.ts), not a free-text
-  // form field.
   const { data: auth } = await supabase.auth.getUser();
 
-  const { error } = await supabase.from("customer_topups").insert({
-    customer_id: customerId,
-    amount_sar: amountSar,
-    topup_date: topupDate,
-    method,
-    note,
-    reference,
-    photo_path: photoPath,
-    entered_by: auth?.user?.email ?? null,
+  const { data, error } = await supabase.rpc("record_topup", {
+    p_customer_id: customerId,
+    p_amount: amountSar,
+    p_method: method,
+    p_reference: reference,
+    p_photo_path: photoPath,
+    p_actor: auth?.user?.email ?? null,
+    p_note: note,
+  });
+  if (error) return { error: error.message };
+  // `returns customer_ledger` (a single composite row) comes back as one
+  // object through PostgREST; supabase-js types an untyped rpc() as any.
+  const row = data as LedgerRpcRow;
+
+  revalidatePath("/trips");
+  return {
+    error: null,
+    data: {
+      docNumber: row.doc_number ?? "",
+      amountSar: row.amount_sar,
+      method: row.method ?? method,
+      reference: row.reference,
+      note: row.note,
+      createdAt: row.created_at,
+      createdBy: row.created_by,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// REFUND (record_refund) — money OUT of the ledger, capped by Available.
+// The cap lives in the RPC (it reads v_customer_available under the customer
+// row lock); the app does NOT pre-check it — the RPC's error message is the
+// single source of refusal and is shown verbatim. amount_sar is stored
+// negative by the RPC; the form takes the positive figure being paid back.
+// No photo: customer_ledger refund rows have no proof column (0203).
+// ---------------------------------------------------------------------------
+
+export async function recordRefund(formData: FormData): Promise<ActionResult<LedgerDocResult>> {
+  const supabase = createClient();
+
+  const customerId = String(formData.get("customerId") ?? "");
+  const amountSar = Number(formData.get("amountSar"));
+  const method = String(formData.get("method") ?? "");
+  const note = String(formData.get("note") ?? "").trim() || null;
+  const reference = String(formData.get("reference") ?? "").trim() || null;
+
+  if (!customerId) return { error: "Missing customer." };
+  if (!Number.isFinite(amountSar) || amountSar <= 0) {
+    return { error: "Refund amount must be a positive number." };
+  }
+  if (method !== "cash" && method !== "bank_transfer") {
+    return { error: "Method must be cash or bank transfer." };
+  }
+  if (method === "bank_transfer" && !reference) {
+    return { error: "Bank transfer requires an ETF Ref. number." };
+  }
+
+  const { data: auth } = await supabase.auth.getUser();
+
+  const { data, error } = await supabase.rpc("record_refund", {
+    p_customer_id: customerId,
+    p_amount: amountSar,
+    p_method: method,
+    p_reference: reference,
+    p_actor: auth?.user?.email ?? null,
+    p_note: note,
+  });
+  if (error) return { error: error.message };
+  // Same single-composite-row shape as record_topup above.
+  const row = data as LedgerRpcRow;
+
+  revalidatePath("/trips");
+  return {
+    error: null,
+    data: {
+      docNumber: row.doc_number ?? "",
+      amountSar: row.amount_sar,
+      method: row.method ?? method,
+      reference: row.reference,
+      note: row.note,
+      createdAt: row.created_at,
+      createdBy: row.created_by,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// LEDGER CORRECTIONS — two-vote model (0203, cloned from the 0057/0058 PO
+// gate). Propose is open to any authenticated user; voting is restricted by
+// the RPC (fleet_manager / ops_supervisor staff, never the proposer). All
+// rules live in the RPCs; these actions validate only shape and pass every
+// database error through verbatim.
+// ---------------------------------------------------------------------------
+
+export async function proposeLedgerCorrection(formData: FormData): Promise<ActionResult> {
+  const supabase = createClient();
+
+  const customerId = String(formData.get("customerId") ?? "");
+  const amountSar = Number(formData.get("amountSar"));
+  const reason = String(formData.get("reason") ?? "").trim();
+
+  if (!customerId) return { error: "Missing customer." };
+  if (!Number.isFinite(amountSar)) {
+    return { error: "Correction amount must be a number (either sign)." };
+  }
+
+  const { data: auth } = await supabase.auth.getUser();
+
+  const { error } = await supabase.rpc("propose_ledger_correction", {
+    p_customer_id: customerId,
+    p_amount: amountSar,
+    p_reason: reason,
+    p_actor: auth?.user?.email ?? null,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/trips");
+  return { error: null };
+}
+
+export async function voteLedgerCorrection(formData: FormData): Promise<ActionResult> {
+  const supabase = createClient();
+
+  const correctionId = String(formData.get("correctionId") ?? "");
+  const action = String(formData.get("action") ?? "");
+  const comment = String(formData.get("comment") ?? "").trim() || null;
+
+  if (!correctionId) return { error: "Missing correction." };
+
+  const { data: auth } = await supabase.auth.getUser();
+
+  const { error } = await supabase.rpc("vote_ledger_correction", {
+    p_correction_id: correctionId,
+    p_action: action,
+    p_comment: comment,
+    p_actor: auth?.user?.email ?? null,
   });
   if (error) return { error: error.message };
 
@@ -213,6 +357,26 @@ export async function getTopupProofSignedUrl(topupId: string): Promise<ActionRes
   const { data, error } = await supabase.storage
     .from(PHOTO_BUCKET)
     .createSignedUrl(topup.photo_path, 300);
+  if (error || !data) return { error: error?.message ?? "Could not generate a link to the photo." };
+  return { error: null, data: { url: data.signedUrl } };
+}
+
+// Ledger-era twin of getTopupProofSignedUrl: record_topup's p_photo_path lands
+// on customer_ledger.photo_path, and the file itself still lives in the SAME
+// private topup-proofs bucket — only the row that names it moved tables.
+export async function getLedgerPhotoSignedUrl(entryId: string): Promise<ActionResult<{ url: string }>> {
+  const supabase = createClient();
+  const { data: entry, error: entryErr } = await supabase
+    .from("customer_ledger")
+    .select("photo_path")
+    .eq("id", entryId)
+    .single();
+  if (entryErr || !entry) return { error: entryErr?.message ?? "Ledger entry not found." };
+  if (!entry.photo_path) return { error: "No photo on file for this entry." };
+
+  const { data, error } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrl(entry.photo_path, 300);
   if (error || !data) return { error: error?.message ?? "Could not generate a link to the photo." };
   return { error: null, data: { url: data.signedUrl } };
 }

@@ -35,21 +35,15 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  buildStatementItems,
-  derivedBalanceItems,
-  round2,
-  type BalanceReturnLite,
-  type ConsumingCharge,
-  type ConsumingTrip,
-  type TopupStatementInput,
-} from "../lib/prepaid";
+import { round2, type ConsumingTrip } from "../lib/prepaid";
 import { num2 } from "../lib/docPrimitives";
+import { fill } from "../lib/i18n";
 import { formatSar } from "../lib/utils";
 import { buildStatementHtml } from "../lib/statementPdfTemplate";
 import { stripComments } from "./code-grep";
 import {
   buildStatementVm,
+  type StatementLedgerEntry,
   type StatementPaymentInput,
   type StatementTripMeta,
   type StatementVm,
@@ -73,10 +67,33 @@ function check(name: string, ok: boolean, detail = "") {
 const RATE = 1234.5;
 const RATE_INC = round2(RATE * 1.15);
 
-const topups: TopupStatementInput[] = [
-  { id: "tu-1", amount_sar: 20000, topup_date: "2026-01-05", reference: "TRF-88120", note: null },
-  { id: "tu-2", amount_sar: 5000, topup_date: "2026-03-02", reference: "TRF-91007", note: null },
+// THE PREPAID FIXTURE IS A LEDGER (0203) — rows shaped exactly like
+// customer_ledger stores them: SIGNED amounts (sign check: topup/draw_reversal
+// positive, invoice_draw/balance_applied/refund negative, correction either),
+// doc numbers only on topup/refund, invoice numbers only on invoice-linked
+// rows. Oldest first, the order lib/customer-ledger.ts reads them in. It
+// exercises every one of the six entry types, because each maps to its own
+// Type label and row ink and an unexercised arm is an unguarded one.
+const ledgerRows: StatementLedgerEntry[] = [
+  { id: "le-1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000001", invoice_number: null, method: "bank_transfer", reference: "TRF-88120", note: null, created_at: "2026-01-05T09:00:00Z" },
+  { id: "le-2", entry_type: "invoice_draw", amount_sar: -RATE_INC, doc_number: null, invoice_number: "026-000004", method: null, reference: null, note: null, created_at: "2026-01-12T08:00:00Z" },
+  { id: "le-3", entry_type: "invoice_draw", amount_sar: -RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-14T06:05:00Z" },
+  { id: "le-4", entry_type: "balance_applied", amount_sar: -800, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-20T10:00:00Z" },
+  { id: "le-5", entry_type: "draw_reversal", amount_sar: RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: "Invoice cancelled", created_at: "2026-02-25T09:30:00Z" },
+  { id: "le-6", entry_type: "topup", amount_sar: 5000, doc_number: "RCT-2026-000002", invoice_number: null, method: "bank_transfer", reference: "TRF-91007", note: null, created_at: "2026-03-02T11:00:00Z" },
+  { id: "le-7", entry_type: "refund", amount_sar: -1500, doc_number: "CN-2026-000001", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-03-20T13:00:00Z" },
+  { id: "le-8", entry_type: "correction", amount_sar: 250.25, doc_number: null, invoice_number: null, method: null, reference: null, note: "Bank fee reversed", created_at: "2026-03-25T15:00:00Z" },
+  { id: "le-9", entry_type: "correction", amount_sar: -100.1, doc_number: null, invoice_number: null, method: null, reference: null, note: "Duplicate keying", created_at: "2026-03-28T15:00:00Z" },
 ];
+
+// What v_customer_ledger_balance would say over these rows: round(sum, 2) in
+// SQL. This test does the arithmetic the VIEW owns in production — the app
+// never does — so the fixture can be self-consistent the way prod is.
+const LEDGER_BALANCE = round2(ledgerRows.reduce((s, e) => s + e.amount_sar, 0));
+// The uninvoiced pair the footer renders: two delivered trips awaiting an
+// invoice, at the view's own uninvoiced_sar figure (2 × the VAT-inc rate).
+const UNINV_COUNT = 2;
+const UNINV_SAR = round2(RATE_INC * 2);
 
 const trips: ConsumingTrip[] = [
   {
@@ -107,12 +124,6 @@ const trips: ConsumingTrip[] = [
   },
 ];
 
-const charges: ConsumingCharge[] = [
-  { id: "ch-1", charge_date: "2026-02-20", amount_sar: 800, label: "Standby hours" },
-];
-
-const returns: BalanceReturnLite[] = [{ id: "rt-1", amount_sar: 1500, returned_on: "2026-03-20" }];
-
 const payments: StatementPaymentInput[] = [
   {
     id: "inv-1",
@@ -135,21 +146,30 @@ const basePrepaid: StatementVmInput = {
   customerName: "Seder Facility Management Co.",
   projectName: "Riyadh North Compound",
   mode: "prepaid",
-  topups,
-  trips,
-  charges,
-  returns,
-  payments,
-  tripMetaById,
+  ledger: ledgerRows,
+  balance: LEDGER_BALANCE,
+  uninvoicedCount: UNINV_COUNT,
+  uninvoicedSar: UNINV_SAR,
+  // The postpaid-arm inputs, empty: the prepaid arm never reads them, and
+  // passing real trips here would let a defect that CROSSES the arms hide.
+  trips: [],
+  payments: [],
+  tripMetaById: new Map(),
   projectWaterType: "potable",
-  // `projectInitials: "K1"` stood here. It fed the header's sample-ref line,
-  // which is gone; the trips above still carry real "K1-026-…" refs, so case
-  // 2a's marker string is unaffected.
   dateFrom: "",
   dateTo: "",
 };
 
-const basePostpaid: StatementVmInput = { ...basePrepaid, mode: "postpaid", charges: [], returns: [] };
+const basePostpaid: StatementVmInput = {
+  ...basePrepaid,
+  mode: "postpaid",
+  // DELIBERATELY LEFT CARRYING the prepaid figures (ledger, balance, the
+  // uninvoiced pair): the postpaid arm must IGNORE them — case 13c pins that
+  // no uninvoiced footer leaks onto a postpaid statement.
+  trips,
+  payments,
+  tripMetaById,
+};
 
 // ---------------------------------------------------------------------------
 // The document, reduced to its readable text
@@ -217,6 +237,17 @@ function expectedStrings(vm: StatementVm): string[] {
   } else {
     out.push(vm.allTimeLabel.en);
   }
+  // THE UNINVOICED FOOTNOTE, filled exactly the way the document fills it
+  // (String(count), num2(amount)) — so case 1's sweep catches a template the
+  // renderer dropped or filled with different tokens.
+  if (vm.uninvoicedFooter) {
+    out.push(
+      fill(vm.uninvoicedFooter.template.en, {
+        count: String(vm.uninvoicedFooter.count),
+        amount: num2(vm.uninvoicedFooter.amount),
+      }),
+    );
+  }
   for (const c of vm.columns) out.push(c.label.en, c.label.ar);
   for (const row of vm.rows) {
     for (const cell of row.cells) {
@@ -273,21 +304,21 @@ check(
 // ---------------------------------------------------------------------------
 // 2. AND THE COMPARISON CAN FAIL — the inverted case
 // ---------------------------------------------------------------------------
-// A fourth trip at a figure that appears nowhere else, checked against the
-// THREE-trip document. If this reports "nothing missing", the collector or the
-// tokenizer is broken and case 1 is worthless.
+// A tenth ledger row with a document number that appears nowhere else, checked
+// against the NINE-row document. If this reports "nothing missing", the
+// collector or the tokenizer is broken and case 1 is worthless.
 
 const vmExtra = buildStatementVm({
   ...basePrepaid,
-  trips: [
-    ...trips,
-    { id: "tr-9", trip_date: "2026-04-01", delivered_at: "2026-04-01T07:00:00Z", rate_sar: 7777.77, ref: "K1-026-0009", water_type: "potable" },
+  ledger: [
+    ...ledgerRows,
+    { id: "le-99", entry_type: "topup", amount_sar: 7777.77, doc_number: "RCT-2026-000099", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-04-01T07:00:00Z" },
   ],
 });
 const missExtra = missingFrom(vmExtra, htmlPrepaid);
 check(
   "2a. a value the document does NOT carry is reported missing",
-  missExtra.length > 0 && missExtra.some((s) => s.includes("K1-026-0009")),
+  missExtra.length > 0 && missExtra.some((s) => s.includes("RCT-2026-000099")),
   `reported: ${missExtra.join(" | ") || "(nothing — the check cannot fail)"}`,
 );
 check(
@@ -297,32 +328,27 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// 3. THE MONEY LAW — the headline is the ledger's own closing balance
+// 3. THE MONEY LAW — the headline is the VIEW's figure, PASSED THROUGH
 // ---------------------------------------------------------------------------
-// lib/prepaid.ts's invariant: buildStatementItems' last runningBalance equals
-// derivedBalanceItems over the same inputs. The statement's headline figure is
-// that number, and the Finance tab's Balance column is the other. If these
-// ever disagree, the document and the tab contradict each other on screen.
+// 0203's rule: Balance is v_customer_ledger_balance's column, and the app
+// does NO arithmetic on it. So the guard has two halves: the headline must be
+// the input balance UNTOUCHED (3a), and the running-balance walk down the
+// rows must land on the same sum the view computes over the same rows (3b) —
+// together they mean the page cannot contradict itself between its last row
+// and its headline. The test does the reduce; the view-model must not.
 
-const derived = derivedBalanceItems(topups, trips, charges, undefined, returns);
 check(
-  "3a. prepaid headline === derivedBalanceItems over the same inputs",
-  vmPrepaid.headline.value === derived,
-  `headline ${vmPrepaid.headline.value} vs derived ${derived}`,
+  "3a. prepaid headline === the input balance, untouched",
+  vmPrepaid.headline.value === basePrepaid.balance,
+  `headline ${vmPrepaid.headline.value} vs input ${basePrepaid.balance}`,
 );
 
-const walk = buildStatementItems(
-  topups,
-  trips,
-  charges,
-  undefined,
-  payments.map((p) => ({ id: p.id, date: p.payment_date!, invoice_number: p.invoice_number, amount: p.grand_total_sar })),
-  returns,
-);
+const lastRunningCell = vmPrepaid.rows[vmPrepaid.rows.length - 1].cells[6];
+const rawSum = ledgerRows.reduce((s, e) => s + e.amount_sar, 0);
 check(
-  "3b. headline === the ledger walk's last running balance",
-  vmPrepaid.headline.value === walk[walk.length - 1].runningBalance,
-  `headline ${vmPrepaid.headline.value} vs walk ${walk[walk.length - 1].runningBalance}`,
+  "3b. the walk's last running balance === the sum of the rows (the view's own sum)",
+  lastRunningCell.kind === "num" && lastRunningCell.value === rawSum && round2(rawSum) === LEDGER_BALANCE,
+  `last running ${lastRunningCell.kind === "num" ? lastRunningCell.value : "(not num)"} vs sum ${rawSum} vs balance ${LEDGER_BALANCE}`,
 );
 
 // ---------------------------------------------------------------------------
@@ -349,54 +375,78 @@ check(
     documentText(buildStatementHtml(vmFiltered)).includes("2026-02-28"),
   "a filtered statement that does not say so can be mistaken for an all-time one",
 );
-
-// ---------------------------------------------------------------------------
-// 5. A SETTLEMENT RECORDS, IT DOES NOT MOVE MONEY
-// ---------------------------------------------------------------------------
-
-const settlementIdx = walk.findIndex((e) => e.kind === "settlement");
+// FILTER AFTER THE FULL WALK, NEVER BEFORE — the docblock's ordering rule,
+// measured: the first visible row of a filtered statement must carry the
+// running balance of the FULL history up to it, byte-identical to the same
+// row on the unfiltered statement. A walk taken over the filtered rows would
+// restart from zero and disagree here.
 check(
-  "5a. the fixture actually contains a settlement row",
-  settlementIdx > 0,
-  "without one, 5b passes vacuously",
-);
-check(
-  "5b. the running balance holds FLAT across a settlement",
-  settlementIdx > 0 && walk[settlementIdx].runningBalance === walk[settlementIdx - 1].runningBalance,
-  settlementIdx > 0
-    ? `before ${walk[settlementIdx - 1].runningBalance}, after ${walk[settlementIdx].runningBalance}`
-    : "",
-);
-check(
-  "5c. and it still appears on the document, with its invoice number",
-  documentText(htmlPrepaid).includes("026-000004") &&
-    vmPrepaid.rows.some((r) => r.kind === "settlement"),
-  "a traced invoice that is invisible is not a trace",
+  "4d. a filtered row keeps its FULL-history running balance",
+  (() => {
+    const filtered0 = vmFiltered.rows[0];
+    const same = vmPrepaid.rows.find((r) => r.key === filtered0.key);
+    const a = filtered0.cells[6];
+    const b = same?.cells[6];
+    const own = filtered0.cells[5];
+    // Same value as the unfiltered statement's same row, AND not the row's
+    // own amount — the second half is what makes the first falsifiable on a
+    // fixture whose first filtered row could coincide with its own figure.
+    return a.kind === "num" && b?.kind === "num" && own.kind === "num" && a.value === b.value && a.value !== own.value;
+  })(),
+  "a running balance recomputed over the visible rows alone restates history",
 );
 
 // ---------------------------------------------------------------------------
-// 6. A BALANCE RETURN IS A REAL DEBIT, AND CARRIES NO VAT SPLIT
+// 5. THE LEDGER'S OWN GRAMMAR — trace, direction, and sign-decided ink
 // ---------------------------------------------------------------------------
-// A refund of credit is cash leaving, not a taxable supply. A "+ VAT" sub-line
-// under it would be inventing a tax line.
+// The rows are the database's; what the statement adds is WHICH document each
+// row points at and WHICH WAY its money moved, and those must come from the
+// row's own columns, never invented.
+
+const drawRow = vmPrepaid.rows.find((r) => r.key === "ledger-le-2");
+check(
+  "5a. an invoice-linked row traces its invoice number in Ref",
+  drawRow?.cells[2].kind === "text" && drawRow.cells[2].value === "026-000004",
+  "a draw that does not say which invoice drew it is not a trace",
+);
+const reversalRow = vmPrepaid.rows.find((r) => r.key === "ledger-le-5");
+const reversalAmount = reversalRow?.cells[5];
+check(
+  "5b. a draw reversal is money RESTORED — signed plus, rendered as a payment",
+  reversalAmount?.kind === "num" && reversalAmount.sign === "plus" && reversalRow?.kind === "payment",
+  `sign ${reversalAmount?.kind === "num" ? reversalAmount.sign : "?"}, kind ${reversalRow?.kind}`,
+);
+const corrPlus = vmPrepaid.rows.find((r) => r.key === "ledger-le-8");
+const corrMinus = vmPrepaid.rows.find((r) => r.key === "ledger-le-9");
+check(
+  "5c. a correction's ink follows its SIGN — positive reads credit, negative debit",
+  corrPlus?.kind === "payment" && corrMinus?.kind === "charge",
+  `+250.25 -> ${corrPlus?.kind}, -100.10 -> ${corrMinus?.kind}`,
+);
+
+// ---------------------------------------------------------------------------
+// 6. A REFUND IS A REAL DEBIT, SHOWN AS A MAGNITUDE, TRACED BY ITS CN
+// ---------------------------------------------------------------------------
+// The ledger STORES a refund negative (customer_ledger_sign_check); the sheet
+// prints the magnitude and lets the minus glyph and the Type label say the
+// direction. Math.abs is presentation, not arithmetic — nothing is derived.
 
 const returnRow = vmPrepaid.rows.find((r) => r.kind === "return");
-const returnAmountCell = returnRow?.cells[6];
+const returnAmountCell = returnRow?.cells[5];
 check(
-  "6a. the return row's amount is signed as a debit",
-  returnAmountCell?.kind === "num" && returnAmountCell.sign === "minus",
-  `sign: ${returnAmountCell?.kind === "num" ? returnAmountCell.sign : "(not a number cell)"}`,
+  "6a. the refund's amount is the MAGNITUDE, signed as a debit",
+  returnAmountCell?.kind === "num" && returnAmountCell.sign === "minus" && returnAmountCell.value === 1500,
+  `cell: ${returnAmountCell?.kind === "num" ? `${returnAmountCell.sign} ${returnAmountCell.value}` : "(not a number cell)"} — stored -1500`,
 );
 check(
-  "6b. the return row carries NO VAT split",
+  "6b. the refund row carries NO VAT split",
   returnAmountCell?.kind === "num" && returnAmountCell.split === null,
   "a refund is not a taxable supply",
 );
-const tripRow = vmPrepaid.rows.find((r) => r.kind === "trip");
-const tripAmountCell = tripRow?.cells[6];
 check(
-  "6c. a TRIP row does carry one (so 6b is a rule, not an empty branch)",
-  tripAmountCell?.kind === "num" && tripAmountCell.split !== null,
+  "6c. and its Ref is the credit note's own number",
+  returnRow?.cells[2].kind === "text" && returnRow.cells[2].value === "CN-2026-000001",
+  "the CN is the paper trail record_refund minted for exactly this row",
 );
 
 // ---------------------------------------------------------------------------
@@ -482,9 +532,14 @@ check(
   vmPostpaid.columns.map((c) => c.key).join(","),
 );
 check(
-  "9d. prepaid renders eight columns, ending on Running Balance",
-  vmPrepaid.columns.length === 8 && vmPrepaid.columns[7].key === "runningBalance",
+  "9d. prepaid renders SEVEN columns, ending on Running Balance",
+  vmPrepaid.columns.length === 7 && vmPrepaid.columns[6].key === "runningBalance",
   vmPrepaid.columns.map((c) => c.key).join(","),
+);
+check(
+  "9e. and the Method column sits among them (the ledger's own field)",
+  vmPrepaid.columns.some((c) => c.key === "method") && !vmPostpaid.columns.some((c) => c.key === "method"),
+  "prepaid rows carry how money physically moved; a postpaid trip row has no method",
 );
 
 // ---------------------------------------------------------------------------
@@ -492,8 +547,8 @@ check(
 // ---------------------------------------------------------------------------
 
 check(
-  "10a. a trip with no ref prints the same words the screen shows",
-  documentText(htmlPrepaid).includes("No ref"),
+  "10a. a trip with no ref prints the same words the screen shows (postpaid)",
+  documentText(htmlPostpaid).includes("No ref"),
   "lib/trip-ref.ts's formatTripRef fallback — a blank cell here would be a wording deviation",
 );
 check(
@@ -501,15 +556,46 @@ check(
   vmPrepaid.vatSplitTemplate.en.includes("{net}") && vmPrepaid.vatSplitTemplate.en.includes("{vat}"),
   `template: ${vmPrepaid.vatSplitTemplate.en}`,
 );
+// 10c INVERTED WITH THE 0203 REBUILD. The old prepaid statement split every
+// trip debit into net + VAT; the ledger statement deliberately does NOT — a
+// ledger row is a money movement, not a taxable supply, and the tax lives on
+// the invoice the draw points at (postpaid itemizes VAT in its own columns).
+// So the rule is now an ABSENCE, and per this repo's guard discipline an
+// absence-check must be shown able to fire: 10c-2 plants a split into a
+// cloned vm and requires the retained render grammar to fill the template —
+// proving both that no honest row carries one AND that the machinery being
+// "unused" is a decision, not dead code that quietly stopped rendering.
 check(
-  "10c. and the document fills it rather than writing its own",
-  documentText(htmlPrepaid).includes(`${num2(RATE)} + VAT ${num2(round2(RATE_INC - RATE))}`),
-  `expected "${num2(RATE)} + VAT ${num2(round2(RATE_INC - RATE))}"`,
+  "10c. NO row on either statement carries a VAT split any more",
+  [...vmPrepaid.rows, ...vmPostpaid.rows]
+    .flatMap((r) => r.cells)
+    .every((c) => c.kind !== "num" || c.split === null),
+  "the tax lives on the invoice; a split here would be inventing a tax line",
+);
+check(
+  "10c-2. and a PLANTED split still renders filled (the grammar is alive)",
+  (() => {
+    // Plain-data clone — the vm holds no Map/function, JSON round-trip is exact.
+    const planted = JSON.parse(JSON.stringify(vmPrepaid)) as StatementVm;
+    const cell = planted.rows[1].cells[5];
+    if (cell.kind !== "num") return false;
+    cell.split = { net: RATE, vat: round2(RATE_INC - RATE) };
+    return documentText(buildStatementHtml(planted)).includes(
+      `${num2(RATE)} + VAT ${num2(round2(RATE_INC - RATE))}`,
+    );
+  })(),
+  "if the fill path is gone, 10c is vacuously green and the template is a lie",
 );
 check(
   "10d. an empty statement keeps its column heads and says why it is empty",
   (() => {
-    const empty = buildStatementVm({ ...basePrepaid, topups: [], trips: [], charges: [], returns: [], payments: [] });
+    const empty = buildStatementVm({
+      ...basePrepaid,
+      ledger: [],
+      balance: 0,
+      uninvoicedCount: 0,
+      uninvoicedSar: 0,
+    });
     const text = documentText(buildStatementHtml(empty));
     return empty.rows.length === 0 && empty.emptyLabel !== null && text.includes(empty.emptyLabel.en) && text.includes(empty.columns[0].label.en);
   })(),
@@ -713,6 +799,40 @@ check(
   "12f. every one of them is SCOPED to the statement",
   arRules.length > 0 && arRules.every((r) => r.trimStart().startsWith(".stmt-")),
   "lib/plainDocStyles.ts is shared with the invoice print sheet; a kit-wide bump restyles a tax document",
+);
+
+// ---------------------------------------------------------------------------
+// 13. UNINVOICED FOOTER — the one figure on this statement that is NOT a ledger
+// row. It comes from v_customer_uninvoiced via input pass-through, so the pin
+// is the same money law as case 3: the VM carries the VIEW's numbers verbatim,
+// and the document carries the VM's fill. 13b proves the footer can go dark;
+// 13c proves it cannot leak onto a postpaid statement even when the input
+// deliberately carries the prepaid figures (basePostpaid does — by design).
+check(
+  "13a. prepaid statement carries the uninvoiced footnote, figures pass through",
+  (() => {
+    const f = vmPrepaid.uninvoicedFooter;
+    if (!f) return false;
+    if (f.count !== UNINV_COUNT || f.amount !== UNINV_SAR) return false;
+    const filled = fill(f.template.en, { count: String(f.count), amount: num2(f.amount) });
+    return documentText(htmlPrepaid).includes(filled);
+  })(),
+  `footer ${JSON.stringify(vmPrepaid.uninvoicedFooter)}; expected count ${UNINV_COUNT}, amount ${UNINV_SAR}`,
+);
+check(
+  "13b. footer goes dark when nothing is uninvoiced",
+  (() => {
+    const vm = buildStatementVm({ ...basePrepaid, uninvoicedCount: 0, uninvoicedSar: 0 });
+    // documentMarkup, not the raw html: the .stmt-uninv CSS RULE is always in
+    // the stylesheet — what must vanish is the ELEMENT.
+    return vm.uninvoicedFooter === null && !documentMarkup(buildStatementHtml(vm)).includes("stmt-uninv");
+  })(),
+  "a zero-count zero-amount footer is noise on a clean account",
+);
+check(
+  "13c. postpaid statement never carries it, even with the figures in its input",
+  vmPostpaid.uninvoicedFooter === null && !documentMarkup(htmlPostpaid).includes("stmt-uninv"),
+  "basePostpaid deliberately holds the prepaid figures; the postpaid arm must ignore them",
 );
 
 console.log(failures === 0 ? "\nAll statement parity checks passed." : `\n${failures} check(s) FAILED.`);

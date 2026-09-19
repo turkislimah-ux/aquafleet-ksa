@@ -15,11 +15,22 @@
 //
 // WHAT THIS FILE DOES NOT DO
 // --------------------------
-// It does not compute money. lib/prepaid.ts's buildStatementItems() and
-// consumingItems() remain the ONLY expressions of the ledger, and they are
-// called here with exactly the arguments the modal always passed. Nothing here
-// re-signs, re-rounds, re-bases or re-sums a single amount. This file ARRANGES
-// what that engine returns; it does not participate in the money-core.
+// It does not compute money.
+//
+//   PREPAID (rebuilt on 0203's customer_ledger): every row is a ledger row
+//   passed in verbatim, the headline Balance is v_customer_ledger_balance's
+//   figure passed in, and the footer amount is v_customer_uninvoiced's. The
+//   ONE cumulative walk below (running balance down the rows) is presentation
+//   of the rows' own amounts in sequence — the directive's sanctioned display
+//   device — and is never used as a source figure: the headline is the view's,
+//   not the walk's. Nothing reads lib/prepaid.ts's derived balance any more.
+//
+//   POSTPAID (unchanged): lib/prepaid.ts's consumingItems() remains the only
+//   expression of what a postpaid trip costs, called with exactly the
+//   arguments the modal always passed.
+//
+// Nothing here re-signs, re-rounds, re-bases or re-sums a single amount. This
+// file ARRANGES what it is handed; it does not participate in the money-core.
 //
 // NUMBERS ARE RAW, NOT FORMATTED — same rule as the invoice view-model. The
 // screen shows whole riyals (`formatSar`); a document shows 2 decimals
@@ -44,17 +55,9 @@ import { paymentMethodLabel, paymentModeLabel, waterTypeLabel } from "./enum-lab
 // substitution. The VAT-split template is carried UNFILLED to the renderers on
 // purpose (see `vatSplitTemplate`), so nothing here interpolates any more.
 import { t, type TKey } from "./i18n";
-import {
-  buildStatementItems,
-  consumingItems,
-  round2,
-  type BalanceReturnLite,
-  type ConsumedItem,
-  type ConsumingCharge,
-  type ConsumingTrip,
-  type SettlementStatementInput,
-  type TopupStatementInput,
-} from "./prepaid";
+// POSTPAID-ONLY imports. The prepaid arm no longer touches lib/prepaid.ts —
+// its rows arrive as ledger rows and its figures as view columns (0203).
+import { consumingItems, round2, type ConsumedItem, type ConsumingTrip } from "./prepaid";
 // The ref column's wording lives here for BOTH surfaces. lib/trip-ref.ts's own
 // header requires it: "ALL trip-ref rendering (Kanban cards, invoice tables,
 // statements) must go through this file". A document that printed a bare blank
@@ -97,14 +100,51 @@ export type StatementPaymentInput = {
   grand_total_sar: number;
 };
 
+// One prepaid ledger row, exactly as customer_ledger stores it plus the joined
+// invoice number. Re-declared here (rather than imported from
+// lib/customer-ledger.ts) so this view-model stays importable from a test
+// script with no Supabase types in the graph — the same reason
+// StatementTripMeta is re-declared above.
+export type StatementLedgerEntryType =
+  | "topup"
+  | "invoice_draw"
+  | "balance_applied"
+  | "refund"
+  | "correction"
+  | "draw_reversal";
+
+export type StatementLedgerEntry = {
+  id: string;
+  entry_type: StatementLedgerEntryType;
+  /** SIGNED, as stored: money in positive, money out negative
+   *  (customer_ledger_sign_check). Never re-signed here. */
+  amount_sar: number;
+  doc_number: string | null;
+  /** The joined invoices.invoice_number, for invoice-linked rows. */
+  invoice_number: string | null;
+  method: string | null;
+  reference: string | null;
+  note: string | null;
+  /** timestamptz. The row's date on the statement is its first 10 chars. */
+  created_at: string;
+};
+
 export type StatementVmInput = {
   customerName: string;
   projectName: string | null;
   mode: "prepaid" | "postpaid";
-  topups: TopupStatementInput[];
+  // ---- Prepaid inputs (0203 ledger model) --------------------------------
+  /** The customer's ledger rows, oldest first. Prepaid only; ignored postpaid. */
+  ledger: StatementLedgerEntry[];
+  /** v_customer_ledger_balance.balance_sar — THE headline figure, passed
+   *  through. Never derived from the rows here. */
+  balance: number;
+  /** Count of delivered-but-uninvoiced trips (lib/customer-ledger.ts's count
+   *  query) and v_customer_uninvoiced.uninvoiced_sar, for the footer line. */
+  uninvoicedCount: number;
+  uninvoicedSar: number;
+  // ---- Postpaid inputs (unchanged path) ----------------------------------
   trips: ConsumingTrip[];
-  charges: ConsumingCharge[];
-  returns: BalanceReturnLite[];
   payments: StatementPaymentInput[];
   tripMetaById: Map<string, StatementTripMeta>;
   projectWaterType: WaterType | null;
@@ -123,14 +163,16 @@ export type StatementVmInput = {
 // ---------------------------------------------------------------------------
 
 // The column set differs by MODE, in both membership and order — mirroring the
-// two on-screen tables exactly. Prepaid is a ledger (ends on a running
-// balance); postpaid is an itemised bill (breaks VAT out and ends on a total).
+// two on-screen tables exactly. Prepaid is a bank-statement ledger of 0203
+// rows (date/type/ref/method/note/amount, ending on a running balance);
+// postpaid is an itemised bill (breaks VAT out and ends on a total).
 export type StatementColumnKey =
   | "date"
   | "type"
   | "truck"
   | "capacity"
   | "ref"
+  | "method"
   | "note"
   | "amount"
   | "runningBalance"
@@ -222,6 +264,14 @@ export type StatementVm = {
   // renderer in ITS OWN format, because the screen shows whole riyals and a
   // document shows two decimals. Resolving it here would freeze one of them.
   vatSplitTemplate: BiLabel;
+  // "N deliveries not yet invoiced — X SAR" under the prepaid table. Carried
+  // the same way as vatSplitTemplate: an UNFILLED template plus the two raw
+  // figures, substituted by each renderer in its own number format. The
+  // AMOUNT is v_customer_uninvoiced.uninvoiced_sar passed through, so
+  // Balance − footer amount reconciles with Available by construction. null
+  // on postpaid, and on a prepaid statement with nothing uninvoiced — a
+  // renderer seeing null prints nothing.
+  uninvoicedFooter: { template: BiLabel; count: number; amount: number } | null;
 };
 
 // payment_date is a plain date (user-entered); paid_at is a full timestamp
@@ -236,22 +286,21 @@ const EMPTY: StatementCell = { kind: "empty" };
 /**
  * Build the statement view-model.
  *
- * THE ORDER OF OPERATIONS BELOW IS THE MODAL'S, UNCHANGED:
- *   1. drop payments with no usable date (no place on a dated ledger)
- *   2. prepaid: map them to record-only settlements
- *   3. run buildStatementItems over the FULL, unfiltered inputs
- *   4. take the closing runningBalance from the FULL list
- *   5. filter to the visible period for display only
- * Reversing 3 and 5 would make the running balance restart mid-history — the
- * single most likely way to silently produce a wrong document.
+ * PREPAID ORDER OF OPERATIONS:
+ *   1. walk the FULL ledger oldest-first, annotating each row with the
+ *      cumulative running balance
+ *   2. filter to the visible period for display only
+ *   3. the headline is the PASSED-IN view balance, period-independent
+ * Filtering before walking would make the running balance restart mid-history
+ * — the single most likely way to silently produce a wrong document.
+ *
+ * POSTPAID is byte-identical to what it was before the ledger rebuild.
  */
 export function buildStatementVm(input: StatementVmInput): StatementVm {
   const {
     mode,
-    topups,
+    ledger,
     trips,
-    charges,
-    returns,
     payments,
     tripMetaById,
     projectWaterType,
@@ -315,112 +364,115 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
     ];
   }
 
-  // ---- Prepaid: the bank-statement ledger --------------------------------
+  // ---- Prepaid: the bank-statement ledger (0203 rows, verbatim) -----------
   if (mode === "prepaid") {
-    // Record-only rows: a paid prepaid invoice is TRACED, never deducted.
-    const settlements: SettlementStatementInput[] = allPayments.map((p) => ({
-      id: p.id,
-      date: paymentDateOf(p),
-      invoice_number: p.invoice_number,
-      amount: p.grand_total_sar,
-    }));
-
-    // FULL (unfiltered) sequence — the running balance must reflect true
+    // FULL (unfiltered) walk — the running balance must reflect true
     // cumulative history even when the visible rows are period-filtered.
-    const allEntries = buildStatementItems(topups, trips, charges, undefined, settlements, returns);
-    const entries = allEntries.filter((e) => inPeriod(e.date));
-    const balance = allEntries.length > 0 ? allEntries[allEntries.length - 1].runningBalance : 0;
-
-    // Pre-VAT/VAT breakdown for debit rows — a second call to the SAME pure
-    // function buildStatementItems() calls internally, keyed by kind+id. No new
-    // math: consumingItems() already carries both the pre-VAT `amount` and the
-    // VAT-inclusive `consumedAmount`.
-    const consumedById = new Map<string, ConsumedItem>(
-      consumingItems(trips, charges).map((e) => [`${e.kind}:${e.id}`, e]),
-    );
+    // The walk is PRESENTATION: it shows each row's own signed amount
+    // accumulating down the page. The headline is NOT taken from it — that is
+    // the view's balance, passed in.
+    let run = 0;
+    const annotated = ledger.map((e) => {
+      run += e.amount_sar;
+      return { e, running: run };
+    });
+    const entries = annotated.filter(({ e }) => inPeriod(e.created_at.slice(0, 10)));
 
     const columns: StatementColumn[] = [
       { key: "date", label: bi("common.date"), align: "start" },
       { key: "type", label: bi("common.type"), align: "start" },
-      { key: "truck", label: bi("common.truck"), align: "start" },
-      { key: "capacity", label: bi("common.capacity"), align: "start" },
       { key: "ref", label: bi("trips.statement.colRef"), align: "start" },
+      { key: "method", label: bi("trips.finance.colMethod"), align: "start" },
       { key: "note", label: bi("common.note"), align: "start" },
       { key: "amount", label: bi("common.amount"), align: "end" },
       { key: "runningBalance", label: bi("trips.statement.colRunningBalance"), align: "end" },
     ];
 
-    const rows: StatementRow[] = entries.map((e) => {
-      const isTrip = e.kind === "trip";
-      const [truck, capacity] = isTrip ? truckCells(e.id) : [EMPTY, EMPTY];
+    // Entry type -> the row's STYLING kind. Reuses the union the renderers
+    // already switch over exhaustively, so no renderer needs a new arm:
+    //   money in  (topup)                    -> "topup"    (green)
+    //   money back to customer (refund)      -> "return"   (amber)
+    //   money drawn (invoice_draw /
+    //                balance_applied)        -> "charge"   (muted)
+    //   money restored (draw_reversal)       -> "payment"  (green)
+    //   correction                           -> by its sign
+    const kindOf = (e: StatementLedgerEntry): StatementRow["kind"] =>
+      e.entry_type === "topup"
+        ? "topup"
+        : e.entry_type === "refund"
+          ? "return"
+          : e.entry_type === "draw_reversal"
+            ? "payment"
+            : e.entry_type === "correction"
+              ? e.amount_sar > 0
+                ? "payment"
+                : "charge"
+              : "charge";
 
-      // TYPE — four named kinds; the fifth renders the trip's water type.
-      const typeCell: StatementCell =
-        e.kind === "topup"
-          ? { kind: "bi", value: bi("trips.finance.addBalance") }
-          : e.kind === "settlement"
-            ? { kind: "bi", value: bi("trips.statement.typeSettlement") }
-            : e.kind === "return"
-              ? { kind: "bi", value: bi("trips.statement.typeReturn") }
-              : e.kind === "charge"
-                ? { kind: "bi", value: bi("trips.statement.typeCharge") }
-                : waterTypeCell(e.water_type);
+    const typeKeyOf = (e: StatementLedgerEntry): TKey =>
+      e.entry_type === "topup"
+        ? "trips.finance.addBalance"
+        : e.entry_type === "refund"
+          ? "trips.statement.typeReturn"
+          : e.entry_type === "invoice_draw"
+            ? "trips.statement.typeInvoiceDraw"
+            : e.entry_type === "balance_applied"
+              ? "trips.statement.typeBalanceApplied"
+              : e.entry_type === "draw_reversal"
+                ? "trips.statement.typeDrawReversal"
+                : "trips.statement.typeCorrection";
 
-      // REF — a trip links; a top-up/settlement shows its reference; the rest
-      // are blank.
-      const refCell: StatementCell = isTrip
-        ? { kind: "tripRef", value: formatTripRef(e.ref), tripId: e.id }
-        : (e.kind === "topup" || e.kind === "settlement") && e.reference
+    const rows: StatementRow[] = entries.map(({ e, running }) => {
+      // REF — the row's own document number (RCT-… / CN-…), or the invoice it
+      // is linked to. A correction has neither, deliberately: its paper trail
+      // is the corrections table, not a numbered document.
+      const refCell: StatementCell = e.doc_number
+        ? { kind: "text", value: e.doc_number }
+        : e.invoice_number
+          ? { kind: "text", value: e.invoice_number }
+          : EMPTY;
+
+      // METHOD — only rows where money physically changed hands carry one.
+      const methodCell: StatementCell = e.method
+        ? {
+            kind: "bi",
+            value: {
+              en: paymentMethodLabel(e.method as InvoicePaymentMethod, "en"),
+              ar: paymentMethodLabel(e.method as InvoicePaymentMethod, "ar"),
+            },
+          }
+        : EMPTY;
+
+      // NOTE — the row's note, else its bank reference, else blank.
+      const noteCell: StatementCell = e.note
+        ? { kind: "text", value: e.note }
+        : e.reference
           ? { kind: "text", value: e.reference }
           : EMPTY;
 
-      // NOTE — never shown for a top-up (its reference is in the Ref column);
-      // fixed wording for a settlement; the row's own note otherwise.
-      const noteCell: StatementCell =
-        e.kind === "topup"
-          ? EMPTY
-          : e.kind === "settlement"
-            ? { kind: "bi", value: bi("trips.statement.noteBalance") }
-            : e.note
-              ? { kind: "text", value: e.note }
-              : EMPTY;
-
-      // AMOUNT — the sign treatment IS the row's meaning.
-      const consumed = isTrip || e.kind === "charge" ? consumedById.get(`${e.kind}:${e.id}`) : undefined;
-      const amountCell: StatementCell =
-        e.kind === "topup"
-          ? { kind: "num", value: e.amount, sign: "plus", split: null, negative: false }
-          : e.kind === "settlement"
-            ? // Neither a credit nor a debit — no sign, no VAT split. The
-              // document's own total, for the record.
-              { kind: "num", value: e.amount, sign: "none", split: null, negative: false }
-            : e.kind === "return"
-              ? // A real debit — signed, and the running balance moves with it.
-                // No VAT split (see StatementCell's `split` note).
-                { kind: "num", value: Math.abs(e.amount), sign: "minus", split: null, negative: false }
-              : {
-                  kind: "num",
-                  value: Math.abs(e.amount),
-                  sign: "minus",
-                  split: {
-                    net: consumed?.amount ?? 0,
-                    vat: round2((consumed?.consumedAmount ?? 0) - (consumed?.amount ?? 0)),
-                  },
-                  negative: false,
-                };
+      // AMOUNT — the ledger's own sign IS the row's meaning; the cell shows
+      // the magnitude and the sign glyph restates the direction. No VAT split
+      // anywhere: a ledger row is a money movement, not a taxable supply —
+      // the tax lives on the invoice the draw points at.
+      const amountCell: StatementCell = {
+        kind: "num",
+        value: Math.abs(e.amount_sar),
+        sign: e.amount_sar > 0 ? "plus" : "minus",
+        split: null,
+        negative: false,
+      };
 
       return {
-        key: `${e.kind}-${e.id}`,
-        kind: e.kind,
+        key: `ledger-${e.id}`,
+        kind: kindOf(e),
         cells: [
-          { kind: "date", value: e.date },
-          typeCell,
-          truck,
-          capacity,
+          { kind: "date", value: e.created_at.slice(0, 10) },
+          { kind: "bi", value: bi(typeKeyOf(e)) },
           refCell,
+          methodCell,
           noteCell,
           amountCell,
-          { kind: "num", value: e.runningBalance, sign: "none", split: null, negative: e.runningBalance < 0 },
+          { kind: "num", value: running, sign: "none", split: null, negative: running < 0 },
         ],
       };
     });
@@ -428,9 +480,12 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
     return {
       ...common,
       headline: {
-        label: bi("trips.statement.footRunningBalance"),
-        value: balance,
-        negative: balance < 0,
+        // THE VIEW'S FIGURE, passed through — v_customer_ledger_balance. The
+        // walk above agrees with it by construction (same rows, same signs),
+        // but the view is the authority.
+        label: bi("trips.statement.footBalance"),
+        value: input.balance,
+        negative: input.balance < 0,
       },
       columns,
       rows,
@@ -438,6 +493,14 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
         rows.length > 0
           ? null
           : bi(hasPeriodFilter ? "trips.statement.emptyPeriod" : "trips.statement.emptyPrepaid"),
+      uninvoicedFooter:
+        input.uninvoicedCount > 0 || input.uninvoicedSar !== 0
+          ? {
+              template: bi("trips.statement.footUninvoiced"),
+              count: input.uninvoicedCount,
+              amount: input.uninvoicedSar,
+            }
+          : null,
     };
   }
 
@@ -543,5 +606,8 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
     rows,
     emptyLabel:
       rows.length > 0 ? null : bi(hasPeriodFilter ? "trips.statement.emptyPeriod" : "trips.statement.emptyPostpaid"),
+    // Postpaid has no prepaid balance to reconcile — the footer is a prepaid
+    // device and its absence here is what keeps this arm byte-identical.
+    uninvoicedFooter: null,
   };
 }

@@ -9900,6 +9900,33 @@ export const dict = {
       // `labels.*` through paymentModeLabel(); NULL is not an enum member and
       // has no entry there, so it is named here.
       modeUnset: { en: "Unset", ar: "غير محدد" },
+      // --- 0203 ledger columns. THREE VIEW FIGURES, one hint each — the
+      // hints state the DEFINITION (what the view computes), because the
+      // difference between the three is the whole point of showing three.
+      colBalance: { en: "Balance", ar: "الرصيد" },
+      colBalanceHint: {
+        en: "Sum of every ledger row: top-ups, invoice draws, refunds and corrections. VAT-inclusive.",
+        ar: "مجموع كل قيود الدفتر: الإضافات وخصومات الفواتير والاستردادات والتصحيحات. شامل VAT.",
+      },
+      colUninvoiced: { en: "Uninvoiced", ar: "غير مفوتر" },
+      colUninvoicedHint: {
+        en: "Delivered work a confirmed invoice has not yet drawn. VAT-inclusive.",
+        ar: "أعمال مسلَّمة لم تخصمها فاتورة معتمدة بعد. شامل VAT.",
+      },
+      colAvailable: { en: "Available", ar: "المتاح" },
+      colAvailableHint: {
+        en: "Balance minus Uninvoiced — the figure a refund is capped by.",
+        ar: "الرصيد ناقص غير المفوتر — الرقم الذي يُحدّ به الاسترداد.",
+      },
+      // The per-row drill-in button AND the modal it opens — one leaf, same
+      // rule as `addBalance` above.
+      ledger: { en: "Ledger", ar: "دفتر الحساب" },
+      // KPI heads for the ledger era. Counts, not sums — the app does no
+      // money arithmetic on 0203 figures, and no view totals across customers.
+      kTopupsMonth: { en: "Top-ups · month", ar: "إضافات الرصيد · الشهر" },
+      kPendingCorrections: { en: "Pending corrections", ar: "تصحيحات معلّقة" },
+      kCorrAwaiting: { en: "awaiting votes", ar: "بانتظار الأصوات" },
+      kCorrNone: { en: "none pending", ar: "لا يوجد معلّق" },
     },
 
     // AddBalanceModal — the history list AND the add form, one popup. The
@@ -9959,6 +9986,70 @@ export const dict = {
         ar: "اختر عميلاً وطريقة دفع، وأدخل مبلغًا موجبًا وتاريخًا.",
       },
       errPhoto: { en: "Could not open photo.", ar: "تعذّر فتح الصورة." },
+      // --- 0203: every top-up is a numbered receipt now. The history table
+      // shows the number; the success view offers the printed sheet.
+      colReceipt: { en: "Receipt", ar: "الإيصال" },
+      successTitle: { en: "Balance added", ar: "تمت إضافة الرصيد" },
+      // `{n}` is the RCT number from the RPC's own returned row — never
+      // composed in the app.
+      successReceipt: { en: "Receipt {n} recorded.", ar: "تم تسجيل الإيصال {n}." },
+      printReceipt: { en: "Print receipt", ar: "طباعة الإيصال" },
+    },
+
+    // CustomerLedgerModal — the 0203 ledger drill-in: stat strip, the rows,
+    // refund and the two-vote correction gate. Table heads reuse `common.*`
+    // and `trips.statement.*` — the modal and the printed statement must name
+    // a column in the same words. RPC errors render VERBATIM (English), like
+    // every other database refusal; only OUR copy translates.
+    ledger: {
+      title: { en: "Ledger — {name}", ar: "دفتر الحساب — {name}" },
+      subtitle: {
+        en: "Every money movement on this customer's prepaid account, oldest first.",
+        ar: "كل حركة مالية على حساب العميل المدفوع مقدمًا، الأقدم أولاً.",
+      },
+      empty: { en: "No ledger entries yet.", ar: "لا توجد قيود بعد." },
+      // Refund — money OUT, capped by Available IN THE RPC. The subtitle says
+      // where the cap lives so a refusal reads as the rule, not a bug.
+      refund: { en: "Refund", ar: "استرداد" },
+      refundSubtitle: {
+        en: "Returns money to the customer from their balance. Capped by Available — the database refuses anything above it.",
+        ar: "يُعيد المال إلى العميل من رصيده. محدود بالمتاح — وترفض قاعدة البيانات أي مبلغ يتجاوزه.",
+      },
+      refunding: { en: "Recording…", ar: "جارٍ التسجيل…" },
+      refundDone: { en: "Credit note {n} recorded.", ar: "تم تسجيل إشعار دائن {n}." },
+      printCreditNote: { en: "Print credit note", ar: "طباعة الإشعار الدائن" },
+      errRefundIncomplete: {
+        en: "Enter a positive amount and pick a method.",
+        ar: "أدخل مبلغًا موجبًا واختر طريقة.",
+      },
+      // Corrections — the 2-vote gate (0203, cloned from the PO gate).
+      proposeCorrection: { en: "Propose correction", ar: "اقتراح تصحيح" },
+      corrSubtitle: {
+        en: "A signed amount with a reason. Nothing lands on the ledger until two other managers approve.",
+        ar: "مبلغ بإشارته مع سبب. لا يُقيَّد شيء في الدفتر حتى يعتمده مديران آخران.",
+      },
+      fCorrAmount: { en: "Amount (SAR, either sign)", ar: "المبلغ (SAR، بأي اتجاه)" },
+      fReason: { en: "Reason", ar: "السبب" },
+      proposing: { en: "Proposing…", ar: "جارٍ الاقتراح…" },
+      corrProposed: {
+        en: "Correction proposed — awaiting two votes.",
+        ar: "تم اقتراح التصحيح — بانتظار صوتين.",
+      },
+      errCorrIncomplete: {
+        en: "Enter a non-zero amount and a reason.",
+        ar: "أدخل مبلغًا غير صفري وسببًا.",
+      },
+      pendingCorrections: { en: "Pending corrections", ar: "تصحيحات معلّقة" },
+      // `{name}` is the proposer's session email, printed as stored.
+      corrProposedBy: { en: "Proposed by {name}", ar: "اقترحه {name}" },
+      corrYouProposed: {
+        en: "You proposed this — two other managers must decide.",
+        ar: "أنت من اقترحه — يقرّره مديران آخران.",
+      },
+      corrYouVoted: { en: "You have voted.", ar: "لقد صوّتّ." },
+      approve: { en: "Approve", ar: "اعتماد" },
+      reject: { en: "Reject", ar: "رفض" },
+      fComment: { en: "Comment (optional)", ar: "تعليق (اختياري)" },
     },
 
     // StatementModal — the per-customer ledger drill-in, both arms.
@@ -10068,6 +10159,54 @@ export const dict = {
       // exactly this about exactly this provider call, and a second pair of
       // strings could only drift from them. Same cross-group reuse as
       // `common.print` above.
+      //
+      // ---- Ledger statement (0203 rebuild) ----
+      // The prepaid Type column names the ledger's own entry kinds. `topup`
+      // reuses `trips.finance.addBalance` and `refund` reuses `typeReturn`
+      // above; these four kinds had no prior label.
+      typeInvoiceDraw: { en: "Invoice draw", ar: "خصم فاتورة" },
+      typeBalanceApplied: { en: "Balance applied", ar: "رصيد مُطبَّق" },
+      typeDrawReversal: { en: "Draw reversed", ar: "خصم مُلغى" },
+      typeCorrection: { en: "Correction", ar: "تصحيح" },
+      // The prepaid headline is the LEDGER Balance — the view's figure, not a
+      // cumulative walk — so it does not say "running". Same trailing-colon
+      // grammar as footRunningBalance/footTotalPayable above.
+      footBalance: { en: "Balance:", ar: "الرصيد:" },
+      // Footer template under the prepaid statement: work delivered but not
+      // yet drawn from the balance, so the reader can reconcile Balance −
+      // this = Available. Count is trips; amount is the view's uninvoiced_sar
+      // (trips + special charges). "SAR" stays Latin — the app's pinned unit.
+      footUninvoiced: {
+        en: "{count} deliveries not yet invoiced — {amount} SAR",
+        ar: "{count} توصيلات لم تُفوتر بعد — {amount} SAR",
+      },
+    },
+
+    // Ledger documents — the printable top-up receipt (RCT-…) and credit note
+    // (CN-…), lib/docvm/ledgerDoc.ts. One group, kind-split keys: the two
+    // sheets share every structural label and differ only in the words that
+    // say which way the money moved.
+    ledgerDoc: {
+      eyebrowTopup: { en: "Top-up receipt", ar: "إيصال إضافة رصيد" },
+      eyebrowRefund: { en: "Credit note", ar: "إشعار دائن" },
+      // Browser-tab/PDF title; {n} is the document number.
+      docTitleTopup: { en: "Top-up receipt {n}", ar: "إيصال إضافة رصيد {n}" },
+      docTitleRefund: { en: "Credit note {n}", ar: "إشعار دائن {n}" },
+      // The masthead figure's caption — the one sum the paper certifies.
+      figReceived: { en: "Amount received", ar: "المبلغ المستلم" },
+      figReturned: { en: "Amount returned", ar: "المبلغ المُعاد" },
+      // The row's created_by (a session email) — who keyed it in, distinct
+      // from the signature line's "Issued by" (who hands the paper over).
+      fRecordedBy: { en: "Recorded by", ar: "سجّله" },
+      // The one fixed sentence stating the direction of the money.
+      topupLine: {
+        en: "Added to the customer's prepaid balance.",
+        ar: "أُضيف إلى رصيد العميل المدفوع مقدمًا.",
+      },
+      refundLine: {
+        en: "Returned to the customer from their prepaid balance.",
+        ar: "أُعيد إلى العميل من رصيده المدفوع مقدمًا.",
+      },
     },
 
     // WaterStationsModal — the only CRUD surface over water_stations.

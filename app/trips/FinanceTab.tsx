@@ -1,24 +1,24 @@
 "use client";
 
-// Finance tab (Trips page) — Commit 1: the prepaid-ledger surface + a
-// productivity shell around it. Home for ALL Finance/Invoice UI going
-// forward (grows commit by commit). Reuses lib/prepaid.ts's v3 engine
-// (derivedBalanceItems + buildStatementItems, trips+charges combined FIFO)
-// and lib/actions/finance.ts (recordTopup) UNCHANGED.
+// Finance tab (Trips page) — home for ALL Finance/Invoice UI.
 //
-// Scope lock (finance-invoice-spec.md v2): PRE-VAT only. No invoices, no PDF,
-// no VAT here — those are later commits. Customers tab is untouched; this is
-// the only place Finance UI lives.
+// PREPAID REBUILD (0203). A prepaid customer's three money figures — Balance,
+// Uninvoiced, Available — are VIEW COLUMNS (v_customer_ledger_balance,
+// v_customer_uninvoiced, v_customer_available) read through
+// lib/customer-ledger.ts and passed in as props. This component does NO money
+// arithmetic for prepaid: no derived balance, no paid-up expression, no sums.
+// The one KPI that used to total money now counts rows instead, because a
+// count is not a figure the ledger owns.
+//
+// lib/prepaid.ts is NOT imported for prepaid figures any more. Its two
+// remaining imports here (round2/VAT_RATE for the display-only Rate column,
+// ConsumingTrip for the POSTPAID statement's itemized trips) predate the
+// ledger and serve surfaces the rebuild leaves untouched.
 //
 // Balance model: payment_mode lives on the PROJECT (1:1 with its customer).
 // Only PREPAID projects run a ledger — postpaid and unset (legacy, pre-0025
-// rows) projects have no top-up/statement actions, just a mode badge.
-//
-// v3: the balance/statement math also draws on every non-void special charge
-// across the customer's invoices (a charge consumes balance the instant it's
-// added — lib/prepaid.ts header) — `specialCharges` prop, fetched
-// customer-wide in app/trips/page.tsx (same void-exclusion rule
-// assembleForCustomerPeriod applies).
+// rows) projects keep their Amount Payable / statement / invoice surfaces
+// exactly as before.
 
 import { useMemo, useState } from "react";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
@@ -28,21 +28,22 @@ import { monthKeyOf } from "@/lib/commission";
 // paymentModeLabel() instead. The MAP ITSELF IS NOT EDITED; it stays the
 // enum's English source of truth in db-types.ts, and the helper keys off the
 // same enum values.
-import { type PaymentMode } from "@/lib/db-types";
-import {
-  derivedBalanceItems,
-  paidUpBalance,
-  round2,
-  VAT_RATE,
-  type BalanceReturnLite,
-  type ConsumingTrip,
-  type ConsumingCharge,
-  type TopupStatementInput,
-} from "@/lib/prepaid";
-import { computeAmountPayable, toConsumingTrip, toConsumingCharge } from "./amountPayable";
+import { type PaymentMode, type CompanySettings } from "@/lib/db-types";
+import { round2, VAT_RATE, type ConsumingTrip } from "@/lib/prepaid";
+import { computeAmountPayable, toConsumingTrip } from "./amountPayable";
 import type { WaterType } from "@/lib/db-types";
-import type { BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
-import AddBalanceModal, { type AddBalanceCustomerOption } from "./AddBalanceModal";
+import type { SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type {
+  CustomerLedgerBalanceRow,
+  CustomerUninvoicedRow,
+  CustomerAvailableRow,
+  LedgerEntryRow,
+  LedgerCorrectionRow,
+  LedgerCorrectionVoteRow,
+} from "@/lib/customer-ledger";
+import type { StatementLedgerEntry } from "@/lib/statementViewModel";
+import AddBalanceModal, { type AddBalanceCustomerOption, type AddBalanceHistoryRow } from "./AddBalanceModal";
+import CustomerLedgerModal from "./CustomerLedgerModal";
 import StatementModal, { type TripMeta } from "./StatementModal";
 import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
 import { useRecordFocus } from "@/lib/useRecordFocus";
@@ -116,15 +117,30 @@ export type FinanceTabProps = {
   customers: CustomerLite[];
   projects: ProjectLite[];
   trips: TripLite[];
+  // LEGACY top-ups (customer_topups) — history display only now. New top-ups
+  // land on customer_ledger via record_topup; these rows predate 0203 and are
+  // merged into the Add Balance history so old proof photos stay reachable.
   topups: TopupRow[];
-  // Recorded refunds of prepaid credit (0139), a DEBIT on the pool since 0142.
-  // Every balance derived below nets them; see lib/prepaid.ts's BALANCE RETURNS
-  // note for why a refund is a debit and not a negative top-up.
-  balanceReturns: BalanceReturnRow[];
   specialCharges: SpecialChargeRow[];
   // Statement rebuild (Batch 3) — paid invoices, customer-tagged, feeding the
   // postpaid statement's Payment rows. See page.tsx's PaidInvoiceRow comment.
   paidInvoices: PaidInvoiceRow[];
+  // ---- Prepaid ledger model (0203) — lib/customer-ledger.ts shapes. -------
+  // Three view figures, the raw ledger rows, and the correction gate's state.
+  ledgerBalances: CustomerLedgerBalanceRow[];
+  ledgerUninvoiced: CustomerUninvoicedRow[];
+  ledgerAvailable: CustomerAvailableRow[];
+  ledgerEntries: LedgerEntryRow[];
+  ledgerCorrections: LedgerCorrectionRow[];
+  ledgerCorrectionVotes: LedgerCorrectionVoteRow[];
+  // COUNT of uninvoiced deliveries per customer (statement footer); the
+  // AMOUNT beside it is always the view's. Record, not Map — RSC boundary.
+  uninvoicedTripCounts: Record<string, number>;
+  // Letterhead for the printable RCT/CN sheets. null prints unheaded sheets.
+  company: CompanySettings | null;
+  // Signed-in email — the correction gate hides vote controls from the
+  // proposer and from anyone who already voted.
+  currentUserEmail: string | null;
 };
 
 type ModeFilter = "all" | "prepaid" | "postpaid";
@@ -134,13 +150,22 @@ export default function FinanceTab({
   projects,
   trips,
   topups,
-  balanceReturns,
   specialCharges,
   paidInvoices,
+  ledgerBalances,
+  ledgerUninvoiced,
+  ledgerAvailable,
+  ledgerEntries,
+  ledgerCorrections,
+  ledgerCorrectionVotes,
+  uninvoicedTripCounts,
+  company,
+  currentUserEmail,
 }: FinanceTabProps) {
   const { lang } = useApp();
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
   const [topupTarget, setTopupTarget] = useState<AddBalanceCustomerOption | null | "global">(null);
+  const [ledgerFor, setLedgerFor] = useState<{ id: string; name: string } | null>(null);
   const [statementFor, setStatementFor] = useState<{ customerId: string; customerName: string } | null>(null);
   const [invoicesFor, setInvoicesFor] = useState<InvoiceCustomer | null>(null);
   const [focusInvoiceId, setFocusInvoiceId] = useState<string | null>(null);
@@ -195,13 +220,52 @@ export default function FinanceTab({
     return m;
   }, [topups]);
 
-  const returnsByCustomer = useMemo(() => {
-    const m = new Map<string, BalanceReturnRow[]>();
-    for (const r of balanceReturns) {
-      (m.get(r.customer_id) ?? m.set(r.customer_id, []).get(r.customer_id)!).push(r);
+  // ---- Ledger lookups (0203) — keyed views + grouped rows. No arithmetic:
+  // every number in these maps is a view column or a stored row, verbatim.
+  const balanceByCustomer = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of ledgerBalances) m.set(r.customer_id, r.balance_sar);
+    return m;
+  }, [ledgerBalances]);
+
+  const uninvByCustomer = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of ledgerUninvoiced) m.set(r.customer_id, r.uninvoiced_sar);
+    return m;
+  }, [ledgerUninvoiced]);
+
+  const availByCustomer = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of ledgerAvailable) m.set(r.customer_id, r.available_sar);
+    return m;
+  }, [ledgerAvailable]);
+
+  // Ledger rows arrive oldest-first per customer (lib/customer-ledger.ts's
+  // order) — grouping preserves that, which is the order a running balance
+  // is walked in.
+  const entriesByCustomer = useMemo(() => {
+    const m = new Map<string, LedgerEntryRow[]>();
+    for (const e of ledgerEntries) {
+      (m.get(e.customer_id) ?? m.set(e.customer_id, []).get(e.customer_id)!).push(e);
     }
     return m;
-  }, [balanceReturns]);
+  }, [ledgerEntries]);
+
+  const correctionsByCustomer = useMemo(() => {
+    const m = new Map<string, LedgerCorrectionRow[]>();
+    for (const c of ledgerCorrections) {
+      (m.get(c.customer_id) ?? m.set(c.customer_id, []).get(c.customer_id)!).push(c);
+    }
+    return m;
+  }, [ledgerCorrections]);
+
+  const votesByCorrection = useMemo(() => {
+    const m = new Map<string, LedgerCorrectionVoteRow[]>();
+    for (const v of ledgerCorrectionVotes) {
+      (m.get(v.correction_id) ?? m.set(v.correction_id, []).get(v.correction_id)!).push(v);
+    }
+    return m;
+  }, [ledgerCorrectionVotes]);
 
   const chargesByCustomer = useMemo(() => {
     const m = new Map<string, SpecialChargeRow[]>();
@@ -236,149 +300,65 @@ export default function FinanceTab({
     return m;
   }, [paidInvoices]);
 
-  // Per-customer row: resolved project, mode, consuming-trips + balance (prepaid only).
-  //
-  // v3.1 — two balances now coexist here, deliberately:
-  //   - `balance` ("Running Balance", Model A) — top-ups minus ALL consumption
-  //     (every delivered/consuming trip + every non-void charge), regardless
-  //     of whether it's been invoiced/paid yet. This is the engine number —
-  //     drives over-balance alerts, the invoice tables' own ledger, etc.
-  //     UNCHANGED by this batch.
-  //   - `paidUp` ("Paid-up balance", RENAMED from "Settled Balance") — top-ups
-  //     minus consumption of ONLY the items sitting on a PAID invoice, minus
-  //     returns. Moves exclusively on Mark Paid.
-  //
-  // THE PAID-UP FIGURE NO LONGER CALLS derivedBalanceItems WITH A FILTERED
-  // SLICE. It calls paidUpBalance() in lib/prepaid — the SAME expression the
-  // invoice popup, the PDF and the print document read through
-  // loadPaidUpBalance(). Two call shapes producing "the same" number is how
-  // this column came to contradict the invoice in the first place; there is now
-  // one expression and four readers of it.
-  //
-  // Identity worth holding on to, and the reason both columns can sit on one
-  // row without either being wrong: paidUp = balance − amountPayable.
+  // Per-customer row. PREPAID figures are the three VIEW COLUMNS looked up by
+  // customer id — nothing here derives, sums or rounds a prepaid number any
+  // more. The `?? 0` fallbacks are lookup defaults, not arithmetic: the views
+  // LEFT JOIN every customer, so a missing key means "customer not in the
+  // fetch", which the page-level error chain already surfaces.
   const rows = useMemo(() => {
     return customers.map((c) => {
       const project = projectByCustomer.get(c.id) ?? null;
       const mode = project?.payment_mode ?? null;
-      let balance: number | null = null;
-      let paidUp: number | null = null;
       let consuming: ConsumingTrip[] = [];
-      let customerTopups: TopupStatementInput[] = [];
-      let customerCharges: ConsumingCharge[] = [];
-      let customerReturns: BalanceReturnLite[] = [];
-      // consuming is built for BOTH prepaid and postpaid — prepaid needs it
-      // for derivedBalanceItems/buildStatementItems; postpaid needs it for
-      // the itemized-trips statement view (no balance, no top-ups involved).
+      // consuming feeds the POSTPAID statement's itemized-trips view (and the
+      // prepaid statement's trip prop pass-through). Display-only here.
       if (project && (mode === "prepaid" || mode === "postpaid")) {
         const projTrips = tripsByProject.get(project.id) ?? [];
         consuming = projTrips.map((t) => toConsumingTrip(t, project.rate_per_trip_sar));
       }
-      if (project && mode === "prepaid") {
-        customerTopups = (topupsByCustomer.get(c.id) ?? []).map((t) => ({
-          id: t.id,
-          amount_sar: t.amount_sar,
-          topup_date: t.topup_date,
-          note: t.note,
-          reference: t.reference,
-        }));
-        // v3: every non-void charge consumes balance too (void charges are
-        // already excluded upstream in page.tsx).
-        customerCharges = (chargesByCustomer.get(c.id) ?? []).map(toConsumingCharge);
-        // Refunds already paid back (0142). A DEBIT, so it nets out of BOTH
-        // balances below — money that has left the business is not credit this
-        // customer can spend, and Running Balance is the figure every downstream
-        // alert, KPI and invoice ledger reads.
-        customerReturns = (returnsByCustomer.get(c.id) ?? []).map((r) => ({
-          id: r.id,
-          amount_sar: r.amount_sar,
-          returned_on: r.returned_on,
-        }));
-        balance = derivedBalanceItems(customerTopups, consuming, customerCharges, undefined, customerReturns);
 
-        // Paid-up balance: the paid-only slice, handed to the shared
-        // expression. `invoiceLocked` (page.tsx) already means "this trip's
-        // invoice is status='paid'"; `paid` (SpecialChargeRow, page.tsx) is the
-        // charge-side equivalent. `delivered_at != null` is restated rather
-        // than assumed — confirm blocks on undelivered trips, so the filter is
-        // a no-op today, but paidUpBalance() sums whatever it is given and
-        // derivedBalanceItems used to apply this filter itself.
-        //
-        // These are the CURRENT (live) figures, so they go through
-        // paidUpBalance, not paidUpBalanceAsOf: this screen holds no `paid_at`
-        // for a special charge (page.tsx's charges query carries only the
-        // invoice's customer_id and status), and the untimestamped item type is
-        // what makes an as-of call impossible to write here by accident.
-        const paidTripItems = (tripsByProject.get(project.id) ?? [])
-          .filter((t) => t.invoiceLocked && t.delivered_at != null)
-          .map((t) => ({ id: t.id, amount_sar: t.rate_sar ?? project.rate_per_trip_sar }));
-        const paidChargeItems = (chargesByCustomer.get(c.id) ?? [])
-          .filter((ch) => ch.paid)
-          .map((ch) => ({ id: ch.id, amount_sar: ch.amount_sar }));
-        // Returns net here too: a refund is cash out of the pool whether or not
-        // the work it once backed has been invoiced, so leaving it out would let
-        // this column keep reporting money the customer no longer holds.
-        paidUp = paidUpBalance({
-          topups: customerTopups,
-          paidItems: [...paidTripItems, ...paidChargeItems],
-          returns: customerReturns,
-        });
-      }
-      // Paid invoices for this customer — read in BOTH modes now. Postpaid
-      // renders them as Payment rows; prepaid renders them as record-only
-      // "Invoice payable" rows that trace the document without touching the
-      // balance (see StatementModal's header / lib/prepaid.ts's settlement
-      // note). Prepaid never mixes cash/bank_transfer Mark-Paid — Batch 1's
-      // "Pay with Balance" sets none of the payment_* fields — which is why
-      // the prepaid row reads paid_at and the invoice number, not the method.
+      // The three ledger figures — prepaid only; null renders as "—".
+      const balance = mode === "prepaid" ? (balanceByCustomer.get(c.id) ?? 0) : null;
+      const uninvoiced = mode === "prepaid" ? (uninvByCustomer.get(c.id) ?? 0) : null;
+      const available = mode === "prepaid" ? (availByCustomer.get(c.id) ?? 0) : null;
+
+      // Paid invoices for this customer — read in BOTH modes. Postpaid renders
+      // them as Payment rows; prepaid as record-only "Invoice payable" rows.
       const customerPaidInvoices = paidInvoicesByCustomer.get(c.id) ?? [];
 
-      // Batch A — "Unsettled Trips": delivered trips not yet on a PAID
-      // invoice. Same notion as the statement's "Total payable" (postpaid)
-      // and the paid-up balance's paid-filter above (invoiceLocked = invoice_id
-      // set AND that invoice's status='paid') — reused here, no new flag.
+      // "Unsettled Trips": delivered trips not yet on a PAID invoice —
+      // unchanged, a count of rows, not a money figure.
       const unsettledTripsCount = project
         ? (tripsByProject.get(project.id) ?? []).filter((t) => t.delivered_at != null && !t.invoiceLocked).length
         : 0;
 
-      // Batch A — "Rate": per-trip price, VAT-inclusive. Same formula the
-      // engine already uses for a consumed trip (lib/prepaid.ts:
-      // round2(rate_sar * (1 + VAT_RATE))) — no new math, just displaying it
-      // ahead of consumption.
+      // "Rate": per-trip price, VAT-inclusive — display of the project's
+      // CURRENT rate, pre-dating the ledger and untouched by it.
       const rateVatInclusive = project ? round2(project.rate_per_trip_sar * (1 + VAT_RATE)) : null;
 
-      // AMOUNT PAYABLE — what this customer still owes us for work already
-      // provided, net of what they have actually paid. The rule (both modes,
-      // the null cases, and the sign convention) lives in ./amountPayable, which
-      // the project Breakdown report also calls, so the column here and the box
-      // there cannot render two different numbers.
-      //
-      // **`balance` IS DELIBERATELY NOT PASSED IN.** It used to be, as a reuse
-      // hatch, back when the prepaid payable WAS the running balance. It is not
-      // any more: a prepaid customer's pool FUNDS delivered work, it does not
-      // SETTLE it, so only Mark Paid moves this figure. `balance` above is a
-      // different number and stays one — it still drives the running-balance
-      // KPI, the over-balance banner, the paid-up balance and the statement. It is
-      // also the Running Balance column beside this one. The two
-      // decoupled on purpose; re-feeding one into the other would undo it.
-      const amountPayable = computeAmountPayable({
-        mode,
-        hasProject: project != null,
-        projectRate: project?.rate_per_trip_sar ?? 0,
-        trips: project ? (tripsByProject.get(project.id) ?? []) : [],
-        charges: chargesByCustomer.get(c.id) ?? [],
-      });
+      // AMOUNT PAYABLE — POSTPAID/UNSET ONLY now. The prepaid cell renders
+      // "—": a prepaid customer's obligations are the ledger's business
+      // (Uninvoiced is the figure that replaced it), and computeAmountPayable
+      // is legacy-derived math the rebuild bans from prepaid surfaces.
+      const amountPayable =
+        mode === "prepaid"
+          ? null
+          : computeAmountPayable({
+              mode,
+              hasProject: project != null,
+              projectRate: project?.rate_per_trip_sar ?? 0,
+              trips: project ? (tripsByProject.get(project.id) ?? []) : [],
+              charges: chargesByCustomer.get(c.id) ?? [],
+            });
 
       return {
         customer: c,
         project,
         mode,
         balance,
-        paidUp,
+        uninvoiced,
+        available,
         consuming,
-        customerTopups,
-        customerReturns,
-        customerCharges,
         customerPaidInvoices,
         unsettledTripsCount,
         rateVatInclusive,
@@ -389,8 +369,9 @@ export default function FinanceTab({
     customers,
     projectByCustomer,
     tripsByProject,
-    topupsByCustomer,
-    returnsByCustomer,
+    balanceByCustomer,
+    uninvByCustomer,
+    availByCustomer,
     chargesByCustomer,
     paidInvoicesByCustomer,
   ]);
@@ -403,26 +384,33 @@ export default function FinanceTab({
     return rows.filter((r) => r.mode !== "prepaid");
   }, [rows, modeFilter]);
 
-  // ---- KPIs --------------------------------------------------------------
+  // ---- KPIs — COUNTS ONLY. The old "total prepaid balance" summed money in
+  // the app, which the rebuild bans: no figure exists that a view does not
+  // publish, and no view totals across customers. Counting rows states a fact
+  // about the data without computing a figure the ledger owns.
   const prepaidRows = useMemo(() => rows.filter((r) => r.mode === "prepaid"), [rows]);
-  const totalPrepaidBalance = useMemo(
-    () => prepaidRows.reduce((s, r) => s + (r.balance ?? 0), 0),
-    [prepaidRows],
-  );
-  const overBalanceRows = useMemo(() => prepaidRows.filter((r) => (r.balance ?? 0) < 0), [prepaidRows]);
+  // Over-balance = AVAILABLE below zero. Available is the refund cap and the
+  // "work already delivered exceeds the money held" signal — the alarm the
+  // old derived running-balance check approximated.
+  const overBalanceRows = useMemo(() => prepaidRows.filter((r) => (r.available ?? 0) < 0), [prepaidRows]);
   const prepaidCount = prepaidRows.length;
   const postpaidCount = rows.filter((r) => r.mode === "postpaid").length;
   const unsetCount = rows.filter((r) => r.project && r.mode === null).length;
 
-  // currentMonthKey(), NOT monthKeyOf(new Date().toISOString()). This is compared
-  // against monthKeyOf(t.topup_date), and topup_date is a DATE column — already a
-  // local calendar month — so the old UTC expression put the two sides on
-  // different clocks and the "this month" top-up total reported LAST month's
-  // figure for the first three hours of the 1st.
+  // Top-ups landed this month — a COUNT of ledger topup rows. monthKeyOf
+  // slices the yyyy-mm off created_at; currentMonthKey() is the local month.
   const monthKey = currentMonthKey();
-  const topupsThisMonth = useMemo(
-    () => topups.filter((t) => monthKeyOf(t.topup_date) === monthKey).reduce((s, t) => s + t.amount_sar, 0),
-    [topups, monthKey],
+  const topupCountThisMonth = useMemo(
+    () =>
+      ledgerEntries.filter((e) => e.entry_type === "topup" && monthKeyOf(e.created_at) === monthKey)
+        .length,
+    [ledgerEntries, monthKey],
+  );
+
+  // The two-vote correction gate's open items, across all customers.
+  const pendingCorrectionCount = useMemo(
+    () => ledgerCorrections.filter((c) => c.status === "pending").length,
+    [ledgerCorrections],
   );
 
   // Prepaid-only customer options for the global top-up picker.
@@ -436,16 +424,64 @@ export default function FinanceTab({
 
   const activeStatementRow = statementFor ? rows.find((r) => r.customer.id === statementFor.customerId) : null;
 
+  // Add Balance history — MERGED: legacy customer_topups rows (pre-0203,
+  // where the old proof photos live) + ledger topup entries (where every new
+  // top-up lands, each carrying its RCT number). Tagged by source so the
+  // photo link calls the right signed-URL action. Newest first, like the old
+  // single-source list.
+  const addBalanceHistory: AddBalanceHistoryRow[] = useMemo(() => {
+    if (!activeTopupCustomer) return [];
+    const legacy: AddBalanceHistoryRow[] = (topupsByCustomer.get(activeTopupCustomer.id) ?? []).map((tp) => ({
+      id: tp.id,
+      amount_sar: tp.amount_sar,
+      topup_date: tp.topup_date,
+      method: tp.method,
+      reference: tp.reference,
+      photo_path: tp.photo_path,
+      source: "legacy",
+      doc_number: null,
+    }));
+    const fromLedger: AddBalanceHistoryRow[] = (entriesByCustomer.get(activeTopupCustomer.id) ?? [])
+      .filter((e) => e.entry_type === "topup")
+      .map((e) => ({
+        id: e.id,
+        amount_sar: e.amount_sar,
+        // created_at is timestamptz; the list shows the calendar day, same
+        // convention as the statement's date column (first 10 chars).
+        topup_date: e.created_at.slice(0, 10),
+        method: e.method === "cash" || e.method === "bank_transfer" ? e.method : null,
+        reference: e.reference,
+        photo_path: e.photo_path,
+        source: "ledger",
+        doc_number: e.doc_number,
+      }));
+    return [...legacy, ...fromLedger].sort((a, b) =>
+      a.topup_date < b.topup_date ? 1 : a.topup_date > b.topup_date ? -1 : 0,
+    );
+  }, [activeTopupCustomer, topupsByCustomer, entriesByCustomer]);
+
+  // Prepaid statement input — the customer's ledger rows mapped to the
+  // view-model's shape, verbatim (signed amounts, doc numbers, the joined
+  // invoice number). Postpaid statements pass [] and never read it.
+  const statementLedger: StatementLedgerEntry[] = useMemo(() => {
+    if (!statementFor || activeStatementRow?.mode !== "prepaid") return [];
+    return (entriesByCustomer.get(statementFor.customerId) ?? []).map((e) => ({
+      id: e.id,
+      entry_type: e.entry_type,
+      amount_sar: e.amount_sar,
+      doc_number: e.doc_number,
+      invoice_number: e.invoice?.invoice_number ?? null,
+      method: e.method,
+      reference: e.reference,
+      note: e.note,
+      created_at: e.created_at,
+    }));
+  }, [statementFor, activeStatementRow, entriesByCustomer]);
+
   return (
     <div>
-      {/* KPI row */}
+      {/* KPI row — counts only (see the KPI comment above). */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <Stat
-          label={t("trips.finance.kRunningBalance", lang)}
-          value={formatSar(totalPrepaidBalance)}
-          tone={totalPrepaidBalance < 0 ? "bad" : "ok"}
-          sub={fill(t(`trips.finance.kPrepaidCustomers.${plural(prepaidCount)}`, lang), { n: prepaidCount })}
-        />
         <Stat
           label={t("trips.finance.kOverBalance", lang)}
           value={overBalanceRows.length}
@@ -461,7 +497,13 @@ export default function FinanceTab({
             (unsetCount > 0 ? fill(t("trips.finance.kByModeUnset", lang), { n: unsetCount }) : "")
           }
         />
-        <Stat label={t("trips.finance.kAddBalanceMonth", lang)} value={formatSar(topupsThisMonth)} tone="ok" />
+        <Stat label={t("trips.finance.kTopupsMonth", lang)} value={topupCountThisMonth} tone="ok" />
+        <Stat
+          label={t("trips.finance.kPendingCorrections", lang)}
+          value={pendingCorrectionCount}
+          tone={pendingCorrectionCount > 0 ? "warn" : "ok"}
+          sub={t(pendingCorrectionCount > 0 ? "trips.finance.kCorrAwaiting" : "trips.finance.kCorrNone", lang)}
+        />
       </div>
 
       {/* Over-balance quick access — only when relevant. */}
@@ -538,21 +580,26 @@ export default function FinanceTab({
                 <TH>{t("trips.finance.colMethod", lang)}</TH>
                 <TH>{t("common.rate", lang)}</TH>
                 <TH>{t("trips.finance.colUnsettledTrips", lang)}</TH>
-                {/* THE PAIR. Paid-up sits first because it is what the row
-                    already showed under its old name; Running Balance lands
-                    immediately beside it, so the number the over-balance banner
-                    names is finally on the row it names. Both carry a `title`
-                    definition for the same reason Amount Payable does — the
-                    difference between them is the whole point of showing two.
-                    Prepaid-only, both cells "—" otherwise. */}
+                {/* THE TRIO (0203). Balance, Uninvoiced, Available — the three
+                    view columns, in the order the identity reads them:
+                    Available = Balance − Uninvoiced (computed IN the view).
+                    Each carries its definition on a `title`, same convention
+                    as Amount Payable's; the hint keys double as the ledger
+                    popup's stat captions so both surfaces define a word the
+                    same way. Prepaid-only; all three cells "—" otherwise. */}
                 <TH>
-                  <span title={t("trips.finance.colPaidUpBalanceHint", lang)}>
-                    {t("trips.invoiceSheet.paidUpBalance", lang)}
+                  <span title={t("trips.finance.colBalanceHint", lang)}>
+                    {t("trips.finance.colBalance", lang)}
                   </span>
                 </TH>
                 <TH>
-                  <span title={t("trips.finance.colRunningBalanceHint", lang)}>
-                    {t("trips.statement.colRunningBalance", lang)}
+                  <span title={t("trips.finance.colUninvoicedHint", lang)}>
+                    {t("trips.finance.colUninvoiced", lang)}
+                  </span>
+                </TH>
+                <TH>
+                  <span title={t("trips.finance.colAvailableHint", lang)}>
+                    {t("trips.finance.colAvailable", lang)}
                   </span>
                 </TH>
                 <TH>
@@ -586,24 +633,35 @@ export default function FinanceTab({
                       <span className="muted">—</span>
                     )}
                   </TD>
+                  {/* Balance — every ledger row summed BY THE VIEW. */}
                   <TD className="tabular-nums">
-                    {r.mode === "prepaid" ? (
-                      <span className={(r.paidUp ?? 0) < 0 ? "text-rose-600 dark:text-rose-400 font-medium" : ""}>
-                        {formatSar(r.paidUp ?? 0)}
+                    {r.balance != null ? (
+                      <span className={r.balance < 0 ? "text-rose-600 dark:text-rose-400 font-medium" : "font-medium"}>
+                        {formatSar(r.balance)}
                       </span>
                     ) : (
                       <span className="muted">—</span>
                     )}
                   </TD>
-                  {/* Running Balance — the spendable pool, and the figure the
-                      over-balance banner above is computed from (`r.balance`,
-                      same field). Negative is the alarm state, so it takes the
-                      stronger red-plus-weight treatment the paid-up cell uses
-                      only as a tint. */}
+                  {/* Uninvoiced — delivered work no confirmed invoice has
+                      drawn yet. Amber when non-zero: money already earned
+                      against the pool, waiting for its document. */}
                   <TD className="tabular-nums">
-                    {r.mode === "prepaid" ? (
-                      <span className={(r.balance ?? 0) < 0 ? "text-rose-600 dark:text-rose-400 font-semibold" : "font-medium"}>
-                        {formatSar(r.balance ?? 0)}
+                    {r.uninvoiced != null ? (
+                      <span className={r.uninvoiced > 0 ? "text-amber-700 dark:text-amber-300" : "muted"}>
+                        {formatSar(r.uninvoiced)}
+                      </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </TD>
+                  {/* Available — the refund cap and the over-balance signal
+                      (the banner above counts this cell below zero). Alarm
+                      state takes the strongest treatment on the row. */}
+                  <TD className="tabular-nums">
+                    {r.available != null ? (
+                      <span className={r.available < 0 ? "text-rose-600 dark:text-rose-400 font-semibold" : "font-medium"}>
+                        {formatSar(r.available)}
                       </span>
                     ) : (
                       <span className="muted">—</span>
@@ -620,6 +678,16 @@ export default function FinanceTab({
                           onClick={() => setTopupTarget({ id: r.customer.id, name: r.customer.name })}
                         >
                           {t("trips.finance.addBalance", lang)}
+                        </Btn>
+                      )}
+                      {/* Ledger — the prepaid drill-in (0203): every row,
+                          running balance, refund + correction gate. */}
+                      {r.mode === "prepaid" && (
+                        <Btn
+                          variant="outline"
+                          onClick={() => setLedgerFor({ id: r.customer.id, name: r.customer.name })}
+                        >
+                          {t("trips.finance.ledger", lang)}
                         </Btn>
                       )}
                       {(r.mode === "prepaid" || r.mode === "postpaid") && (
@@ -658,7 +726,24 @@ export default function FinanceTab({
         onClose={() => setTopupTarget(null)}
         customers={prepaidCustomerOptions}
         fixedCustomer={activeTopupCustomer}
-        history={activeTopupCustomer ? (topupsByCustomer.get(activeTopupCustomer.id) ?? []) : []}
+        history={addBalanceHistory}
+        company={company}
+      />
+
+      {/* Prepaid ledger drill-in (0203) — every row, running balance walk,
+          refund + the two-vote correction gate, RCT/CN reprints. */}
+      <CustomerLedgerModal
+        open={ledgerFor !== null}
+        onClose={() => setLedgerFor(null)}
+        customer={ledgerFor}
+        entries={ledgerFor ? (entriesByCustomer.get(ledgerFor.id) ?? []) : []}
+        balance={ledgerFor ? (balanceByCustomer.get(ledgerFor.id) ?? 0) : 0}
+        uninvoiced={ledgerFor ? (uninvByCustomer.get(ledgerFor.id) ?? 0) : 0}
+        available={ledgerFor ? (availByCustomer.get(ledgerFor.id) ?? 0) : 0}
+        corrections={ledgerFor ? (correctionsByCustomer.get(ledgerFor.id) ?? []) : []}
+        votesByCorrection={votesByCorrection}
+        currentUserEmail={currentUserEmail}
+        company={company}
       />
 
       {/* `projectInitials={activeStatementRow?.project?.initials ?? null}` used
@@ -673,14 +758,14 @@ export default function FinanceTab({
         onClose={() => setStatementFor(null)}
         customerName={statementFor?.customerName ?? ""}
         mode={activeStatementRow?.mode === "postpaid" ? "postpaid" : "prepaid"}
-        topups={activeStatementRow?.customerTopups ?? []}
+        // PREPAID inputs (0203): the customer's ledger rows verbatim, plus the
+        // three view figures passed through — never summed here. Postpaid
+        // passes [] / 0 / 0 / 0; its arm never reads them.
+        ledger={statementLedger}
+        balance={activeStatementRow?.balance ?? 0}
+        uninvoicedCount={statementFor ? (uninvoicedTripCounts[statementFor.customerId] ?? 0) : 0}
+        uninvoicedSar={activeStatementRow?.uninvoiced ?? 0}
         trips={activeStatementRow?.consuming ?? []}
-        charges={activeStatementRow?.customerCharges ?? []}
-        // Refunds of prepaid credit (0142). The statement's closing running
-        // balance must equal derivedBalanceItems() over the same inputs, and
-        // that call now nets returns — so omitting them here would make the
-        // statement close on a figure the Balance column contradicts.
-        returns={activeStatementRow?.customerReturns ?? []}
         projectWaterType={activeStatementRow?.project?.water_type ?? null}
         projectName={activeStatementRow?.project?.name ?? null}
         tripMetaById={tripMetaById}

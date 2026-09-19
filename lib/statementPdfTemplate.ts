@@ -212,6 +212,18 @@ const STATEMENT_CSS = `
      italic ink instead — visible without colour, and it changes no figure. */
   .stmt-table tr.settlement td { font-style: italic; color: var(--ink-soft); }
   .stmt-table tr.settlement td.dt { font-style: normal; }
+
+  /* ---------- the uninvoiced footnote (prepaid, 0203) ----------
+     One line under the table, hairlined off it: delivered work not yet drawn
+     from the balance, so the reader can reconcile the headline Balance minus
+     this against Available. A note ABOUT the figures, not a row of them, so
+     it renders in the sub-caption's voice rather than the table's. */
+  .stmt-uninv { margin-top: 3mm; padding-top: 2mm;
+                border-top: 1px solid var(--rule-faint);
+                font-size: 8.8px; color: var(--ink-soft);
+                break-inside: avoid; }
+  .stmt-uninv .ar { display: block; font-size: 11px; font-weight: 500;
+                    line-height: 1.6; color: var(--ink-soft); }
 `;
 
 // ---------------------------------------------------------------------------
@@ -334,6 +346,24 @@ export function buildStatementHtml(vm: StatementVm): string {
     bl(vm.modeLabel),
   ].filter((s): s is string => s !== null);
 
+  // THE UNINVOICED FOOTNOTE — prepaid only, and only when the VM emitted it.
+  // Count and amount are the VM's pass-throughs (trip count + the view's
+  // uninvoiced_sar); the amount takes this document's two decimals, and the
+  // "SAR" literal is the TEMPLATE's, so nothing is appended here. Filled per
+  // language, blOnce'd like the VAT split, so identical halves print once.
+  const uninvoicedNote = vm.uninvoicedFooter
+    ? `<div class="stmt-uninv">${blOnce({
+        en: fill(vm.uninvoicedFooter.template.en, {
+          count: String(vm.uninvoicedFooter.count),
+          amount: num2(vm.uninvoicedFooter.amount),
+        }),
+        ar: fill(vm.uninvoicedFooter.template.ar, {
+          count: String(vm.uninvoicedFooter.count),
+          amount: num2(vm.uninvoicedFooter.amount),
+        }),
+      })}</div>`
+    : "";
+
   const body = `
 <div class="masthead">
   <div class="wordmark">${bl(vm.title)}</div>
@@ -363,7 +393,8 @@ export function buildStatementHtml(vm: StatementVm): string {
     ${thead}
     ${tbody}
   </table>
-</div>`;
+</div>
+${uninvoicedNote}`;
 
   return plainDocShell({
     // The tab/print title, not a rendered heading — English only, because a

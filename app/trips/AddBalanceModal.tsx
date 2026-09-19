@@ -23,11 +23,22 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Plus, Image as ImageIcon } from "lucide-react";
+import { X, Plus, Printer, Image as ImageIcon } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar, todayKey } from "@/lib/utils";
-import { recordTopup, getTopupProofSignedUrl } from "@/lib/actions/finance";
+import {
+  recordTopup,
+  getTopupProofSignedUrl,
+  getLedgerPhotoSignedUrl,
+  type LedgerDocResult,
+} from "@/lib/actions/finance";
 import { prepareUploadFiles } from "@/lib/upload-image";
+// The printable RCT sheet (0203) — view-model decides the words, docs kit the
+// look, printHtml the iframe. Same trio every other document print uses.
+import { buildLedgerDocVm } from "@/lib/docvm/ledgerDoc";
+import { buildLedgerDocHtml } from "@/lib/docs/ledgerDoc";
+import { printHtml } from "@/lib/printHtml";
+import type { CompanySettings } from "@/lib/db-types";
 import ScrollLock from "@/components/ScrollLock";
 import { useApp } from "@/components/AppShell";
 import { t, fill } from "@/lib/i18n";
@@ -41,16 +52,20 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 
 export type AddBalanceCustomerOption = { id: string; name: string };
 
-// Just enough of FinanceTab's (page.tsx-sourced) TopupRow to render history —
-// kept narrow deliberately, same convention as every other *Lite type here.
+// One history row from EITHER era, tagged by source: "legacy" rows are
+// customer_topups (pre-0203, photos behind getTopupProofSignedUrl, no receipt
+// number); "ledger" rows are customer_ledger topups (photos behind
+// getLedgerPhotoSignedUrl, RCT number in doc_number). FinanceTab merges the
+// two lists — this modal only routes by the tag.
 export type AddBalanceHistoryRow = {
   id: string;
   amount_sar: number;
   topup_date: string;
   method: "cash" | "bank_transfer" | null;
   reference: string | null;
-  // Batch B follow-up — lets the history popup offer a "view photo" link.
   photo_path: string | null;
+  source: "legacy" | "ledger";
+  doc_number: string | null;
 };
 
 export default function AddBalanceModal({
@@ -62,16 +77,23 @@ export default function AddBalanceModal({
   // history to show yet), customer picker shown.
   fixedCustomer,
   history,
+  // Letterhead for the printable receipt. null prints an unheaded sheet
+  // rather than blocking (lib/docvm/ledgerDoc.ts).
+  company,
 }: {
   open: boolean;
   onClose: () => void;
   customers: AddBalanceCustomerOption[];
   fixedCustomer: AddBalanceCustomerOption | null;
   history: AddBalanceHistoryRow[];
+  company: CompanySettings | null;
 }) {
   const router = useRouter();
   const { lang } = useApp();
-  const [view, setView] = useState<"list" | "form">("form");
+  // "done" (new, 0203): the moment record_topup returns, the receipt number
+  // exists — this view says so and offers the print before anything closes.
+  const [view, setView] = useState<"list" | "form" | "done">("form");
+  const [receipt, setReceipt] = useState<LedgerDocResult | null>(null);
 
   const [customerId, setCustomerId] = useState("");
   const [method, setMethod] = useState<"" | "cash" | "bank_transfer">("");
@@ -101,6 +123,7 @@ export default function AddBalanceModal({
     setPhoto(null);
     setPhotoKey((k) => k + 1);
     setError(null);
+    setReceipt(null);
   }, [open, fixedCustomer]);
 
   const canSubmit =
@@ -119,9 +142,14 @@ export default function AddBalanceModal({
   }
 
   // Mirrors InvoiceDetailModal's onViewProof — short-lived signed URL, never
-  // a public link (topup-proofs is a private bucket).
-  async function onViewPhoto(topupId: string) {
-    const r = await getTopupProofSignedUrl(topupId);
+  // a public link (topup-proofs is a private bucket). Routed by the row's
+  // era tag: legacy rows are customer_topups ids, ledger rows are
+  // customer_ledger ids — same bucket, different table naming the file.
+  async function onViewPhoto(row: AddBalanceHistoryRow) {
+    const r =
+      row.source === "ledger"
+        ? await getLedgerPhotoSignedUrl(row.id)
+        : await getTopupProofSignedUrl(row.id);
     if (r.error || !r.data) {
       // `r.error` is the server action's own string and stays ENGLISH — only
       // OUR fallback translates.
@@ -129,6 +157,29 @@ export default function AddBalanceModal({
       return;
     }
     window.open(r.data.url, "_blank", "noopener,noreferrer");
+  }
+
+  // Print the RCT for the top-up that JUST saved (done view only). The VM is
+  // built from record_topup's own return — no re-fetch, no arithmetic; the
+  // signed amount is presented via Math.abs inside the VM builder.
+  function onPrintReceipt() {
+    if (!receipt) return;
+    const name = fixedCustomer?.name ?? customers.find((c) => c.id === customerId)?.name ?? "";
+    const vm = buildLedgerDocVm({
+      lang,
+      generatedAt: new Date(),
+      kind: "topup",
+      docNumber: receipt.docNumber,
+      customerName: name,
+      amountSar: receipt.amountSar,
+      method: receipt.method,
+      reference: receipt.reference,
+      note: receipt.note,
+      createdAt: receipt.createdAt,
+      createdBy: receipt.createdBy,
+      company,
+    });
+    printHtml(buildLedgerDocHtml(vm));
   }
 
   function openForm() {
@@ -167,18 +218,15 @@ export default function AddBalanceModal({
     // on busy with no message — the finally owns the busy flag now.
     try {
       const res = await recordTopup(form);
-      if (res.error) {
-        setError(res.error);
+      if (res.error || !res.data) {
+        setError(res.error ?? t("shared.upload.saveFailedNetwork", lang));
         return;
       }
-      if (fixedCustomer) {
-        // Back to history, not fully closed — mirrors the invoice list
-        // reappearing after a detail action, lets Turki see the new row land.
-        setView("list");
-        router.refresh();
-        return;
-      }
-      close();
+      // The receipt number exists the moment record_topup returns — show it
+      // and offer the print BEFORE anything closes (0203 done view). The
+      // refresh runs now so the history list is current when dismissed.
+      setReceipt(res.data);
+      setView("done");
       router.refresh();
     } catch {
       setError(t("shared.upload.saveFailedNetwork", lang));
@@ -199,9 +247,10 @@ export default function AddBalanceModal({
       <ScrollLock />
       <div
         // TWO WIDTHS, because this shell hosts two different things. The list
-        // view is a five-column history table (Date / Method / ETF Ref. /
-        // Amount / Photo) and gets the app's size:lg width, 1080px, like every
-        // other table-bearing trips popup. The ADD FORM stays narrower — it is a
+        // view is a six-column history table (Date / Receipt / Method / ETF
+        // Ref. / Amount / Photo) and gets the app's size:lg width, 1080px, like
+        // every other table-bearing trips popup. The ADD FORM stays narrower —
+        // it (and the done view) is a
         // single-column stack of single-line fields, and a 1080px-wide date
         // input is harder to fill in, not easier — but not as narrow as the
         // md it used to be, which cramped the amount and ETF-reference rows.
@@ -233,6 +282,7 @@ export default function AddBalanceModal({
                   <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                     <tr>
                       <TH>{t("common.date", lang)}</TH>
+                      <TH>{t("trips.addBalance.colReceipt", lang)}</TH>
                       <TH>{t("trips.finance.colMethod", lang)}</TH>
                       <TH>{t("trips.addBalance.colEtfRef", lang)}</TH>
                       <TH>{t("common.amount", lang)}</TH>
@@ -247,6 +297,11 @@ export default function AddBalanceModal({
                     {history.map((tp) => (
                       <tr key={tp.id}>
                         <TD className="tabular-nums">{tp.topup_date}</TD>
+                        {/* Receipt number: ledger rows carry RCT-…; legacy
+                            customer_topups rows predate numbering — em dash. */}
+                        <TD className="tabular-nums">
+                          {tp.doc_number ?? <span className="muted">—</span>}
+                        </TD>
                         <TD>
                           {tp.method ? paymentMethodLabel(tp.method, lang) : <span className="muted">—</span>}
                         </TD>
@@ -256,7 +311,7 @@ export default function AddBalanceModal({
                           {tp.photo_path ? (
                             <button
                               type="button"
-                              onClick={() => onViewPhoto(tp.id)}
+                              onClick={() => onViewPhoto(tp)}
                               className="inline-flex items-center gap-1 text-brand-600 hover:underline"
                             >
                               <ImageIcon className="h-3.5 w-3.5" /> {t("common.view", lang)}
@@ -271,6 +326,35 @@ export default function AddBalanceModal({
                 </Table>
               </div>
             )}
+          </>
+        ) : view === "done" ? (
+          <>
+            {/* Success view (0203): the receipt number is the whole point of
+                this screen — record_topup returned it, show it BEFORE the
+                modal closes, with the print one tap away. */}
+            <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 mt-3">
+              {t("trips.addBalance.successTitle", lang)}
+            </p>
+            <p className="text-sm mt-2">
+              {fill(t("trips.addBalance.successReceipt", lang), {
+                n: receipt?.docNumber ?? "",
+              })}
+            </p>
+            <p className="text-2xl font-semibold tabular-nums mt-2">
+              {formatSar(receipt?.amountSar ?? 0)}
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-4 mt-4 border-t border-app">
+              <Btn
+                type="button"
+                variant="ghost"
+                onClick={() => (fixedCustomer ? setView("list") : close())}
+              >
+                {t("common.close", lang)}
+              </Btn>
+              <Btn type="button" variant="primary" onClick={onPrintReceipt}>
+                <Printer className="h-4 w-4" /> {t("trips.addBalance.printReceipt", lang)}
+              </Btn>
+            </div>
           </>
         ) : (
           <>

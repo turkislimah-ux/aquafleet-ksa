@@ -1,32 +1,29 @@
 # SESSION HANDOFF
 
 ## State
-- **Uploads CLOSED:** 15mb body; lib/upload-image.ts; all 11 surfaces
-  hardened (compress, gates, try/catch, 300s TTL).
-- **DB at 0202, PROD + TEST.** Migration FILES authoritative. Repo
-  UNLINKED = no `db push`.
-- **IBAN CLOSED (bf3dedd):** driver/staff shape HARD (SA+22, DB), mod-97
-  `ibanChecksumOk` WARNS only; server never calls it (iban-check greps).
-  Company module (lib/bankAccounts.ts): NO checksum. Two rulings, deliberate.
-- **PERMIT DECLARATION CLOSED (77b7fd1):** print-only signature section,
-  every permit, EN+AR (printDeclaration*); no-declaration byte-identical.
-- **Shell guard (282050f):** scripts/repo-root-check.sh (INIT_CWD) gates
-  npm test / test:db (CLAUDE.md §5).
-- **0202 bank export CLOSED:** `lib/bank-transfer.ts` IS the contract (not
-  i18n), CP1256 bytes, frozen money + live routing pair rule, digits fold
-  at row boundary. 45 checks in test:money.
-- **ENABLE/EMIT RULE — all nine report exports.** `resolveCsvRegistration`:
-  nothing to emit = null = disabled button. Never register a raw builder.
-- **Person names locale-aware app-wide (personName / personNameById,
-  lib/i18n.ts). Views untouched.**
-- **Vehicles:** grouping/naming/capacity/tabs live in lib/vehicle-groups,
-  vehicle-types, capacity, fleet-tabs — never re-derive.
-  `v_fleet_state_now` includes operation vehicles ON PURPOSE.
-- **PARKED:** snapshot-drop STEP 2 (`drop-ledger-snapshot-2026-09-16.sql`)
-  — Turki's, SQL Editor. Undo = `schema_migrations_backup_20260916`.
-- **PARKED:** leaked-password protection OFF in Supabase Auth.
-- **CARRIED:** web-design-guidelines + vercel-composition-patterns
-  missing. Use `preview/` + `frontend-design`, say so.
+- **0203 customer_ledger APPLIED prod+test.** Seed run; Available==legacy
+  verified. DB at 0203. Migration FILES authoritative; repo UNLINKED.
+- **PREPAID BATCH 1 BUILT — UNCOMMITTED, awaiting Turki's in-browser pass.**
+  lib/customer-ledger.ts (sole reader of the 3 views) · prepaid Finance tab
+  (FinanceTab + AddBalanceModal receipt/done view + CustomerLedgerModal:
+  ledger w/ running balance, refund, corrections+votes) · RCT/CN print via
+  lib/docvm/ledgerDoc + lib/docs/ledgerDoc · statement rebuilt on ledger ·
+  doc-render-ledger.ts corpus (8 sheets pinned) · scripts/db/ledger-check.ts
+  in test:db. npm test + test:db GREEN.
+- **0203 fallout fixed in harnesses:** customers.payment_mode NOT NULL →
+  3 seeds updated; R8 INVERTED (paid invoices now void directly, by design);
+  R9 raise text updated.
+- **DEVIATION:** archive returnCustomerBalance NOT switched to record_refund
+  — legacy surface, Batch 2–3. Nothing new reads v_customer_prepaid_balance.
+- **NEXT:** Turki verifies checklist → commit Batch 1 → Batch 2–3 (legacy
+  surfaces onto ledger) → 0204 drops old views/tables + projects.payment_mode.
+- **IBAN CLOSED (bf3dedd):** driver/staff SA+22 HARD; mod-97 WARNS only.
+- **0202 bank export CLOSED:** lib/bank-transfer.ts IS the contract.
+- **Person names locale-aware app-wide (personName*). Views untouched.**
+- **Vehicles:** lib/vehicle-groups/-types/capacity/fleet-tabs — never re-derive.
+- **PARKED:** snapshot-drop STEP 2 (Turki, SQL Editor); leaked-password
+  protection OFF in Supabase Auth.
+- **CARRIED:** web-design-guidelines + vercel-composition-patterns missing.
 
 ## Rules
 - CLAUDE.md = rules. Read it, NEVER append.

@@ -442,9 +442,9 @@ async function main(): Promise<void> {
     ): Promise<string> {
       const customer = (
         await c.query(
-          `insert into public.customers (name, customer_type, archived_at)
-           values ($1, 'construction', $2) returning id`,
-          [`DBCHK INV ${tag}`, opts.archived ? new Date().toISOString() : null],
+          `insert into public.customers (name, customer_type, archived_at, payment_mode)
+           values ($1, 'construction', $2, $3) returning id`,
+          [`DBCHK INV ${tag}`, opts.archived ? new Date().toISOString() : null, mode],
         )
       ).rows[0].id;
       const project = (

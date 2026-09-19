@@ -1,10 +1,10 @@
 "use client";
 
-// Transaction-statement drill-in (Finance tab). ITEMIZED per-trip detail —
-// every trip, distinct from the invoice's grouped summary ranges (see
-// lib/invoiceDisplay.ts). Two modes:
-//   - prepaid: bank-statement-style chronological ledger — top-up credits +
-//     delivered-trip/special-charge VAT-inclusive debits, running balance.
+// Transaction-statement drill-in (Finance tab). Two modes:
+//   - prepaid: the customer_ledger's own rows (0203), verbatim, with a running
+//     balance walked down them — top-ups, invoice draws, refunds, corrections.
+//     The headline Balance is v_customer_ledger_balance's figure passed
+//     through, and the footer notes what is delivered but not yet invoiced.
 //   - postpaid: itemized delivered trips + Payment rows (paid invoices) — no
 //     balance/ledger concept (spec §8/§10: postpaid has no prepaid balance).
 //
@@ -59,12 +59,13 @@ import { createPortal } from "react-dom";
 import { X, Printer, Download } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar, formatNum } from "@/lib/utils";
-import type { BalanceReturnLite, ConsumingTrip, ConsumingCharge, TopupStatementInput } from "@/lib/prepaid";
+import type { ConsumingTrip } from "@/lib/prepaid";
 import { type WaterType } from "@/lib/db-types";
 import {
   buildStatementVm,
   type StatementCell,
   type StatementColumnKey,
+  type StatementLedgerEntry,
   type StatementPaymentInput,
   type StatementRow,
   type StatementTripMeta,
@@ -146,6 +147,10 @@ function tdCls(colKey: StatementColumnKey): string {
     case "truck":
     case "capacity":
       return "muted";
+    // The prepaid ledger's Method column — a short enum label (Cash / Bank
+    // transfer), secondary to the figures the way Truck/Capacity are.
+    case "method":
+      return "muted";
     case "amount":
       return "tabular-nums";
     case "vat":
@@ -184,10 +189,11 @@ export default function StatementModal({
   onClose,
   customerName,
   mode,
-  topups,
+  ledger,
+  balance,
+  uninvoicedCount,
+  uninvoicedSar,
   trips,
-  charges,
-  returns,
   projectWaterType,
   projectName,
   tripMetaById,
@@ -197,15 +203,16 @@ export default function StatementModal({
   onClose: () => void;
   customerName: string;
   mode: "prepaid" | "postpaid";
-  topups: TopupStatementInput[];
+  // PREPAID INPUTS — the 0203 ledger, verbatim. The rows come straight from
+  // customer_ledger (lib/customer-ledger.ts is the only reader); `balance` and
+  // the two uninvoiced figures are VIEW COLUMNS passed through, never summed
+  // here or in the view-model. Postpaid callers pass [] / 0 / 0 / 0 — the
+  // postpaid arm never reads them.
+  ledger: StatementLedgerEntry[];
+  balance: number;
+  uninvoicedCount: number;
+  uninvoicedSar: number;
   trips: ConsumingTrip[];
-  // v3 — prepaid only. Always [] for postpaid (no coverage/balance concept).
-  charges: ConsumingCharge[];
-  // Recorded refunds of prepaid credit (0142) — prepaid only, and defaulted so
-  // the postpaid caller and any future one read unchanged. These are DEBITS in
-  // the engine, so the closing running balance below only agrees with the
-  // Finance tab's Balance column while they are threaded through.
-  returns?: BalanceReturnLite[];
   // Display-only fallback (Finance polish batch C) — project's CURRENT
   // water_type, used when an entry/trip's own water_type is null (pre-
   // water_type-field data). Never mutates any stored record.
@@ -270,10 +277,11 @@ export default function StatementModal({
     customerName,
     projectName: projectName ?? null,
     mode,
-    topups,
+    ledger,
+    balance,
+    uninvoicedCount,
+    uninvoicedSar,
     trips,
-    charges,
-    returns: returns ?? [],
     payments,
     tripMetaById,
     projectWaterType: projectWaterType ?? null,
@@ -320,10 +328,11 @@ export default function StatementModal({
       customerName,
       projectName: projectName ?? null,
       mode,
-      topups,
+      ledger,
+      balance,
+      uninvoicedCount,
+      uninvoicedSar,
       trips,
-      charges,
-      returns: returns ?? [],
       payments,
       tripMeta: Array.from(tripMetaById, ([tripId, m]) => ({ tripId, ...m })),
       projectWaterType: projectWaterType ?? null,
@@ -544,6 +553,20 @@ export default function StatementModal({
             >
               {formatSar(vm.headline.value)}
             </span>
+            {/* Delivered-but-uninvoiced footnote — prepaid only, and only when
+                there IS something uninvoiced (the VM decides both). Count and
+                amount are the VM's pass-throughs (trip count + the view's
+                uninvoiced_sar); this line is what lets a reader reconcile
+                Balance − this = Available. The template carries its own "SAR"
+                literal, so the amount is formatNum, not formatSar. */}
+            {vm.uninvoicedFooter && (
+              <span className="block text-xs muted mt-1">
+                {fill(vm.uninvoicedFooter.template[lang], {
+                  count: formatNum(vm.uninvoicedFooter.count),
+                  amount: formatNum(vm.uninvoicedFooter.amount, 2),
+                })}
+              </span>
+            )}
           </div>
           <Btn variant="outline" onClick={onClose}>
             {t("common.close", lang)}

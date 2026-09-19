@@ -53,7 +53,8 @@
 //   case 4  unpay round trip          prepaid pool identical at all three points
 //   case 5  void (prepaid)            trips released; pool rises by the charge gross
 //   case 6  void (postpaid)           trips released; payable unchanged
-//   R1..R9  every refusal the three RPCs encode
+//   R1..R7b, R9  every refusal the three RPCs encode
+//   R8      the 0203 INVERSION — a paid invoice now voids directly
 //   R10-12  anon denied on all three (CLAUDE.md section 6)
 //
 // NO ROWS SURVIVE. Same shape as pass 1: one transaction ending in ROLLBACK,
@@ -296,9 +297,9 @@ async function main(): Promise<void> {
     ): Promise<{ customer: string; project: string; trips: string[]; invoice: string }> {
       const customer = (
         await c.query(
-          `insert into public.customers (name, customer_type)
-           values ($1, 'construction') returning id`,
-          [`DBCHK LIFECYCLE ${tag}`],
+          `insert into public.customers (name, customer_type, payment_mode)
+           values ($1, 'construction', $2) returning id`,
+          [`DBCHK LIFECYCLE ${tag}`, mode],
         )
       ).rows[0].id;
 
@@ -638,17 +639,25 @@ async function main(): Promise<void> {
       }
     });
 
-    // The lifecycle rule 0182's hint states: unpay first, then void.
-    await scenario("R8 void — a PAID invoice (must unpay first)", async () => {
+    // 0203 REWORKED VOID and this case is the old rule's INVERSION, not its
+    // deletion. 0182's "unpay first, then void" gate is dead: void_invoice now
+    // accepts status in ('confirmed','paid') — a paid invoice voids directly,
+    // releases its trips, and (for prepaid) writes paired draw_reversal rows.
+    // So the assertion flips: the void must SUCCEED and put the postpaid debt
+    // back on the books. If someone restores the old refusal, this fails.
+    await scenario("R8 void — a PAID invoice (0203: voids directly)", async () => {
       const paid = await rpc(PAY_SQL, [Q.invoice, "cash", null, "REF", PERIOD_END, null]);
       ok("R8 — the invoice really is paid before the void attempt", paid.err === null);
+      check("R8 — payable settled by the payment", await payable(Q.customer), 0);
       const r = await rpc(VOID_SQL, [Q.invoice, "DBCHK"]);
-      ok("R8 — void REFUSED on a paid invoice", r.err !== null);
+      ok("R8 — void ACCEPTED on a paid invoice (0203 rework)", r.err === null);
       if (r.err) {
-        ok("R8 — refused for the RIGHT reason", r.err.message.includes("not in confirmed status"));
         console.log(`          db said: ${r.err.message.split("\n")[0]}`);
+        return;
       }
-      check("R8 — the invoice is still 'paid', not half-voided", await invStatus(Q.invoice), "paid");
+      check("R8 — the invoice is 'void'", await invStatus(Q.invoice), "void");
+      check("R8 — trips released", await reservedCount(Q.invoice), 0);
+      check("R8 — the debt is back on the books", await payable(Q.customer), PAYABLE_BASE);
     });
 
     await scenario("R9 void — an ALREADY-VOID invoice", async () => {
@@ -657,7 +666,7 @@ async function main(): Promise<void> {
       const second = await rpc(VOID_SQL, [Q.invoice, "DBCHK"]);
       ok("R9 — the second void REFUSED", second.err !== null);
       if (second.err) {
-        ok("R9 — refused for the RIGHT reason", second.err.message.includes("not in confirmed status"));
+        ok("R9 — refused for the RIGHT reason", second.err.message.includes("not in confirmed or paid status"));
         console.log(`          db said: ${second.err.message.split("\n")[0]}`);
       }
     });
