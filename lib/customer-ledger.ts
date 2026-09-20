@@ -72,6 +72,48 @@ export type LedgerEntryRow = {
   invoice: { invoice_number: string | null } | null;
 };
 
+// PER-INVOICE SETTLEMENT — v_invoice_settlement, the ONE place the app may ask
+// "how much of this invoice is still outstanding". Never derive it from
+// invoices.status, payment_method or paid_at: those three are display-only
+// history since 0203 and a partially-paid invoice still reads `confirmed` with
+// a null payment_method.
+//
+// `payable_sar` is NULL in exactly two cases, and they mean different things:
+//   - a DRAFT/REVIEW invoice: nothing has been confirmed, so no draw has
+//     happened and no payable has been frozen.
+//   - a LEGACY invoice confirmed before 0203: it was settled under the old
+//     model and must stay on the old flow.
+// `remainder_sar` is NULL alongside it. A caller that needs to tell the two
+// apart tests the invoice's status, not this row.
+export type InvoiceSettlementRow = {
+  invoice_id: string;
+  customer_id: string;
+  invoice_number: string | null;
+  status: string;
+  payable_sar: number | null;
+  paid_sar: number;
+  applied_sar: number;
+  written_off_sar: number;
+  remainder_sar: number | null;
+};
+
+// One recorded payment against one invoice. APPEND-ONLY by grant: authenticated
+// holds SELECT and nothing else, so these rows arrive through
+// record_invoice_payment() and are never edited or deleted — voiding an invoice
+// reverses the ledger and leaves its payments standing.
+export type InvoicePaymentRow = {
+  id: string;
+  invoice_id: string;
+  amount_sar: number;
+  method: "cash" | "bank_transfer";
+  reference: string | null;
+  proof_path: string | null;
+  paid_on: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
 export type LedgerCorrectionStatus = "pending" | "approved" | "rejected";
 
 export type LedgerCorrectionRow = {
@@ -125,6 +167,17 @@ export async function fetchAvailable(supabase: Db) {
     .returns<CustomerAvailableRow[]>();
 }
 
+// ONE customer's Available. Same view, same column, filtered — for the
+// surfaces that already know whose money they are looking at (an invoice
+// popup, a trip form) and must not pull every customer to find one row.
+export async function fetchCustomerAvailable(supabase: Db, customerId: string) {
+  return supabase
+    .from("v_customer_available")
+    .select("customer_id, customer_name, balance_sar, uninvoiced_sar, available_sar")
+    .eq("customer_id", customerId)
+    .maybeSingle<CustomerAvailableRow>();
+}
+
 // Full ledger, all customers, oldest-first inside each customer — the order a
 // running balance is presented in. Running balance itself is presentation
 // (cumulative display of amount_sar down the rows), never persisted and never
@@ -138,6 +191,29 @@ export async function fetchLedgerEntries(supabase: Db) {
     .order("customer_id")
     .order("created_at", { ascending: true })
     .returns<LedgerEntryRow[]>();
+}
+
+// ONE invoice's settlement. Single-row read by id — the invoice detail is the
+// only surface that needs it, and it already knows which invoice it is.
+export async function fetchInvoiceSettlement(supabase: Db, invoiceId: string) {
+  return supabase
+    .from("v_invoice_settlement")
+    .select(
+      "invoice_id, customer_id, invoice_number, status, payable_sar, paid_sar, applied_sar, written_off_sar, remainder_sar",
+    )
+    .eq("invoice_id", invoiceId)
+    .maybeSingle<InvoiceSettlementRow>();
+}
+
+// Payment history for ONE invoice, oldest-first — the order money arrived, and
+// the order a reader reconciles it in.
+export async function fetchInvoicePayments(supabase: Db, invoiceId: string) {
+  return supabase
+    .from("invoice_payments")
+    .select("id, invoice_id, amount_sar, method, reference, proof_path, paid_on, note, created_by, created_at")
+    .eq("invoice_id", invoiceId)
+    .order("created_at", { ascending: true })
+    .returns<InvoicePaymentRow[]>();
 }
 
 export async function fetchLedgerCorrections(supabase: Db) {

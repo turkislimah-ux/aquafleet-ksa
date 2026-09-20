@@ -293,6 +293,13 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
 // Special charges. Six columns — the sheet's seven minus its actions column,
 // which holds internal-only attach/delete controls that are `no-print` there
 // and have no meaning on a customer's document.
+// The Status column is present or absent as one unit — header cell, body cell
+// and the foot's colspan arithmetic. A ledger-era document has no coverage
+// verdict to print (see VmChargesSection.showStatus), and dropping the cells
+// while leaving `colspan="4"`/`colspan="2"` behind would make the foot span six
+// columns across a five-column table: every browser resolves that by inventing
+// a sixth, so the table would silently grow a blank column. The two colspans
+// move together with the column.
 function chargesSection(s: VmChargesSection, labels: InvoiceVm["labels"]): string {
   const body = s.rows
     .map(
@@ -303,7 +310,7 @@ function chargesSection(s: VmChargesSection, labels: InvoiceVm["labels"]): strin
         <td class="num">${numPlain(r.quantity)}</td>
         <td class="num">${num2(r.price)}</td>
         <td class="num">${num2(r.amount)}</td>
-        <td><span class="pill ${r.covered ? "on" : "off"}">${bl(r.statusLabel, "ar inline")}</span></td>
+        ${s.showStatus ? `<td><span class="pill ${r.covered ? "on" : "off"}">${bl(r.statusLabel, "ar inline")}</span></td>` : ""}
       </tr>`,
     )
     .join("");
@@ -318,14 +325,14 @@ function chargesSection(s: VmChargesSection, labels: InvoiceVm["labels"]): strin
           <th class="num" style="width:15mm">${bl(labels.colQuantity)}</th>
           <th class="num" style="width:23mm">${bl(labels.colPrice)}</th>
           <th class="num" style="width:25mm">${bl(labels.colAmount)} <span class="cur-tag">(${esc(labels.currency.en)})</span></th>
-          <th style="width:28mm">${bl(labels.colStatus)}</th>
+          ${s.showStatus ? `<th style="width:28mm">${bl(labels.colStatus)}</th>` : ""}
         </tr>
       </thead>
       <tbody>${body}</tbody>
       <tfoot>
         <tr class="grand">
           <td colspan="4" class="lbl">${bl(fillBi(labels.chargesSubtotal, { net: num2(s.preVat), vat: num2(s.vat) }), "ar inline")}</td>
-          <td class="num" colspan="2">${num2(s.total)}</td>
+          <td class="num" colspan="${s.showStatus ? 2 : 1}">${num2(s.total)}</td>
         </tr>
       </tfoot>
     </table>
@@ -387,16 +394,16 @@ export async function buildInvoicePdfHtml(data: PdfInvoiceData): Promise<string>
   // Amount Due figure are the same conversation, and printing them as two
   // competing dark blocks made the document ask the reader which number to pay.
   //
-  // Prepaid: the stack's rows and TOTAL are the document's value, and Amount
-  // Due — what is actually collectible after the prepaid pool — is the hero
-  // figure. Postpaid (and prepaid with the hide toggle on): there is no
-  // separate due figure, so TOTAL itself is the hero. `vm.amountDue` is null in
-  // exactly those two cases, so this branch needs no status or mode test.
+  // The card reads top to bottom: subtotal rows → Total VAT → [Grand Total] →
+  // [settlement pair] → the hero. Ledger-era prepaid carries Prepaid Applied
+  // and Amount Payable in the settlement slot and heroes the payable; legacy
+  // prepaid heroes Amount Due; postpaid (and anything with the toggle on)
+  // heroes TOTAL itself. WHICH of those it is was decided once, in the view
+  // model — this renderer reads `vm.hero` and never re-derives it. Three
+  // surfaces each writing their own `vm.amountDue ? … : …` is how they drifted.
   const stackRows = vm.totals.rows
     .map((r) => `<div class="r0"><span>${bl(r.label, "ar inline")}</span><b>${num2(r.amount)}</b></div>`)
     .join("");
-  const heroLabel = vm.amountDue ? L.amountDue : L.grandTotal;
-  const heroAmount = vm.amountDue ? vm.amountDue.totals.total : vm.totals.total;
 
   return `<!doctype html>
 <html lang="en">
@@ -641,6 +648,14 @@ export async function buildInvoicePdfHtml(data: PdfInvoiceData): Promise<string>
                  color: rgba(255,255,255,.85); position: relative; z-index: 1; }
   .duecard .r0 .ar { color: rgba(255,255,255,.84); }
   .duecard .r0 b { font-variant-numeric: tabular-nums; color: #fff; font-weight: 700; white-space: nowrap; }
+  /* The settlement pair (ledger era, prepaid). Set apart from the value rows
+     above it by a hairline and a step of space, because it answers a different
+     question: those rows are what the work cost, these are what was taken off
+     and what is left. Indented one notch so the eye reads them as qualifying
+     the TOTAL rather than continuing the subtotal list. */
+  .duecard .settled { border-top: 1px solid rgba(255,255,255,.16); margin-top: 4px; padding: 3px 0 0 6px; }
+  .duecard .settled .r0 { font-size: 8.4px; color: rgba(255,255,255,.78); }
+  .duecard .settled .r0 b { font-weight: 600; }
   .duecard .sep { border-top: 1px solid rgba(255,255,255,.22); margin: 5px 0 6px; }
   .duecard .lab { font-size: 7.4px; letter-spacing: .16em; text-transform: uppercase; font-weight: 700;
                   color: rgba(255,255,255,.82); position: relative; z-index: 1; }
@@ -776,13 +791,26 @@ export async function buildInvoicePdfHtml(data: PdfInvoiceData): Promise<string>
         // printing it here too put the same number in the card twice, six
         // millimetres apart — which reads as two different figures that happen
         // to match, and invites the customer to look for the difference.
-        vm.amountDue
-          ? `<div class="r0"><span>${bl(L.grandTotal, "ar inline")}</span><b>${num2(vm.totals.total)}</b></div>`
-          : ""
+        vm.heroIsGrandTotal
+          ? ""
+          : `<div class="r0"><span>${bl(L.grandTotal, "ar inline")}</span><b>${num2(vm.totals.total)}</b></div>`
+      }
+      ${
+        // SETTLEMENT (ledger era, prepaid): Prepaid Applied then Amount
+        // Payable, below the Grand Total and above the rule. Empty everywhere
+        // else, so this prints nothing rather than testing the mode.
+        vm.settlementRows.length === 0
+          ? ""
+          : `<div class="settled">${vm.settlementRows
+              .map(
+                (r) =>
+                  `<div class="r0"><span>${bl(r.label, "ar inline")}</span><b dir="ltr">${num2(r.amount)}</b></div>`,
+              )
+              .join("")}</div>`
       }
       <div class="sep"></div>
-      <div class="lab">${esc(heroLabel.en)}<span class="ar" dir="rtl">${esc(heroLabel.ar)}</span></div>
-      <div class="amt" dir="ltr">${num2(heroAmount)}<span class="cur">${esc(L.currency.en)}</span></div>
+      <div class="lab">${esc(vm.hero.label.en)}<span class="ar" dir="rtl">${esc(vm.hero.label.ar)}</span></div>
+      <div class="amt" dir="ltr">${num2(vm.hero.amount)}<span class="cur">${esc(L.currency.en)}</span></div>
     </div>
   </div>
 

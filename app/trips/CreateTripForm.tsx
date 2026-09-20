@@ -8,7 +8,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui";
-import { cn, monthName, riyadhDayKey } from "@/lib/utils";
+import { cn, formatSar, monthName, riyadhDayKey } from "@/lib/utils";
+// THE prepaid gross-up, imported rather than restated — see availNeeded below.
+import { inclVat } from "@/lib/prepaid";
 import {
   type WaterType,
   WATER_TYPE_LABELS,
@@ -29,6 +31,20 @@ type ProjectOption = {
   name: string;
   water_type: WaterType | null;
   default_water_station: string;
+  // ── The two fields the prepaid warning needs, and nothing more ────────────
+  // customer_id is WHOSE money; rate_per_trip_sar prices the estimate. Both
+  // were already on the row the board hands down (ProjectHeader), so this
+  // widening adds no fetch and no prop — it only stops the form throwing away
+  // columns it now reads.
+  //
+  // NO payment_mode HERE, DELIBERATELY. The arrangement is the CUSTOMER's
+  // (0203 moved it to customers.payment_mode, which is the column
+  // confirm_invoice draws on) and the board has already applied it: a project
+  // whose customer is postpaid simply has no entry in availableByCustomer. A
+  // second mode test on the project row would be a second opinion, and after
+  // the next ProjectModal edit it would be the stale one.
+  customer_id: string;
+  rate_per_trip_sar: number;
 };
 type CustomerOption = { id: string; name: string; default_station: string | null };
 type TruckOption = { id: string; plate: string; assigned_driver_id: string | null };
@@ -108,6 +124,7 @@ export default function CreateTripForm({
   driverStateById,
   leavePeriods,
   leaveLoadFailed,
+  availableByCustomer,
 }: {
   projects: ProjectOption[];
   customers: CustomerOption[];
@@ -131,6 +148,11 @@ export default function CreateTripForm({
   onCloseControlled?: () => void;
   // Pre-fill the trip date (the board's selected calendar day). Still editable.
   defaultDate?: string;
+  // customer_id -> v_customer_available.available_sar, straight off the view
+  // (page.tsx -> lib/customer-ledger.ts, the only reader). A customer missing
+  // from this map has no ledger row, which is NOT the same as a zero balance —
+  // see availWarning below, where the absent case warns about nothing.
+  availableByCustomer: Record<string, number>;
 }) {
   const router = useRouter();
   const { lang } = useApp();
@@ -309,6 +331,48 @@ export default function CreateTripForm({
     parsedCount < 1 ||
     parsedCount > MAX_BATCH_TRIPS;
   const missingDriver = driverId === null;
+
+  // PREPAID AVAILABLE WARNING — WARNS, NEVER BLOCKS.
+  //
+  // It is computed beside blockedReason and feeds NOTHING that blockedReason
+  // feeds. That adjacency is the point: the next reader will see one derived
+  // value that gates the Create button and one that does not, and the reason
+  // they differ is written here rather than inferred from a missing `||`.
+  //
+  // Four ways this stays silent, all of them deliberate:
+  //   - kind !== "project": a direct-customer trip has no project, so no
+  //     payment_mode and no rate. There is nothing to warn ABOUT, not merely
+  //     nothing to warn WITH.
+  //   - the customer is postpaid: a postpaid customer has no pool to be short
+  //     of. This form does NOT re-test the mode, and must not: the board built
+  //     availableByCustomer from customers.payment_mode — the same column
+  //     confirm_invoice draws on — and dropped every postpaid customer while
+  //     building it. A postpaid customer is therefore ABSENT from the map, and
+  //     absent is already the silent case below. Two places testing the mode
+  //     are two places that can disagree after a ProjectModal edit.
+  //   - the customer has no v_customer_available row: never topped up, never
+  //     drawn. Treating a missing row as 0.00 would light this warning on
+  //     every first trip of every new prepaid customer, which trains the
+  //     operator to ignore it before it ever means anything.
+  //   - countInvalid: the batch is the multiplier. An unparseable batch would
+  //     make the estimate a fiction, and a fictional figure in an amber box is
+  //     worse than no box.
+  //
+  // The comparison is `available < needed`, strictly. Exactly enough money is
+  // not short.
+  const availProject = kind === "project" ? (projects.find((p) => p.id === projectId) ?? null) : null;
+  const availSar = availProject ? (availableByCustomer[availProject.customer_id] ?? null) : null;
+  // inclVat() is IMPORTED, never re-expressed. A trip consumes
+  // round2(rate_sar * (1 + VAT_RATE)) off the prepaid pool — one expression in
+  // lib/prepaid.ts serves the statement, the coverage walk and now this — so a
+  // hand-rolled `* 1.15` here would be a second opinion that disagrees in
+  // halalas on exactly the trips where the warning matters most. The batch
+  // multiplies an ALREADY-ROUNDED per-trip figure, which is what actually
+  // happens: N trips each draw their own rounded amount, so there is no second
+  // rounding to do.
+  const availNeeded =
+    availSar !== null && !countInvalid ? inclVat(availProject!.rate_per_trip_sar) * parsedCount : null;
+  const availShort = availSar !== null && availNeeded !== null && availSar < availNeeded;
   // Gates the Create button. Deliberately NOT a per-field disable: the fields
   // themselves stay editable so the user can always reach the state that unblocks.
   const blockedReason = countInvalid
@@ -555,6 +619,32 @@ export default function CreateTripForm({
                   {t("trips.newTrip.batchHint", lang)}
                 </span>
               </label>
+
+              {/* PREPAID SHORTFALL — amber, full width, and directly under the
+                  batch field it is priced from, so changing the count moves the
+                  figure the operator is reading. Amber, not rose: rose is this
+                  form's refusal colour (the error line below and the asterisks
+                  above), and a warning wearing the refusal colour is read as a
+                  refusal. The Create button below is untouched. */}
+              {availShort && (
+                <div
+                  className="sm:col-span-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2"
+                  role="status"
+                >
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                    {t("trips.newTrip.availShortTitle", lang)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-amber-800/90 dark:text-amber-200/90">
+                    {fill(t("trips.newTrip.availShort", lang), {
+                      customer:
+                        customers.find((c) => c.id === availProject!.customer_id)?.name ??
+                        availProject!.name,
+                      available: formatSar(availSar as number),
+                      needed: formatSar(availNeeded as number),
+                    })}
+                  </p>
+                </div>
+              )}
 
               {error && (
                 <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{error}</p>

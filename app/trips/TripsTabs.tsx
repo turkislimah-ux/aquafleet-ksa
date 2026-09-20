@@ -27,7 +27,9 @@ import type { CompanySettings } from "@/lib/db-types";
 import type {
   CustomerLedgerBalanceRow,
   CustomerUninvoicedRow,
-  CustomerAvailableRow,
+  // CustomerAvailableRow is NOT imported here any more — ProjectsBoardProps
+  // declares that field, so this file names the type nowhere and re-importing
+  // it would be an unused symbol the compiler refuses (noUnusedLocals).
   LedgerEntryRow,
   LedgerCorrectionRow,
   LedgerCorrectionVoteRow,
@@ -84,7 +86,11 @@ export default function TripsTabs({
   // page.tsx through lib/customer-ledger.ts (the only reader).
   ledgerBalances: CustomerLedgerBalanceRow[];
   ledgerUninvoiced: CustomerUninvoicedRow[];
-  ledgerAvailable: CustomerAvailableRow[];
+  // ledgerAvailable is NOT re-declared here — it belongs to ProjectsBoardProps
+  // now that the board warns on a short prepaid balance, and the intersection
+  // above already carries it. It IS destructured (FinanceTab needs it), which
+  // takes it out of `boardProps`, so the ProjectsBoard call site below hands it
+  // back by name. Two readers, one fetch, one declaration.
   ledgerEntries: LedgerEntryRow[];
   ledgerCorrections: LedgerCorrectionRow[];
   ledgerCorrectionVotes: LedgerCorrectionVoteRow[];
@@ -187,7 +193,7 @@ export default function TripsTabs({
         </p>
       )}
 
-      {tab === "projects" && <ProjectsBoard {...boardProps} />}
+      {tab === "projects" && <ProjectsBoard {...boardProps} ledgerAvailable={ledgerAvailable} />}
 
       {tab === "customers" && (
         <CustomersTab

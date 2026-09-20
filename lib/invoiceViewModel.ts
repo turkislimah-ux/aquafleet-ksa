@@ -106,6 +106,25 @@ export type PdfIdentity = {
 // (confirmed/paid/void, via getInvoice). The caller does the snapshot-vs-live
 // branch; nothing downstream of here knows which it got.
 export type PdfInvoiceData = {
+  /**
+   * WHICH LAW THIS DOCUMENT WAS BUILT UNDER. Decided by the CALLER
+   * (`toPdfInvoiceData`), never inferred here, and never from `status`:
+   *
+   *   "ledger" — 0203 onward. One trips table, no per-line coverage verdict,
+   *              and the prepaid draw reported as the frozen
+   *              `prepaidAppliedSar` / `amountPayableSar` pair below.
+   *   "legacy" — confirmed BEFORE 0203, with `amount_payable_sar` null. Renders
+   *              exactly as it was issued: Covered/Unpaid tables, coverage
+   *              pills, the paid-up balance foot. Freeze law 0027 — an issued
+   *              document is read verbatim, never re-derived under a law that
+   *              did not exist when it was signed.
+   *
+   * A STATUS TEST WOULD BE WRONG TWICE OVER. Draft and review rows carry no
+   * frozen payable at all yet are assembled by today's engine, so they are
+   * "ledger"; and a paid invoice can be either era depending on when it was
+   * confirmed. Only the caller, holding the row, can tell.
+   */
+  era: "ledger" | "legacy";
   status: InvoiceStatus;
   paymentMode: "prepaid" | "postpaid";
   invoiceNumber: string | null;
@@ -141,6 +160,32 @@ export type PdfInvoiceData = {
    * the popup, the download and the printout cannot disagree.
    */
   paidUpBalanceSar: number | null;
+  /**
+   * THE FROZEN DRAW — `invoices.prepaid_applied_sar`, in riyals. What
+   * confirm_invoice() took off the customer's Available balance at the moment
+   * this invoice was confirmed: `min(max(Available, 0), grand_total)`.
+   *
+   * `null` on a draft or review row (nothing is drawn until confirm) and on
+   * every LEGACY row (the column did not exist). 0 is a real answer and means
+   * the customer had nothing available — it is NOT the same as null and must
+   * not be collapsed into one.
+   *
+   * NOT COMPUTED ANYWHERE APP-SIDE, here least of all. The balance moves
+   * between a page load and a confirm; only the RPC, holding the row lock, can
+   * say what was actually taken.
+   */
+  prepaidAppliedSar: number | null;
+  /**
+   * THE FROZEN REMAINDER — `invoices.amount_payable_sar`, in riyals.
+   * `grand_total − prepaid_applied` at confirm. Non-null on EVERY ledger-era
+   * confirmed invoice of either mode: the postpaid arm of confirm_invoice()
+   * writes `applied = 0, payable = grand_total`, which is what lets a postpaid
+   * invoice take partial payments through the same path.
+   *
+   * `null` means "not settled through the ledger" — a draft, or a legacy row.
+   * Both renderers and the settlement panel test THIS, not the status.
+   */
+  amountPayableSar: number | null;
   /**
    * RAW jsonb off the seller row — `company_settings.bank_accounts` for a
    * draft, `seller_snapshot.bank_accounts` for an issued invoice. `unknown`
@@ -242,6 +287,19 @@ export type VmChargesSection = {
   preVat: number;
   vat: number;
   total: number;
+  /**
+   * Whether to print the Status column (the Covered / Rolls-forward pill).
+   * FALSE on every ledger-era document, in both modes: coverage was a per-line
+   * verdict and there is no longer one to print, so the column would carry a
+   * pill whose meaning died with 0203.
+   *
+   * A FLAG RATHER THAN AN ABSENT COLUMN because the renderers' column count is
+   * load-bearing — the table foot's `colspan` has to match — so the decision
+   * has to arrive as data, once, instead of each renderer inferring it from
+   * whether the rows happen to be all-covered. `VmChargeRow.covered` and
+   * `.statusLabel` stay populated for the legacy rows that still print them.
+   */
+  showStatus: boolean;
 };
 
 export type VmSection = VmTripSection | VmChargesSection;
@@ -317,6 +375,42 @@ export type InvoiceVm = {
   totals: { rows: VmTotalRow[]; vat: number; total: number };
   /** null when postpaid (no such card on screen) or when the toggle hides it. */
   amountDue: { totals: PdfTotals } | null;
+  /**
+   * SETTLEMENT, printed between the Grand Total and the hero. Ledger-era
+   * prepaid only — `[]` everywhere else, so a renderer prints the block by
+   * iterating and never by testing the mode.
+   *
+   * ONE row today: Prepaid Applied, NEGATIVE — it is a deduction, and a
+   * deduction printed as a positive under a total reads as an addition. It is
+   * the frozen figure off the invoice row; nothing here subtracts anything.
+   * Amount Payable is deliberately absent — it is the hero directly below, and
+   * printing it twice in one panel reads as two figures that happen to match.
+   * An array, not a single field, because a later settlement fact (a write-off
+   * line, say) joins this slot without touching a renderer.
+   *
+   * Empty when `hideAmountDue` is on: that toggle is how an operator keeps the
+   * customer's balance off the customer's copy, and on a ledger-era invoice
+   * these two rows ARE the balance disclosure. The hero falls back to Grand
+   * Total when they go — see `heroIsGrandTotal`.
+   */
+  settlementRows: VmTotalRow[];
+  /**
+   * THE ONE FIGURE IN THE BIG BOX. Decided here so the sheet, the PDF and the
+   * print cannot each pick a different one — which is exactly what happened
+   * when each renderer wrote `vm.amountDue ? … : …` for itself.
+   *
+   * Ledger-era prepaid with settlement shown → Amount Payable. Everything else
+   * → Grand Total.
+   */
+  hero: { label: BiLabel; amount: number };
+  /**
+   * Whether `hero` IS the Grand Total. When true a renderer must NOT print a
+   * separate Grand Total row above the hero — it would be the same number
+   * twice, which is the bug the old `vm.amountDue ?` conditional existed to
+   * avoid. When false, print the Grand Total row; the hero is a different
+   * figure.
+   */
+  heroIsGrandTotal: boolean;
   // NO top-level balance field, deliberately: the balance belongs to a table
   // foot, so it travels inside `VmTableFoot`'s "ledger" arm and nowhere else.
   /** Labels the renderer needs that are not attached to a section. */
@@ -368,6 +462,8 @@ export type InvoiceVm = {
     totalVat: BiLabel;
     grandTotal: BiLabel;
     amountDue: BiLabel;
+    prepaidApplied: BiLabel;
+    amountPayable: BiLabel;
     noCharges: BiLabel;
     currency: BiLabel;
     qrCaption: BiLabel;
@@ -523,8 +619,78 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
   let totalRows: VmTotalRow[];
   let amountDue: { totals: PdfTotals } | null;
 
-  if (isPrepaid) {
-    // --- PREPAID: Covered trips → Unpaid trips → Special charges ------------
+  // THE THREE BRANCHES, in the order they are tested:
+  //   1. ledger-era prepaid  — one trips table + the settlement pair
+  //   2. LEGACY prepaid      — the pre-0203 document, verbatim (freeze law 0027)
+  //   3. postpaid            — unchanged in both eras; its document never
+  //                            carried a coverage split to lose.
+  const isLedger = data.era === "ledger";
+
+  if (isPrepaid && isLedger) {
+    // --- PREPAID, LEDGER ERA (0203): Trips → Special charges ---------------
+    // ONE trips table, footed like postpaid's. There is no covered/unpaid
+    // boundary to draw a second table around: the draw is a document-level
+    // amount decided at confirm, and it is reported under the totals as
+    // Prepaid Applied / Amount Payable.
+    //
+    // No paid-up balance foot either. That three-row foot (Subtotal / balance /
+    // Remaining) answered "what is left of the pool after this table" — a
+    // question the ledger answers properly on the Finance tab, against the
+    // authoritative view, instead of re-stating a moving figure on a frozen
+    // document. `paidUpBalanceSar` is still carried for the legacy branch
+    // below and is deliberately unread here.
+    const tripLines = data.unpaidLines;
+    const tripT = netAndVat(tripLines);
+
+    sections.push({
+      kind: "trips",
+      title: bi("trips.invoiceSheet.tTrips"),
+      emptyLabel: bi("trips.invoiceSheet.emptyTrips"),
+      rows: toTripRows(groupInvoiceLines(tripLines, wt)),
+      foot: { style: "subtotal", preVat: tripT.preVat, vat: tripT.vat, total: tripT.total },
+    });
+
+    if (data.chargeLines.length > 0) {
+      const c = netAndVat(data.chargeLines);
+      sections.push({
+        kind: "charges",
+        title: bi("trips.invoiceSheet.specialCharges"),
+        rows: toChargeRows(data.chargeLines),
+        preVat: c.preVat,
+        vat: c.vat,
+        total: c.total,
+        // No coverage verdict exists to print. See VmChargesSection.showStatus.
+        showStatus: false,
+      });
+    }
+
+    // The stack rows sum the LINES printed above them, so they cannot disagree
+    // with the tables. Both arms of the old `reconciles` test are gone with the
+    // covered figures they chose between — a ledger-era invoice's grand total
+    // is one pass over exactly these lines, by construction.
+    totalRows = [
+      { label: bi("trips.invoiceSheet.subtotalTrips"), amount: tripT.preVat },
+      {
+        label: bi("trips.invoiceSheet.specialCharges"),
+        amount: round2(data.chargeLines.reduce((s, l) => s + l.amount_sar, 0)),
+      },
+    ];
+
+    // NO Amount Due card. On a ledger-era invoice amountDue IS grand — the
+    // whole document is billable — so the card would print the grand total a
+    // second time under a different name. Same reason postpaid never had one.
+    amountDue = null;
+  } else if (isPrepaid) {
+    // --- PREPAID, LEGACY (pre-0203): Covered → Unpaid → Special charges -----
+    // FROZEN DOCUMENTS ONLY. Nothing assembled today reaches this branch — the
+    // engine stopped producing covered lines, coverage flags and tripTotals at
+    // 0203, so an invoice arrives here only because it was CONFIRMED under the
+    // old law and its caller set era:"legacy". It renders exactly as issued,
+    // including the paid-up balance foot and the coverage pills (0027).
+    //
+    // Do not "simplify" this into the branch above. The two produce different
+    // documents on purpose, and the difference is which law the customer was
+    // billed under.
     // Fallback for a row frozen before migration 0036, which carries no trip-
     // total columns and never will: both figures are still derivable from real
     // frozen document totals. On such a row `amountDue.total` IS the unpaid
@@ -607,6 +773,8 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
         preVat: c.preVat,
         vat: c.vat,
         total: c.total,
+        // As issued: these rows carry real coverage verdicts.
+        showStatus: true,
       });
     }
 
@@ -688,6 +856,12 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
         preVat: chargeT.preVat,
         vat: chargeT.vat,
         total: chargeT.total,
+        // UNCHANGED IN BOTH ERAS. A postpaid charge has never carried a real
+        // coverage verdict — `toChargeRows` defaults it to covered, so the
+        // column prints a uniform pill — but the postpaid document is not what
+        // 0203 changed, and dropping a column from it would be a redesign
+        // smuggled in on a money change. It keeps its look.
+        showStatus: true,
       });
     }
 
@@ -710,10 +884,56 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
   // Printing it on every invoice would have the customer looking for a charge
   // that is not there. Postpaid never rolls anything forward, so this is
   // structurally prepaid-only without needing a mode test.
+  //
+  // `s.showStatus` gates it as well as the verdict does: the sentence explains
+  // a pill, so on a document that prints no pill column it explains nothing.
+  // On a ledger-era invoice nothing rolls forward in the first place — every
+  // charge is billed on the invoice it is bound to — so both halves agree.
   const notes: BiLabel[] = [bi("trips.invoiceSheet.noteVatBasis")];
-  if (sections.some((s) => s.kind === "charges" && s.rows.some((r) => !r.covered))) {
+  if (sections.some((s) => s.kind === "charges" && s.showStatus && s.rows.some((r) => !r.covered))) {
     notes.push(bi("trips.invoiceSheet.noteRollsForward"));
   }
+
+  // --- Settlement + hero ---------------------------------------------------
+  // The applied/payable pair prints only when all four hold:
+  //   ledger era · prepaid · a frozen payable exists · not hidden from customer
+  //
+  // The payable test is what keeps the pair off a DRAFT. A draft has been
+  // assembled but not confirmed, so no draw has happened and there is nothing
+  // honest to print — `prepaidAppliedSar` is null there, and printing 0.00
+  // would tell the customer their balance was checked and found empty.
+  const showSettlement =
+    isLedger &&
+    isPrepaid &&
+    !data.hideAmountDue &&
+    data.amountPayableSar != null &&
+    data.prepaidAppliedSar != null;
+
+  const settlementRows: VmTotalRow[] = showSettlement
+    ? [
+        // NEGATIVE on purpose — it is a deduction sitting under a total, and a
+        // deduction printed positive reads as an addition. The renderers format
+        // the sign; nothing here decides how a minus looks.
+        //
+        // Amount Payable is NOT a row here: it is the hero, immediately below.
+        // Printing it in both places puts the same figure in the panel twice a
+        // few millimetres apart, which reads as two figures that happen to
+        // match and invites the customer to hunt for the difference. The panel
+        // instead carries a chain the reader can do in their head:
+        //   Grand Total − Prepaid Applied = the hero.
+        { label: bi("trips.invoiceSheet.prepaidApplied"), amount: round2(-(data.prepaidAppliedSar ?? 0)) },
+      ]
+    : [];
+
+  // ONE decision, made here, for every surface. `amountDue` survives only for
+  // legacy prepaid documents, which is the one era that still has a due figure
+  // distinct from its grand total.
+  const hero: { label: BiLabel; amount: number } = showSettlement
+    ? { label: bi("trips.invoiceSheet.amountPayable"), amount: data.amountPayableSar ?? 0 }
+    : amountDue
+      ? { label: bi("trips.invoiceSheet.amountDue"), amount: amountDue.totals.total }
+      : { label: bi("trips.invoiceSheet.grandTotal"), amount: data.grand.total };
+  const heroIsGrandTotal = !showSettlement && amountDue == null;
 
   return {
     status: data.status,
@@ -736,6 +956,9 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
     sections,
     totals: { rows: totalRows, vat: data.grand.vat, total: data.grand.total },
     amountDue,
+    settlementRows,
+    hero,
+    heroIsGrandTotal,
     labels: {
       // The ZATCA-mandated document title. Download-only — the sheet's own
       // headline is `Invoice #{n}`, a different string for a different surface,
@@ -774,6 +997,8 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
       totalVat: bi("trips.invoiceSheet.totalVat"),
       grandTotal: bi("trips.invoiceSheet.grandTotal"),
       amountDue: bi("trips.invoiceSheet.amountDue"),
+      prepaidApplied: bi("trips.invoiceSheet.prepaidApplied"),
+      amountPayable: bi("trips.invoiceSheet.amountPayable"),
       noCharges: bi("trips.invoiceSheet.noCharges"),
       // SAR is a currency CODE, not a word — identical in both columns.
       currency: biRaw("SAR"),

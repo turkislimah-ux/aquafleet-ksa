@@ -9472,6 +9472,12 @@ export const dict = {
         en: "Unpaid — Amount Due (trips)",
         ar: "غير مدفوعة — المبلغ المستحق (رحلات)",
       },
+      // LEDGER ERA (0203). A prepaid invoice has ONE trips table now: the draw
+      // against the customer's balance is decided at confirm and reported under
+      // the totals, not by splitting the rows into Covered and Unpaid. The four
+      // titles above each name a settlement state, so none of them can title
+      // this table — it states what the table HOLDS and nothing about payment.
+      tTrips: { en: "Trips", ar: "الرحلات" },
 
       // ── Table columns ────────────────────────────────────────────────────
       // `Date`, `Type`, `Amount` and `Status` come from `common` — same English,
@@ -9600,6 +9606,29 @@ export const dict = {
       // The stack's final row. Uppercase in English, so not `common.total`.
       grandTotal: { en: "TOTAL", ar: "الإجمالي" },
 
+      // ── Settlement, LEDGER ERA (0203) ────────────────────────────────────
+      // The two rows a prepaid invoice prints BELOW its Grand Total, both
+      // frozen at confirm by confirm_invoice(): the draw taken against the
+      // customer's Available balance, and what is left to collect. Postpaid
+      // prints neither — its payable IS its total, and a second row saying so
+      // is the same figure twice.
+      //
+      // `prepaidApplied` is NOT `tCoveredPostpaid`'s "paid from prepaid
+      // balance": that phrase labels LINES that the pool settled, a per-line
+      // verdict that no longer exists. This labels ONE document-level amount.
+      prepaidApplied: {
+        en: "Prepaid Applied",
+        ar: "المخصوم من الرصيد المسبق",
+      },
+      // NOT `amountDue` / `المبلغ المستحق`. "Due" is what the invoice bills;
+      // "payable" is what is left after the balance draw, and on a fully
+      // covered invoice it is zero while the amount due is not. Two figures,
+      // two phrases — collapsing them is how a paid invoice reads as owing.
+      amountPayable: {
+        en: "Amount Payable",
+        ar: "المبلغ الواجب سداده",
+      },
+
       // ── Hide-amount-due toggle (`no-print`) ──────────────────────────────
       // FRESH — a control, not document content.
       hideDueTitle: {
@@ -9720,6 +9749,68 @@ export const dict = {
       confirmUnpay: { en: "Yes, un-pay", ar: "نعم، ألغِ السداد" },
       working: { en: "Working…", ar: "جارٍ التنفيذ…" },
 
+      // ── Settlement workspace, LEDGER ERA (0203) — ALL `no-print` ─────────
+      // ALL FRESH, and none of it reaches paper. The DOCUMENT states what was
+      // billed and what the balance covered at issue (prepaidApplied /
+      // amountPayable above, frozen columns); THIS states what is still owed
+      // today, which moves every time money arrives. Two different facts, which
+      // is why they have two different vocabularies and never share a string.
+      sTitle: { en: "Settlement", ar: "التسوية" },
+      // The chain: Amount Payable − Paid − Applied − Written off = Outstanding.
+      // `sPaid` is NOT `paid` above: that one is the invoice's STATUS ("مدفوعة",
+      // feminine, describing the invoice), this one is an AMOUNT.
+      sPaid: { en: "Paid", ar: "المسدَّد" },
+      sApplied: { en: "Applied from balance", ar: "المطبَّق من الرصيد" },
+      sWrittenOff: { en: "Written off", ar: "المشطوب" },
+      sRemainder: { en: "Outstanding", ar: "المتبقي" },
+      // Words, never a zero. An unreadable settlement and a settled invoice
+      // look identical in figures and could not be less alike in meaning.
+      sUnavailable: {
+        en: "Settlement figures could not be read — nothing can be recorded against this invoice until they load.",
+        ar: "تعذّرت قراءة أرقام التسوية — لا يمكن تسجيل أي شيء على هذه الفاتورة حتى تُحمَّل.",
+      },
+      // Buttons. "Record payment" replaces "Mark Paid" on every ledger-era
+      // invoice: the act is no longer "declare this settled", it is "money
+      // arrived, here is how much".
+      recordPaymentBtn: { en: "Record payment", ar: "تسجيل سداد" },
+      applyBalanceBtn: { en: "Apply balance", ar: "تطبيق الرصيد" },
+      fPayAmount: { en: "Amount received (SAR) *", ar: "المبلغ المستلم (ريال) *" },
+      payAmountHint: {
+        en: "Outstanding on this invoice: {amount}. Less than that is recorded as a partial payment.",
+        ar: "المتبقي على هذه الفاتورة: {amount}. وأي مبلغ أقل يُسجَّل سدادًا جزئيًا.",
+      },
+      // Apply-balance preview. THREE ROWS, ONE OF WHICH IS THE SERVER'S — the
+      // third is min() of the first two, and the copy says so rather than
+      // implying this screen chose it.
+      applyAvailable: { en: "Available balance", ar: "الرصيد المتاح" },
+      applyRemainder: { en: "Outstanding on this invoice", ar: "المتبقي على هذه الفاتورة" },
+      applyWillApply: { en: "Will be applied", ar: "سيُطبَّق" },
+      applyNote: {
+        en: "Applies whichever is smaller. The final amount is decided on the server at the moment of writing, so a top-up or another invoice in between cannot overdraw the balance.",
+        ar: "يُطبَّق الأصغر من الرقمين. ويُحسم المبلغ النهائي على الخادم لحظة الكتابة، فلا تستطيع إضافة رصيد أو فاتورة أخرى بينهما أن تسحب على المكشوف.",
+      },
+      applyUnavailable: {
+        en: "The customer's Available balance could not be read — try again once it loads.",
+        ar: "تعذّرت قراءة الرصيد المتاح للعميل — أعد المحاولة بعد تحميله.",
+      },
+      confirmApply: { en: "Apply balance now", ar: "طبّق الرصيد الآن" },
+      // Payment history — a list of arrivals, never summed here. The totals
+      // above come from the view, which sums in SQL under the write's own lock.
+      historyTitle: { en: "Payments recorded", ar: "المدفوعات المسجّلة" },
+      // Un-pay's absence, explained. The RPC refuses these two cases itself;
+      // this says why the button is not there rather than letting the operator
+      // fill in a reason box for an action that cannot succeed.
+      unpayBlockedNote: {
+        en: "Un-pay is unavailable — money has already moved against this invoice (a recorded payment or an applied balance). Sales Return is the undo, and it reverses the ledger.",
+        ar: "إلغاء السداد غير متاح — تحرّكت أموال فعلًا على هذه الفاتورة (سداد مسجَّل أو رصيد مطبَّق). ومرتجع المبيعات هو التراجع، وهو يعكس القيود.",
+      },
+      // The legacy-era banner. Not an error: these invoices are correct, they
+      // are simply settled under the law they were issued under.
+      legacyFlowNote: {
+        en: "Issued before the prepaid ledger — this invoice is settled with the old full-amount flow, and partial payments are not available on it.",
+        ar: "صدرت قبل نظام الرصيد المسبق — تُسوّى هذه الفاتورة بالمسار القديم بكامل المبلغ، والسداد الجزئي غير متاح عليها.",
+      },
+
       // ── Footer ───────────────────────────────────────────────────────────
       // FRESH. `{date}` is `formatDate()`'s "Aug 28, 2026" — Latin digits, but
       // an ENGLISH month abbreviation in both languages, because the formatter
@@ -9806,6 +9897,27 @@ export const dict = {
       errNoDriver: {
         en: "Pick a driver — a trip cannot be created unassigned.",
         ar: "اختر سائقًا — لا يمكن إنشاء رحلة بدون إسناد.",
+      },
+      // PREPAID BALANCE WARNING (0203) — DELIBERATELY NOT IN THE REFUSAL GROUP
+      // ABOVE. The three errN* strings are reasons the form will not submit;
+      // this one is a fact the operator should carry into the decision, and the
+      // Create button stays live underneath it. A short balance is a finance
+      // problem, not a dispatch problem: the water still has to go out, and a
+      // top-up that lands an hour later settles it. The sentence therefore
+      // states the position and then says the creation is allowed, in that
+      // order — the opposite order reads as a refusal being overridden.
+      //
+      // `{needed}` is an ESTIMATE and says so. Nothing is priced at creation:
+      // trips.rate_sar is stamped at DELIVERY from the project's rate at that
+      // moment (app/trips/actions.ts), so a rate change between now and the
+      // delivery moves this figure. "at today's rate" is the honest hedge.
+      availShortTitle: {
+        en: "Prepaid balance is short",
+        ar: "الرصيد المدفوع مسبقًا غير كافٍ",
+      },
+      availShort: {
+        en: "{customer} has {available} available — about {needed} is needed for these trips at today's rate. Creating them is allowed; the balance runs short at delivery unless a top-up lands first.",
+        ar: "لدى {customer} {available} متاح — المطلوب نحو {needed} لهذه الرحلات بسعر اليوم. الإنشاء مسموح؛ سينقص الرصيد عند التسليم ما لم تُسجَّل إضافة رصيد أولًا.",
       },
       create: { en: "Create", ar: "إنشاء" },
     },
@@ -10733,6 +10845,25 @@ export const dict = {
         many: { en: "{n} drivers", ar: "{n} سائقًا" },
       },
       addTrip: { en: "Add trip", ar: "إضافة رحلة" },
+      // PREPAID BALANCE STRIP (0203) — the DELIVERY-side half of the same
+      // warning the new-trip form carries. It sits on the project card because
+      // that is the one surface both delivery funnels start from: the card's
+      // own "Mark delivered" button (advance) and the phase picker opened from
+      // a card (movePhase). Putting it on the card states the position BEFORE
+      // either is pressed, which a message shown after the move cannot do.
+      //
+      // It is a STATE, not a confirmation step. Nothing here is disabled and
+      // nothing waits for an acknowledgement: a prepaid customer running short
+      // is a reason to chase a top-up, never a reason to hold a truck.
+      //
+      // `{needed}` prices ONE delivery at the project's CURRENT rate, VAT
+      // included, because that is what the trip will draw — and it is still an
+      // estimate for the same reason the form's is (the rate freezes at
+      // delivery, not now).
+      availShortStrip: {
+        en: "Prepaid balance short — {available} available, about {needed} per delivery. Deliveries are not blocked.",
+        ar: "الرصيد المدفوع مسبقًا غير كافٍ — {available} متاح، نحو {needed} لكل تسليم. التسليم غير محظور.",
+      },
       driversOperating: {
         en: "Drivers operating this project",
         ar: "السائقون العاملون على هذا المشروع",

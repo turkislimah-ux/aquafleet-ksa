@@ -36,11 +36,18 @@ import {
   type ProjectStatus,
   type DriverStatus,
   type ProjectCommissionNowRow,
+  type PaymentMode,
   STAGE_ORDER,
   STAGE_STYLES,
 } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
 import { type LeavePeriod } from "@/lib/leave";
+// Available (0203) as a TYPE only — the rows are fetched in page.tsx through
+// lib/customer-ledger.ts, which stays the single reader of that model.
+import { type CustomerAvailableRow } from "@/lib/customer-ledger";
+// THE prepaid gross-up. Same import CreateTripForm makes, for the same reason:
+// the per-delivery draw is round2(rate * (1 + VAT_RATE)) and is expressed once.
+import { inclVat } from "@/lib/prepaid";
 import { pillColor } from "@/lib/project-colors";
 import { formatTripRef } from "@/lib/trip-ref";
 import { useIncomingTripHighlight } from "@/lib/tripHighlight";
@@ -151,8 +158,12 @@ type CustomerOption = {
   cr_number: string | null;
   billing_address: string | null;
   email: string | null;
+  // 0203 — THE payment arrangement, and the same column confirm_invoice reads
+  // when it decides whether to draw the prepaid pool. NOT NULL in the database
+  // since that migration, so there is no unknown arm to handle here.
+  payment_mode: PaymentMode;
 };
-type TruckOption = { id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null; last_service_date: string | null };
+type TruckOption ={ id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null; last_service_date: string | null };
 type DriverOption = { id: string; name: string; name_ar: string | null; status: DriverStatus };
 // Full water_stations row (active + inactive) — feeds the "Manage stations"
 // popup. Imported from lib/station-pricing rather than re-declared: this shape
@@ -1071,6 +1082,7 @@ function ProjectCard({
   assignedCount,
   stationsByKey,
   customerName,
+  prepaidAvailableSar,
   advancingId,
   onAdvance,
   onManage,
@@ -1094,6 +1106,17 @@ function ProjectCard({
   // This project's customer name (1:1 via project.customer_id) — shown in the
   // card header (block A), below the project title, replacing the old short-id.
   customerName: string;
+  // THIS customer's v_customer_available.available_sar — or null, which means
+  // "there is nothing to warn about" and covers BOTH of its causes: the
+  // customer is postpaid (no pool to be short of), or the customer is prepaid
+  // but has no row in that view yet (never topped up, never drawn — a figure
+  // that has not been measured, which is not the same as 0.00 and must not
+  // light an amber box on every new prepaid customer's first trip).
+  //
+  // The mode test happens at the CALL SITE, where the customer row is in hand.
+  // The card deliberately does not take a second `prepaid` prop: two props that
+  // must agree are two props that can disagree.
+  prepaidAvailableSar: number | null;
   advancingId: string | null;
   onAdvance: (tripId: string, to: TripStage) => void;
   onManage: (p: ProjectHeader) => void;
@@ -1108,6 +1131,12 @@ function ProjectCard({
   onHighlightHover?: () => void;
 }) {
   const { lang } = useApp();
+  // Prepaid shortfall for THIS project's customer, priced for ONE delivery —
+  // one delivery because that is the next thing any button on this card can
+  // cause. `<`, strictly: exactly enough money is not short. The card is a
+  // STATE, not a gate; nothing below it is disabled by this line.
+  const availPerDelivery = inclVat(project.rate_per_trip_sar);
+  const availShort = prepaidAvailableSar !== null && prepaidAvailableSar < availPerDelivery;
   return (
     <div className="card p-4">
       {/* Header (block A) */}
@@ -1167,6 +1196,26 @@ function ProjectCard({
         </div>
       </div>
       {project.description && <p className="text-sm muted mt-2">{project.description}</p>}
+
+      {/* PREPAID SHORTFALL STRIP — between the header and the deliveries band,
+          which puts it above every "Mark delivered" button on the card and
+          above the card the phase picker opens from. Amber and full-bleed to
+          the card's text column: it is a condition of the whole project's
+          money, not a note on one trip. Nothing here is a control. */}
+      {availShort && (
+        <div
+          role="status"
+          className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-[0.1rem]" />
+          <span>
+            {fill(t("trips.board.availShortStrip", lang), {
+              available: formatSar(prepaidAvailableSar as number),
+              needed: formatSar(availPerDelivery),
+            })}
+          </span>
+        </div>
+      )}
 
       {/* Deliveries report strip (block B) — all 4 windows at once, anchored to
           today (independent of the selected calendar day). Mirrors the demo's
@@ -1348,6 +1397,16 @@ export type ProjectsBoardProps = {
   leavePeriods: LeavePeriod[];
   // Fail-safe flag: leave data failed to load → block/flag in assignment surfaces.
   leaveLoadFailed: boolean;
+  // v_customer_available, every customer, one row each (page.tsx → lib/customer-ledger).
+  // The board reads ONE column off it — available_sar — and only to warn. It
+  // never blocks a dispatch, never reaches a server action, and never becomes a
+  // figure on a document: the frozen money still comes from confirm_invoice.
+  //
+  // Declared HERE rather than in TripsTabs' extra prop bag because the board is
+  // now a real consumer, not a courier. TripsTabs destructures this same field
+  // for FinanceTab, so it hands it back explicitly at the ProjectsBoard call
+  // site — one fetch, two readers, no second query.
+  ledgerAvailable: CustomerAvailableRow[];
 };
 
 export default function ProjectsBoard({
@@ -1363,6 +1422,7 @@ export default function ProjectsBoard({
   driverStateById,
   leavePeriods,
   leaveLoadFailed,
+  ledgerAvailable,
 }: ProjectsBoardProps) {
   const { lang } = useApp();
   const router = useRouter();
@@ -1617,6 +1677,33 @@ export default function ProjectsBoard({
 
   const activeList = projects.filter((p) => p.status === "active");
 
+  // customer_id -> available_sar, PREPAID CUSTOMERS ONLY. A LOOKUP, not a
+  // calculation: the value put in is the view's own column, unrounded and
+  // unsummed. Built once here and handed to BOTH warning surfaces — the
+  // new-trip form and every project card — so the two halves of one warning
+  // can never be looking at different money.
+  //
+  // THE MODE FILTER IS THE WHOLE POINT OF DOING THIS HERE. v_customer_available
+  // publishes a row for every customer, postpaid included, and a postpaid
+  // customer's Available is a meaningless negative (they have no pool, so it is
+  // just minus their uninvoiced work). Filtering at the source means no
+  // downstream surface has to remember to re-test the mode, and an absent key
+  // reads the same everywhere: nothing to warn about.
+  //
+  // `customers.payment_mode`, not `projects.payment_mode` — 0203 §10 draws on
+  // the customer's column, and a warning that predicts a draw has to read the
+  // column the draw reads.
+  //
+  // A prepaid customer with no ledger row is ABSENT rather than 0: never topped
+  // up and never drawn is not the same fact as nothing left, and `?? 0`
+  // downstream would collapse the two.
+  const availableByCustomer = useMemo(() => {
+    const prepaid = new Set(customers.filter((x) => x.payment_mode === "prepaid").map((x) => x.id));
+    const m: Record<string, number> = {};
+    for (const r of ledgerAvailable) if (prepaid.has(r.customer_id)) m[r.customer_id] = r.available_sar;
+    return m;
+  }, [ledgerAvailable, customers]);
+
   // Sequential, one-step advance (Dispatch / Mark in transit / Mark delivered).
   // Funnels through setTripStage, which stamps the *_at column and commission on delivered.
   async function advance(tripId: string, to: TripStage) {
@@ -1814,6 +1901,7 @@ export default function ProjectsBoard({
         driverStateById={driverStateById}
         leavePeriods={leavePeriods}
         leaveLoadFailed={leaveLoadFailed}
+        availableByCustomer={availableByCustomer}
       />
 
       {/* Project-stacked board */}
@@ -1832,6 +1920,7 @@ export default function ProjectsBoard({
               assignedCount={(assignmentsByProject[p.id] ?? []).length}
               stationsByKey={stationsByKey}
               customerName={customersById.get(p.customer_id) ?? "—"}
+              prepaidAvailableSar={availableByCustomer[p.customer_id] ?? null}
               advancingId={advancingId}
               onAdvance={advance}
               onManage={setManaging}

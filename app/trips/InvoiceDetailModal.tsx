@@ -38,6 +38,11 @@ import {
   type WaterType,
   type PaymentMode,
 } from "@/lib/db-types";
+// The 0203 row shapes, imported as TYPES only. This screen never queries the
+// ledger model itself — lib/customer-ledger.ts is its one reader and
+// getInvoice() is the one call site; these names exist here so the payload
+// that arrives has a shape the compiler can hold us to.
+import type { InvoicePaymentRow, InvoiceSettlementRow } from "@/lib/customer-ledger";
 import {
   getInvoice,
   previewInvoice,
@@ -47,10 +52,27 @@ import {
   revertInvoiceToDraft,
   confirmInvoice,
   voidInvoice,
-  markInvoicePaid,
+  // markInvoicePaid IS GONE FROM THE LEDGER ERA, and the two names that replace
+  // it are not a rename: they are the two things it used to be at once. It sent
+  // a full-amount pay_invoice() for postpaid AND a `balance` settlement for
+  // prepaid, so "record that money arrived" and "draw down the customer's
+  // balance" shared one button, one FormData and one RPC. 0203 split them:
+  // money arriving is invoice_payments (partial, repeatable, append-only),
+  // drawing the balance is a customer_ledger row. Two acts, two actions.
+  recordInvoicePayment,
+  applyBalanceToInvoice,
+  // …and the old act survives for the old rows, under a name that says so. The
+  // 0203 RPCs REFUSE an invoice confirmed before them (no frozen payable to
+  // count a partial payment down against), so without this every already-
+  // confirmed, unpaid invoice would lose its settle button. Offered only when
+  // era === "legacy". Never widen it.
+  markInvoicePaidLegacy,
   unpayInvoice,
   deleteDraftInvoice,
   getProofSignedUrl,
+  // Per-PAYMENT slip. The invoice-level signer above reads the single legacy
+  // column; a ledger invoice can carry several slips, one per arrival.
+  getPaymentProofSignedUrl,
   getCompanyEmail,
   getInvoicePdf,
   getInvoicePrintHtml,
@@ -217,6 +239,28 @@ export default function InvoiceDetailModal({
         paidUpBalanceSar: number | null;
         settlementSar: number | null;
         paidUpError: string | null;
+        // --- LEDGER ERA (0203) ----------------------------------------------
+        // Which body of law this invoice is settled under, decided server-side
+        // by invoiceEra() off the frozen amount_payable_sar. NOT a status test
+        // and NOT a date test: 0203's confirm freezes a payable in BOTH payment
+        // modes, so a null on a confirmed row means exactly one thing — it was
+        // confirmed before 0203 and keeps the covered/unpaid split forever.
+        era: "ledger" | "legacy";
+        // The ONE source for "how much of this invoice is still outstanding".
+        // Never derived here from status / payment_method / paid_at: those are
+        // display-only history since 0203, and a partially-paid invoice still
+        // reads `confirmed` with a null payment_method.
+        settlement: InvoiceSettlementRow | null;
+        // Every recorded payment against this invoice, oldest first. Empty is a
+        // real answer (nobody has paid yet); a failed read is also empty, which
+        // is why the panel's figures come from `settlement` and this array is
+        // only ever a HISTORY list — it is never summed into a balance.
+        payments: InvoicePaymentRow[];
+        // The customer's Available balance RIGHT NOW (prepaid only, null for
+        // postpaid or a failed read). Live, not frozen — it is what a
+        // post-confirm apply-balance would draw against, so it must not be
+        // confused with prepaid_applied_sar, which froze at confirm.
+        availableSar: number | null;
       })
     | null
   >(null);
@@ -260,6 +304,19 @@ export default function InvoiceDetailModal({
   const [voidReason, setVoidReason] = useState("");
   const [payingOpen, setPayingOpen] = useState(false);
   const [payMethod, setPayMethod] = useState<"cash" | "bank_transfer">("cash");
+  // PARTIAL PAYMENTS MEAN THE AMOUNT IS AN INPUT. It was never one before: the
+  // old path paid the whole invoice or nothing, so the figure was implied by
+  // the button. record_invoice_payment takes any amount up to the remainder,
+  // so it is typed — CONTROLLED (not FormData-only like the reference/date
+  // beside it) because the field is pre-filled with the outstanding remainder
+  // and the "pay it all" case must be one click, not a re-typing exercise.
+  const [payAmount, setPayAmount] = useState("");
+  // Apply-balance confirmation. Not a form — apply_balance_to_invoice takes no
+  // amount at all (it draws min(Available, remainder) under its own row lock).
+  // This flag only opens the panel that STATES those two figures before the
+  // ledger row is written, which is the same courtesy the old pay-with-balance
+  // panel paid and the only thing worth keeping from it.
+  const [applyOpen, setApplyOpen] = useState(false);
   const [unpaying, setUnpaying] = useState(false);
   const [unpayReason, setUnpayReason] = useState("");
   const [deletingDraft, setDeletingDraft] = useState(false);
@@ -379,6 +436,8 @@ export default function InvoiceDetailModal({
     setVoidReason("");
     setPayingOpen(false);
     setPayMethod("cash");
+    setPayAmount("");
+    setApplyOpen(false);
     setUnpaying(false);
     setUnpayReason("");
     setDeletingDraft(false);
@@ -633,6 +692,21 @@ export default function InvoiceDetailModal({
     window.open(r.data.url, "_blank", "noopener,noreferrer");
   }
 
+  // Same act, keyed by PAYMENT instead of invoice — the history list below can
+  // hold several slips and each row opens its own. Kept as a separate function
+  // rather than a parameterised one because the two read different columns in
+  // different tables; merging them would mean a caller choosing a branch, and
+  // the branch it would choose is the era test this screen deliberately makes
+  // only once.
+  async function onViewPaymentProof(paymentId: string) {
+    const r = await getPaymentProofSignedUrl(paymentId);
+    if (r.error || !r.data) {
+      setActionError(r.error ?? t("trips.invoice.errProof", lang));
+      return;
+    }
+    window.open(r.data.url, "_blank", "noopener,noreferrer");
+  }
+
   // Deletion removes the row entirely — draft OR review since 0182, releasing
   // its reserved trips and, through the charges' ON DELETE CASCADE, the prepaid
   // balance they were holding. Unlike every other action here, refresh()/load()
@@ -657,7 +731,22 @@ export default function InvoiceDetailModal({
     }
   }
 
-  async function onMarkPaid(e: React.FormEvent<HTMLFormElement>) {
+  // RECORD A PAYMENT — one arrival of money against this invoice, for ANY
+  // amount up to the outstanding remainder. This is the whole pay path now, in
+  // both payment modes: a prepaid invoice whose balance did not cover it is
+  // collected exactly like a postpaid one, because at that point it is the same
+  // fact — the customer owes cash and some of it turned up.
+  //
+  // WHAT IT NO LONGER DOES: flip the invoice to `paid` and write
+  // payment_method/paid_at as the record of settlement. record_invoice_payment
+  // inserts an invoice_payments row and lets v_invoice_settlement decide what
+  // is left; the status only moves to `paid` when the remainder reaches zero,
+  // which may be this payment, the third one, or an apply-balance afterwards.
+  //
+  // The amount rides in the FormData like everything else here rather than
+  // being passed as an argument, so the server action keeps ONE input shape and
+  // one place to refuse a bad one.
+  async function onRecordPayment(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!invoiceId) return;
     const form = new FormData(e.currentTarget);
@@ -682,7 +771,54 @@ export default function InvoiceDetailModal({
         const prepared = r.files[0];
         if (prepared) form.set("proofFile", prepared);
       }
-      const res = await markInvoicePaid(form);
+      const res = await recordInvoicePayment(form);
+      if (res.error) {
+        setActionError(res.error);
+        return;
+      }
+      setPayingOpen(false);
+      setPayAmount("");
+      await refresh();
+    } catch {
+      setActionError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // LEGACY SETTLEMENT — the pre-0203 full-amount path, unchanged in behaviour
+  // and reachable only when era === "legacy".
+  //
+  // It is not kept for symmetry. record_invoice_payment() RAISES on an invoice
+  // with no frozen amount_payable_sar, and 0203 backfills nothing, so every
+  // invoice confirmed before it has no ledger-era way to be settled — deleting
+  // this would strand real receivables behind a screen with no button. These
+  // rows keep the law they were frozen under until they are all closed.
+  //
+  // Two entry points because the old path had two: a full form for cash/bank,
+  // and a bare confirmation for the prepaid `balance` method, which moves no
+  // money and therefore asks for no reference, date or slip. Both reach the
+  // same server action, and 0134's own guard still decides who may send
+  // 'balance'.
+  async function onLegacyPay(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!invoiceId) return;
+    const form = new FormData(e.currentTarget);
+    form.set("invoiceId", invoiceId);
+    setBusy(true);
+    setActionError(null);
+    try {
+      const proof = form.get("proofFile");
+      if (proof instanceof File && proof.size > 0) {
+        const r = await prepareUploadFiles([proof]);
+        if (!r.ok) {
+          setActionError(fill(t(r.errorKey, lang), { name: r.name }));
+          return;
+        }
+        const prepared = r.files[0];
+        if (prepared) form.set("proofFile", prepared);
+      }
+      const res = await markInvoicePaidLegacy(form);
       if (res.error) {
         setActionError(res.error);
         return;
@@ -696,51 +832,33 @@ export default function InvoiceDetailModal({
     }
   }
 
-  // Prepaid "Pay with Balance" (Batch 1) — no cash/bank choice (prepaid never
-  // pays that way, spec v3 §7): the engine already deducted the balance at
-  // delivery (trips) / add-to-draft (charges), so this step only RECORDS
-  // settlement and LOCKS the covered items — same pay_invoice() RPC the
-  // postpaid cash/bank form calls, just with no user-facing method choice.
-  //
-  // IT NOW RECORDS 'balance', WHICH IS WHAT MIGRATION 0134 EXISTS FOR.
-  // This used to send 'cash' — a deliberate mislabel, because 0025's CHECK
-  // constraint permitted only 'cash'/'bank_transfer' and no 'balance' value
-  // existed to write. 0134 widened that constraint AND added a guard inside
-  // pay_invoice() that refuses 'balance' unless the invoice resolves to prepaid
-  // mode (snapshot first, else the customer's project mode), so the honest value
-  // is now both storable and enforced. THIS IS THE ONLY CALLER THAT SENDS
-  // 'balance' — the postpaid form still sends the user's cash/bank_transfer
-  // choice, and neither path ever rewrites an already-settled record.
-  //
-  // No proof file, reference or date are sent, and that is not an omission:
-  // there is no bank transaction to point at. The money left the balance when
-  // the work was delivered, not now.
-  //
-  // HISTORICAL ROWS ARE NOT BACKFILLED. Prepaid invoices settled before 0134
-  // still read 'cash'. A settled document records what was written at the time,
-  // and no figure anywhere derives from this column — the prepaid engine walks
-  // its own FIFO queue, never payment_method — so a rewrite would buy nothing
-  // and would make history claim a value that did not exist when it was issued.
-  async function onMarkPaidBalance() {
+  async function onLegacyPayBalance() {
     if (!invoiceId) return;
     const form = new FormData();
     form.set("invoiceId", invoiceId);
     form.set("paymentMethod", "balance");
-    setBusy(true);
-    setActionError(null);
-    try {
-      const res = await markInvoicePaid(form);
-      if (res.error) {
-        setActionError(res.error);
-        return;
-      }
-      setPayingOpen(false);
-      await refresh();
-    } catch {
-      setActionError(t("shared.upload.saveFailedNetwork", lang));
-    } finally {
-      setBusy(false);
-    }
+    const ok = await runAction(() => markInvoicePaidLegacy(form));
+    if (ok) setPayingOpen(false);
+  }
+
+  // APPLY BALANCE — settle (part of) a confirmed prepaid invoice out of the
+  // customer's Available balance, AFTER confirm.
+  //
+  // It exists because the confirm-time draw is a SNAPSHOT. confirm_invoice()
+  // takes min(Available, grand total) at the confirm instant and freezes the
+  // shortfall as amount_payable_sar; a top-up the next day cannot retroactively
+  // change a frozen figure, so it is applied here as its own dated ledger row.
+  //
+  // NO AMOUNT IS SENT, and that is the design: the RPC draws
+  // min(Available, remainder) under the customer row lock. An amount computed
+  // in this component would be a second opinion on the customer's balance, read
+  // a moment earlier than the write — which is precisely the class of bug the
+  // old pay-with-balance panel kept producing. The panel above this button
+  // PREVIEWS the two figures; it does not decide them.
+  async function onApplyBalance() {
+    if (!invoiceId) return;
+    const ok = await runAction(() => applyBalanceToInvoice(invoiceId));
+    if (ok) setApplyOpen(false);
   }
 
   if (!open || !invoiceId || !mounted) return null;
@@ -762,6 +880,56 @@ export default function InvoiceDetailModal({
   const canEmail = !!(raw && view && customerEmail);
 
   const isPrepaid = view?.paymentMode === "prepaid";
+
+  // ===========================================================================
+  // LEDGER ERA (0203) — which law this invoice is settled under, and the facts
+  // that law provides.
+  // ===========================================================================
+  // `isLedger` is a payload field, not a test performed here, precisely so this
+  // screen cannot invent a fourth definition of "which era". It is false for
+  // exactly one thing: an invoice confirmed before 0203, which has no frozen
+  // payable and keeps the covered/unpaid document plus the old full-amount pay
+  // button forever. Drafts are always ledger — they have not frozen anything
+  // yet, so there is nothing old about them.
+  const isLedger = raw?.era === "ledger";
+
+  // v_invoice_settlement for THIS invoice. THE source of "what is outstanding",
+  // and the ONLY one: invoices.status, payment_method and paid_at are
+  // display-only history since 0203 — a half-paid invoice still reads
+  // `confirmed` with a null payment_method, so reading those to answer this
+  // question gives the wrong answer confidently.
+  const settlement = raw?.settlement ?? null;
+  // A null `payable_sar` on a CONFIRMED row means the read failed (era already
+  // told us it is not legacy), so the panel refuses rather than printing zeros.
+  // On a draft it is the normal, correct state: nothing has been frozen.
+  const settlementReadable = isLedger && settlement != null && settlement.payable_sar != null;
+  const remainderSar = settlementReadable ? (settlement!.remainder_sar ?? 0) : null;
+  // Recorded payments, oldest first — a HISTORY list, never summed into a
+  // figure. Every amount the panel shows comes from the view, which does the
+  // summing in SQL under the same lock the writes take.
+  const payments = raw?.payments ?? [];
+  // The customer's Available balance right now (prepaid only). LIVE, and not to
+  // be confused with prepaid_applied_sar beside it, which froze at confirm:
+  // this is what a post-confirm apply-balance would have to draw from.
+  const availableSar = raw?.availableSar ?? null;
+  // What Apply Balance would actually move — the RPC's own min(), previewed.
+  // Null when either side is unreadable, never zero: "nothing to apply" and "we
+  // could not find out" are different answers and only one of them is a reason
+  // to hide the button.
+  const applicableSar =
+    availableSar == null || remainderSar == null ? null : round2(Math.min(availableSar, remainderSar));
+
+  // UN-PAY'S GATE, mirroring unpay_invoice()'s two guards exactly (0203 §12):
+  // no invoice_payments rows, and no balance_applied ledger rows. Both are
+  // reversals the RPC refuses to make because the money genuinely moved — a
+  // recorded payment is cash that arrived, an applied balance is a ledger row
+  // with a date on it. Void is the correct undo for both, and it reverses the
+  // ledger itself while leaving the payments standing.
+  //
+  // THE UI GATE IS A COURTESY, NOT THE RULE. The RPC raises its own sentence
+  // either way and runAction surfaces it verbatim; this just stops the operator
+  // opening a reason box for an action that cannot succeed.
+  const unpayBlocked = payments.length > 0 || (settlement != null && settlement.applied_sar > 0);
 
   // THE paid-up balance, straight off the server payload. Server-side it is
   // ONE expression (lib/prepaid's paidUpBalance / paidUpBalanceAsOf, reached
@@ -852,6 +1020,18 @@ export default function InvoiceDetailModal({
     [...(view?.coveredLines ?? []), ...(view?.unpaidLines ?? [])].reduce((s, l) => s + l.amount_sar, 0),
   );
   const prepaidChargesSubtotalAll = round2(prepaidChargeLines.reduce((s, l) => s + l.amount_sar, 0));
+
+  // LEDGER-ERA TRIPS TABLE — one table, so one foot figure, VAT-inclusive to
+  // match what PrepaidTripTable's footer promises. Derived from the lines the
+  // table is printing rather than from a `tripTotals` snapshot, because the
+  // ledger era has no such snapshot: lib/invoice.ts stopped emitting one when
+  // the covered/unpaid split went away (there is nothing left to split). Same
+  // round-once convention the postpaid subsets beside it use — display only,
+  // never fed back into document totals.
+  const ledgerTripLines = view?.unpaidLines ?? [];
+  const ledgerTripsTotal = round2(
+    ledgerTripLines.reduce((s, l) => s + l.amount_sar, 0) + ledgerTripLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0),
+  );
 
   // ...EXCEPT ON AN INVOICE FROZEN UNDER THE OLD LAW, WHICH IS RENDERED AS
   // ISSUED. Draft/review recompute live and always reconcile. Confirmed / paid
@@ -1085,9 +1265,123 @@ export default function InvoiceDetailModal({
               </div>
             )}
 
-            {isPrepaid ? (
+            {isPrepaid && isLedger ? (
+              /* ── PREPAID, LEDGER ERA (0203) ─────────────────────────────────
+                 ONE trips table, no coverage verdict anywhere, and the
+                 settlement stated once at the bottom.
+
+                 What this replaces and why: the two tables below (Covered /
+                 Unpaid) were the FIFO walk made visible — every trip carried a
+                 verdict about which side of the prepaid pool it fell on, and a
+                 balance was re-printed under each table so the reader could
+                 follow the walk. 0203 deleted the walk. The draw is now ONE
+                 figure taken at confirm against the customer's Available
+                 balance, so there is no per-trip verdict left to show and no
+                 second place the balance belongs. Splitting the trips anyway
+                 would invent a distinction the money no longer makes.
+
+                 This is also the shape the PRINTED sheet and the downloaded PDF
+                 render for the same invoice — one trips table, no Status column
+                 on charges, TOTAL → Prepaid Applied → AMOUNT PAYABLE. The popup
+                 has to agree with the paper. */
               <>
-                {/* v3 §9 — Covered/Unpaid TRIPS tables, ALWAYS shown (even at
+                <PrepaidTripTable
+                  lang={lang}
+                  title={t("trips.invoiceSheet.tTrips", lang)}
+                  lines={ledgerTripLines}
+                  subtotal={ledgerTripsTotal}
+                  fallbackWaterType={view.projectWaterType}
+                  // No `balance` / `remaining`: see the prop's note. The
+                  // settlement is stated once, in the closing chain below.
+                  //
+                  // The hide-from-customer toggle stays HERE, on the one trips
+                  // table, because it is still the same control governing the
+                  // same thing — whether the customer's copy shows what is left
+                  // to pay. Screen always shows it; print/PDF/email obey it via
+                  // the view-model. §7 unchanged.
+                  headerRight={
+                    <HideAmountDueToggle
+                      lang={lang}
+                      hidden={raw.hide_amount_due}
+                      busy={busy}
+                      onToggle={() => runAction(() => setHideAmountDue(invoiceId, !raw.hide_amount_due))}
+                    />
+                  }
+                />
+
+                {(prepaidChargeLines.length > 0 || editable) && (
+                  <SpecialChargesSection
+                    lang={lang}
+                    chargeLines={prepaidChargeLines}
+                    subtotal={prepaidChargesSubtotalAll}
+                    vat={round2(prepaidChargeLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0))}
+                    total={round2(
+                      prepaidChargesSubtotalAll + prepaidChargeLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0),
+                    )}
+                    // Every charge on a ledger-era invoice is billed on it. A
+                    // column whose only value is "Covered" is noise.
+                    showStatus={false}
+                    editable={editable}
+                    onRemoveCharge={(id) => runAction(() => removeSpecialCharge(invoiceId, id))}
+                    onUploadChargeImage={onUploadChargeImage}
+                    onViewChargeImage={onViewChargeImage}
+                    onAddCharge={onAddCharge}
+                    addingCharge={addingCharge}
+                    chargeLabel={chargeLabel}
+                    setChargeLabel={setChargeLabel}
+                    chargeDate={chargeDate}
+                    setChargeDate={setChargeDate}
+                    chargeQty={chargeQty}
+                    setChargeQty={setChargeQty}
+                    chargePrice={chargePrice}
+                    setChargePrice={setChargePrice}
+                    chargeAmountPreview={chargeAmountPreview}
+                    setChargeImageFile={onPickChargeImage}
+                    chargeImageInputKey={chargeImageInputKey}
+                  />
+                )}
+
+                {/* NO Amount Due card beside this stack, and its absence is the
+                    point. Under the ledger law a prepaid invoice's amountDue IS
+                    its grand total (lib/invoice.ts emits them equal), so the
+                    card would print the stack's own figure a second time a few
+                    centimetres away — the exact repetition the document work
+                    removed from the paper version. What the operator actually
+                    needs to know, "how much is still collectible", is the
+                    Amount Payable hero and the settlement panel below it.
+
+                    The settlement pair is passed ONLY on a frozen invoice, from
+                    the invoice ROW's frozen columns — never from
+                    v_invoice_settlement, whose remainder moves as payments
+                    arrive. A draft has frozen nothing, so it shows a plain
+                    Grand Total exactly as it always did. */}
+                <GrandTotalStack
+                  lang={lang}
+                  rows={[
+                    { label: t("trips.invoiceSheet.subtotalTrips", lang), amount: prepaidTripsSubtotal },
+                    { label: t("trips.invoiceSheet.specialCharges", lang), amount: prepaidChargesSubtotalAll },
+                  ]}
+                  vat={view.grand.vat}
+                  total={view.grand.total}
+                  settlement={
+                    raw.amount_payable_sar != null
+                      ? { applied: raw.prepaid_applied_sar ?? 0, payable: raw.amount_payable_sar }
+                      : undefined
+                  }
+                />
+              </>
+            ) : isPrepaid ? (
+              <>
+                {/* ── PREPAID, LEGACY (confirmed before 0203) ─────────────────
+                    FROZEN DOCUMENT, RENDERED AS ISSUED. Everything below is the
+                    pre-ledger shape and stays byte-for-byte what it was: these
+                    invoices were settled under the covered/unpaid law, their
+                    stored columns describe that law, and re-rendering them in
+                    the new shape would make a tax document claim figures it was
+                    never issued with (0027 freeze law). It is unreachable for
+                    anything confirmed from 0203 onward.
+
+                    v3 §9 — Covered/Unpaid TRIPS tables, ALWAYS shown (even at
                     zero rows), each closing on the stacked Subtotal / balance /
                     Remaining footer. Pre-VAT rows — no per-row VAT column (VAT
                     only ever appears in the Grand Total stack below).
@@ -1338,7 +1632,16 @@ export default function InvoiceDetailModal({
               </div>
             )}
 
-            {raw.status === "paid" && (
+            {/* THE PAID BOX IS LEGACY-ONLY NOW, and the gate is the point. It
+                reads invoices.payment_method, which record_invoice_payment()
+                and apply_balance_to_invoice() never write: both set `paid` +
+                paid_at and leave the method null, because under the ledger
+                model an invoice can be settled by three cash payments and a
+                balance draw and there is no single method to name. Left
+                ungated, every ledger invoice printed "Paid on 2026-03-04 via
+                —", which is a worse answer than none. The settlement panel
+                below says what actually happened, payment by payment. */}
+            {raw.status === "paid" && !isLedger && (
               <div className="rounded-lg border border-app p-3 text-sm break-inside-avoid">
                 <span className="font-medium">{t("trips.invoiceSheet.paid", lang)}</span>{" "}
                 {raw.paid_at ? fill(t("trips.invoiceSheet.paidOn", lang), { date: raw.paid_at.slice(0, 10) }) : ""}{" "}
@@ -1349,6 +1652,113 @@ export default function InvoiceDetailModal({
                     {t("trips.invoiceSheet.viewProof", lang)}
                   </Btn>
                 )}
+              </div>
+            )}
+
+            {/* ═══ SETTLEMENT (0203) — what is still owed TODAY ═══════════════
+                Not a second copy of the document's closing chain. The document
+                (GrandTotalStack above) states two FROZEN figures — what the
+                balance covered at confirm and what was payable then — and a tax
+                document may not restate itself as money arrives. This panel
+                states the living position, and every figure in it is a column
+                of v_invoice_settlement:
+
+                  Amount payable  (frozen at confirm)
+                − Paid            (sum of invoice_payments)
+                − Applied         (post-confirm balance draws)
+                − Written off
+                = Outstanding     (the view's greatest(…, 0))
+
+                NOTHING IS COMPUTED HERE. Not even the subtraction: the last row
+                is remainder_sar, which the view computes under the same
+                rounding the RPCs enforce. A subtraction performed in this
+                component would be a fourth opinion about a figure three RPCs
+                already agree on, and it would disagree in halalas.
+
+                Rendered on a READ-ONLY mount too, deliberately — these are
+                facts, not controls, and the archive reader needs them as much
+                as the operator. Zero rows are omitted rather than shown as
+                0.00: an invoice with no write-off should not have to say so. */}
+            {(status === "confirmed" || status === "paid") && isLedger && (
+              settlementReadable ? (
+                <div className="rounded-lg border border-app p-3 space-y-1.5 text-sm">
+                  <div className="font-medium">{t("trips.invoiceSheet.sTitle", lang)}</div>
+                  <div className="flex items-center justify-between">
+                    <span className="muted">{t("trips.invoiceSheet.amountPayable", lang)}</span>
+                    <span className="tabular-nums">{formatSar(settlement!.payable_sar as number)}</span>
+                  </div>
+                  {settlement!.paid_sar > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="muted">{t("trips.invoiceSheet.sPaid", lang)}</span>
+                      <span className="tabular-nums">{formatSar(round2(-settlement!.paid_sar))}</span>
+                    </div>
+                  )}
+                  {settlement!.applied_sar > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="muted">{t("trips.invoiceSheet.sApplied", lang)}</span>
+                      <span className="tabular-nums">{formatSar(round2(-settlement!.applied_sar))}</span>
+                    </div>
+                  )}
+                  {settlement!.written_off_sar > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="muted">{t("trips.invoiceSheet.sWrittenOff", lang)}</span>
+                      <span className="tabular-nums">{formatSar(round2(-settlement!.written_off_sar))}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between pt-1.5 mt-0.5 border-t border-app">
+                    <span className="font-semibold">{t("trips.invoiceSheet.sRemainder", lang)}</span>
+                    <span
+                      className={
+                        "text-lg font-semibold tabular-nums " +
+                        ((remainderSar as number) > 0
+                          ? "text-brand-600 dark:text-brand-300"
+                          : "text-emerald-600 dark:text-emerald-400")
+                      }
+                    >
+                      {formatSar(remainderSar as number)}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                /* WORDS, NEVER A ZERO — a failed read and a settled invoice are
+                   the same figures and opposite facts. The pay/apply controls
+                   are withheld below on the same condition. */
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-300">
+                  {t("trips.invoiceSheet.sUnavailable", lang)}
+                </div>
+              )
+            )}
+
+            {/* PAYMENT HISTORY — arrivals, oldest first, never summed here.
+                invoice_payments is append-only by grant (authenticated holds
+                SELECT and nothing else), so this list only ever grows: voiding
+                an invoice reverses the ledger and leaves these standing, which
+                is the correct history of a payment that really was received.
+                `paid_on` is the money's own date and `created_at` is when it was
+                keyed in — the first is what a reconciler wants, so it wins when
+                present. */}
+            {payments.length > 0 && (
+              <div className="rounded-lg border border-app p-3 space-y-2 text-sm">
+                <div className="font-medium">{t("trips.invoiceSheet.historyTitle", lang)}</div>
+                <ul className="space-y-1.5">
+                  {payments.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className="tabular-nums muted shrink-0">
+                          {(p.paid_on ?? p.created_at).slice(0, 10)}
+                        </span>
+                        <span className="shrink-0">{paymentMethodLabel(p.method, lang)}</span>
+                        {p.reference && <span className="muted truncate">· {p.reference}</span>}
+                        {p.proof_path && (
+                          <Btn variant="ghost" onClick={() => onViewPaymentProof(p.id)}>
+                            {t("trips.invoiceSheet.viewProof", lang)}
+                          </Btn>
+                        )}
+                      </span>
+                      <span className="tabular-nums shrink-0">{formatSar(p.amount_sar)}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 
@@ -1430,94 +1840,122 @@ export default function InvoiceDetailModal({
                 />
               )}
 
-              {status === "confirmed" && !voiding && !payingOpen && (
-                <div className="flex items-center gap-2">
-                  <Btn variant="primary" onClick={() => setPayingOpen(true)}>
-                    {t(isPrepaid ? "trips.invoiceSheet.payWithBalance" : "trips.invoiceSheet.markPaid", lang)}
-                  </Btn>
+              {/* ═══ CONFIRMED / PAID — the settlement controls ═══════════════
+                  ONE row for both statuses, because under the ledger model they
+                  are the same situation at two points along it: `paid` is
+                  simply what the RPC set when the outstanding amount reached
+                  zero. So every control here is gated on the SETTLEMENT, never
+                  on the status — the status is the consequence, and gating on a
+                  consequence is how a half-paid invoice ends up with no way to
+                  receive the other half.
+
+                  Each panel below REPLACES this row instead of stacking under
+                  it. This is a modal over a long document; a live control row
+                  floating above an open form is how the wrong button gets
+                  clicked. */}
+              {(status === "confirmed" || status === "paid") &&
+                !voiding && !payingOpen && !applyOpen && !unpaying && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* RECORD PAYMENT — ledger era, and only while something is
+                      outstanding. At zero there is nothing left to receive and
+                      record_invoice_payment() would refuse the amount anyway;
+                      withholding the button says so before a figure is typed.
+
+                      The pre-fill happens HERE, at open, rather than in an
+                      effect: the field's starting value is a property of this
+                      click (the remainder as it stands now), not a thing to be
+                      re-synced afterwards while the operator is editing it. */}
+                  {isLedger && settlementReadable && (remainderSar as number) > 0 && (
+                    <Btn
+                      variant="primary"
+                      onClick={() => {
+                        setPayAmount(String(remainderSar));
+                        setPayingOpen(true);
+                      }}
+                    >
+                      {t("trips.invoiceSheet.recordPaymentBtn", lang)}
+                    </Btn>
+                  )}
+                  {/* APPLY BALANCE — prepaid only, which is the RPC's own rule
+                      restated as an absence. A postpaid customer has no balance
+                      to draw from, so there is nothing for the button to do. */}
+                  {isLedger && isPrepaid && settlementReadable && (remainderSar as number) > 0 && (
+                    <Btn variant="outline" onClick={() => setApplyOpen(true)}>
+                      {t("trips.invoiceSheet.applyBalanceBtn", lang)}
+                    </Btn>
+                  )}
+                  {/* LEGACY — the old single button, old label, old flow, and
+                      confirmed-only: pay_invoice() has never accepted a paid
+                      invoice and does not start now. */}
+                  {!isLedger && status === "confirmed" && (
+                    <Btn variant="primary" onClick={() => setPayingOpen(true)}>
+                      {t(isPrepaid ? "trips.invoiceSheet.payWithBalance" : "trips.invoiceSheet.markPaid", lang)}
+                    </Btn>
+                  )}
+                  {/* SALES RETURN — reachable FROM PAID now, and that is the
+                      substance of it. A paid invoice needing to be undone is
+                      exactly the case with money to reverse, and void_invoice()
+                      writes a draw_reversal for every draw and applied balance
+                      itself. Un-pay cannot do that, which is why it refuses
+                      those invoices rather than competing for the job. */}
                   <Btn variant="outline" onClick={() => setVoiding(true)}>
                     {t("trips.invoiceSheet.salesReturn", lang)}
                   </Btn>
-                </div>
-              )}
-              {/* Prepaid — Batch 1: no cash/bank choice, just a confirmation
-                  showing the PAID-UP balance draw-down. Both numbers are
-                  display-only and BOTH come from getInvoice, computed
-                  server-side by the shared prepaid expressions. Nothing is
-                  recomputed here beyond the subtraction of the two.
-
-                  THE DRAW-DOWN IS THE PAYMENT'S OWN SUM OVER THIS INVOICE'S
-                  ITEMS — settlementSar — and it has been wrong twice for the
-                  same reason: the panel reached for a figure computed for
-                  something else.
-
-                  It read covered.total first, under a ruling that "the balance
-                  only ever paid the covered portion". True of the POOL, which
-                  deducts at delivery; false of the PAID-UP balance, which moves
-                  on Mark Paid and moves by everything the payment settles.
-
-                  It then read view.grand.total, which is right on every invoice
-                  frozen under the current law and wrong on the ones frozen by
-                  the covered-only engine: their stored grand total EXCLUDES
-                  lines the document itself lists. 026-000017 previewed 7,544.00
-                  against a real 8,694.00 draw-down; 026-000009 previewed 0.00
-                  against 4,761.00. The fault was never the RPC — it applies the
-                  same sum it always did — it was this panel reading a stale
-                  frozen column.
-
-                  So the figure is now the sum the RPC's own consumption walk
-                  will make: every delivered trip on this invoice plus every one
-                  of its special charges, grossed per item. The third row is
-                  therefore exactly what paidUpBalance() returns a second later,
-                  on a pre-fix invoice as much as a current one. */}
-              {status === "confirmed" && payingOpen && isPrepaid && (
-                <div className="space-y-3 max-w-sm">
-                  {/* `paidUp ?? 0` USED TO STAND IN THE THREE ROWS BELOW, and a
-                      failed read therefore printed a full, confident draw-down
-                      off a balance of zero — a fabricated figure on the one
-                      screen in the app whose entire job is to state what a
-                      payment will consume. The panel now refuses instead: no
-                      arithmetic, and Confirm is not offered. */}
-                  {payPreviewUnreadable ? (
-                    <div className="card p-3 text-sm text-amber-700 dark:text-amber-400" style={{ borderColor: "rgb(var(--border))" }}>
-                      {t("trips.invoiceSheet.paidUpUnavailable", lang)}
-                    </div>
-                  ) : (
-                    <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
-                      <div className="flex justify-between">
-                        <span className="muted">{t("trips.invoiceSheet.paidUpBalance", lang)}</span>
-                        <span className="tabular-nums">{formatSar(paidUp as number)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="muted">{t("trips.invoiceSheet.thisInvoiceGrand", lang)}</span>
-                        <span className="tabular-nums">− {formatSar(settlementSar as number)}</span>
-                      </div>
-                      <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-                        <span>{t("trips.invoiceSheet.remainingSettled", lang)}</span>
-                        <span className={"tabular-nums " + (round2((paidUp as number) - (settlementSar as number)) < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
-                          {formatSar(round2((paidUp as number) - (settlementSar as number)))}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  <p className="text-xs muted">
-                    {t("trips.invoiceSheet.balanceNote", lang)}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Btn type="button" variant="ghost" onClick={() => setPayingOpen(false)}>
-                      {t("common.cancel", lang)}
+                  {/* UN-PAY — paid only, and only while nothing has moved.
+                      `unpayBlocked` mirrors the RPC's two guards, and when it is
+                      set the button is REPLACED BY THE REASON rather than
+                      merely disabled: the operator needs to learn which undo to
+                      reach for, not to discover it from a raised exception
+                      after filling in a reason box. */}
+                  {status === "paid" && !unpayBlocked && (
+                    <Btn variant="outline" onClick={() => setUnpaying(true)}>
+                      <AlertTriangle className="h-4 w-4" /> {t("trips.invoiceSheet.adminUnpay", lang)}
                     </Btn>
-                    {!payPreviewUnreadable && (
-                      <Btn type="button" variant="primary" onClick={onMarkPaidBalance} className={busy ? "opacity-50 pointer-events-none" : ""}>
-                        {t(busy ? "common.recording" : "trips.invoiceSheet.confirmPayment", lang)}
-                      </Btn>
-                    )}
-                  </div>
+                  )}
+                  {status === "paid" && unpayBlocked && (
+                    <p className="text-xs muted basis-full">{t("trips.invoiceSheet.unpayBlockedNote", lang)}</p>
+                  )}
+                  {!isLedger && (
+                    <p className="text-xs muted basis-full">{t("trips.invoiceSheet.legacyFlowNote", lang)}</p>
+                  )}
                 </div>
               )}
-              {/* Postpaid — unchanged (v2 shape). */}
-              {status === "confirmed" && payingOpen && !isPrepaid && (
-                <form onSubmit={onMarkPaid} className="space-y-3 max-w-sm">
+
+              {/* ── RECORD A PAYMENT (ledger era) ────────────────────────────
+                  ONE form for both payment modes. A prepaid invoice whose
+                  balance fell short is collected exactly like a postpaid one,
+                  because by then it is the same fact: the customer owes cash
+                  and some of it turned up. The old screen had two panels here
+                  for what turned out to be one act.
+
+                  THE AMOUNT IS A STARTING VALUE, NOT A LIMIT. It pre-fills with
+                  the outstanding figure so "they paid all of it" is one click,
+                  and stays freely editable because a part-payment is the whole
+                  reason this form exists. No max is set: the ceiling belongs to
+                  record_invoice_payment(), which holds the row lock and refuses
+                  an overpayment with a sentence naming both figures. A `max`
+                  here would be a second, staler opinion of the same rule. */}
+              {payingOpen && isLedger && (
+                <form onSubmit={onRecordPayment} className="space-y-3 max-w-sm">
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium">{t("trips.invoiceSheet.fPayAmount", lang)}</span>
+                    <input
+                      type="number"
+                      name="amount"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      value={payAmount}
+                      onChange={(e) => setPayAmount(e.target.value)}
+                      className={INPUT + " text-lg tabular-nums"}
+                      style={INPUT_STYLE}
+                    />
+                  </label>
+                  {remainderSar != null && (
+                    <p className="text-xs muted">
+                      {fill(t("trips.invoiceSheet.payAmountHint", lang), { amount: formatSar(remainderSar) })}
+                    </p>
+                  )}
                   <div className="flex items-center gap-4 text-sm">
                     <label className="flex items-center gap-1.5">
                       <input type="radio" name="paymentMethod" value="cash" checked={payMethod === "cash"} onChange={() => setPayMethod("cash")} />
@@ -1528,11 +1966,11 @@ export default function InvoiceDetailModal({
                       {paymentMethodLabel("bank_transfer", lang)}
                     </label>
                   </div>
-                  {/* Batch 2 (migration 0039) — reference + date required for
-                      bank_transfer (a real bank transaction to point to,
-                      same reasoning as the proof file below); optional for
-                      cash. Note always optional. Uncontrolled — read via
-                      FormData in onMarkPaid, same as proofFile. */}
+                  {/* Reference + date required for bank_transfer (a real bank
+                      transaction exists to point to), optional for cash — the
+                      same rule 0203's RPC enforces, and it raises its own
+                      message if this markup is ever bypassed. Uncontrolled:
+                      read via FormData at submit, like proofFile. */}
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="font-medium">
                       {t("trips.invoiceSheet.fPaymentReference", lang)}
@@ -1579,7 +2017,185 @@ export default function InvoiceDetailModal({
                   </div>
                 </form>
               )}
-              {status === "confirmed" && voiding && (
+
+              {/* ── APPLY BALANCE (ledger era, prepaid) ──────────────────────
+                  A PREVIEW OF THE SERVER'S OWN min(), AND NOTHING ELSE. The
+                  third row is applicableSar, which restates what the RPC will
+                  draw under the customer row lock — it does not decide it and
+                  it is not sent. An amount computed in this component would be
+                  a second opinion on the customer's balance, read a moment
+                  earlier than the write, which is precisely the bug class the
+                  deleted pay-with-balance panel kept producing.
+
+                  A failed read refuses the action outright. `availableSar` and
+                  `remainderSar` are null, never zero, when unreadable, so
+                  "nothing to apply" and "we could not find out" stay different
+                  answers — and only the first of them is a settled invoice. */}
+              {applyOpen && (
+                <div className="space-y-3 max-w-sm">
+                  {availableSar == null || remainderSar == null ? (
+                    <div className="card p-3 text-sm text-amber-700 dark:text-amber-400" style={{ borderColor: "rgb(var(--border))" }}>
+                      {t("trips.invoiceSheet.applyUnavailable", lang)}
+                    </div>
+                  ) : (
+                    <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
+                      <div className="flex justify-between">
+                        <span className="muted">{t("trips.invoiceSheet.applyAvailable", lang)}</span>
+                        <span className="tabular-nums">{formatSar(availableSar)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="muted">{t("trips.invoiceSheet.applyRemainder", lang)}</span>
+                        <span className="tabular-nums">{formatSar(remainderSar)}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                        <span>{t("trips.invoiceSheet.applyWillApply", lang)}</span>
+                        <span className="tabular-nums">{formatSar(applicableSar as number)}</span>
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-xs muted">{t("trips.invoiceSheet.applyNote", lang)}</p>
+                  <div className="flex items-center gap-2">
+                    <Btn type="button" variant="ghost" onClick={() => setApplyOpen(false)}>
+                      {t("common.cancel", lang)}
+                    </Btn>
+                    {applicableSar != null && applicableSar > 0 && (
+                      <Btn type="button" variant="primary" onClick={onApplyBalance} className={busy ? "opacity-50 pointer-events-none" : ""}>
+                        {t(busy ? "common.recording" : "trips.invoiceSheet.confirmApply", lang)}
+                      </Btn>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── LEGACY PAY, PREPAID (pre-0203 invoices only) ─────────────
+                  UNCHANGED, and unchanged on purpose: these rows were frozen
+                  under the covered/unpaid engine and are settled by the law
+                  they were issued under. No cash/bank choice — the balance
+                  already covered the work at delivery, so this records the
+                  settlement and locks it.
+
+                  THE DRAW-DOWN IS settlementSar, the payment's own sum over
+                  this invoice's items, and it has been wrong twice for the same
+                  reason: the panel reached for a figure computed for something
+                  else. It read covered.total (true of the POOL, false of the
+                  PAID-UP balance, which moves by everything the payment
+                  settles), then view.grand.total (right on invoices frozen
+                  under the current law, wrong on the ones whose stored total
+                  EXCLUDES lines the document lists — 026-000017 previewed
+                  7,544.00 against a real 8,694.00). Both are settled; do not
+                  reopen them.
+
+                  `paidUp ?? 0` USED TO STAND IN THESE THREE ROWS, so a failed
+                  read printed a confident draw-down off a balance of zero. It
+                  refuses now, and Confirm is not offered. */}
+              {payingOpen && !isLedger && isPrepaid && (
+                <div className="space-y-3 max-w-sm">
+                  {payPreviewUnreadable ? (
+                    <div className="card p-3 text-sm text-amber-700 dark:text-amber-400" style={{ borderColor: "rgb(var(--border))" }}>
+                      {t("trips.invoiceSheet.paidUpUnavailable", lang)}
+                    </div>
+                  ) : (
+                    <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
+                      <div className="flex justify-between">
+                        <span className="muted">{t("trips.invoiceSheet.paidUpBalance", lang)}</span>
+                        <span className="tabular-nums">{formatSar(paidUp as number)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="muted">{t("trips.invoiceSheet.thisInvoiceGrand", lang)}</span>
+                        <span className="tabular-nums">− {formatSar(settlementSar as number)}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                        <span>{t("trips.invoiceSheet.remainingSettled", lang)}</span>
+                        <span className={"tabular-nums " + (round2((paidUp as number) - (settlementSar as number)) < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
+                          {formatSar(round2((paidUp as number) - (settlementSar as number)))}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-xs muted">
+                    {t("trips.invoiceSheet.balanceNote", lang)}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Btn type="button" variant="ghost" onClick={() => setPayingOpen(false)}>
+                      {t("common.cancel", lang)}
+                    </Btn>
+                    {!payPreviewUnreadable && (
+                      <Btn type="button" variant="primary" onClick={onLegacyPayBalance} className={busy ? "opacity-50 pointer-events-none" : ""}>
+                        {t(busy ? "common.recording" : "trips.invoiceSheet.confirmPayment", lang)}
+                      </Btn>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── LEGACY PAY, POSTPAID (pre-0203 invoices only) ────────────
+                  The v2 form, verbatim, minus the amount field it never had:
+                  pay_invoice() settles in full or not at all. */}
+              {payingOpen && !isLedger && !isPrepaid && (
+                <form onSubmit={onLegacyPay} className="space-y-3 max-w-sm">
+                  <div className="flex items-center gap-4 text-sm">
+                    <label className="flex items-center gap-1.5">
+                      <input type="radio" name="paymentMethod" value="cash" checked={payMethod === "cash"} onChange={() => setPayMethod("cash")} />
+                      {paymentMethodLabel("cash", lang)}
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <input type="radio" name="paymentMethod" value="bank_transfer" checked={payMethod === "bank_transfer"} onChange={() => setPayMethod("bank_transfer")} />
+                      {paymentMethodLabel("bank_transfer", lang)}
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium">
+                      {t("trips.invoiceSheet.fPaymentReference", lang)}
+                      {t(payMethod === "bank_transfer" ? "trips.invoiceSheet.sufRequired" : "trips.invoiceSheet.sufOptional", lang)}
+                    </span>
+                    <input
+                      type="text"
+                      name="paymentReference"
+                      required={payMethod === "bank_transfer"}
+                      className={INPUT}
+                      style={INPUT_STYLE}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium">
+                      {t("trips.invoiceSheet.fPaymentDate", lang)}
+                      {t(payMethod === "bank_transfer" ? "trips.invoiceSheet.sufRequired" : "trips.invoiceSheet.sufOptional", lang)}
+                    </span>
+                    <input
+                      type="date"
+                      name="paymentDate"
+                      required={payMethod === "bank_transfer"}
+                      className={INPUT}
+                      style={INPUT_STYLE}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium">{t("trips.invoiceSheet.fPayNote", lang)}</span>
+                    <textarea name="paymentNote" rows={2} className={INPUT} style={INPUT_STYLE} />
+                  </label>
+                  {payMethod === "bank_transfer" && (
+                    <label className="flex flex-col gap-1 text-sm">
+                      <span className="font-medium">{t("trips.invoiceSheet.fProof", lang)}</span>
+                      <input type="file" name="proofFile" required className={INPUT} style={INPUT_STYLE} />
+                    </label>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <Btn type="button" variant="ghost" onClick={() => setPayingOpen(false)}>
+                      {t("common.cancel", lang)}
+                    </Btn>
+                    <Btn type="submit" variant="primary" className={busy ? "opacity-50 pointer-events-none" : ""}>
+                      {t(busy ? "common.recording" : "trips.invoiceSheet.confirmPayment", lang)}
+                    </Btn>
+                  </div>
+                </form>
+              )}
+
+              {/* VOID FROM PAID TOO (0203 §11) — the guard widened with the
+                  button above it. void_invoice() accepts confirmed AND paid,
+                  and reverses every un-reversed draw and applied balance on its
+                  way, so this is the correct undo for an invoice whose money
+                  has already moved. */}
+              {(status === "confirmed" || status === "paid") && voiding && (
                 <div className="space-y-2 max-w-sm">
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="font-medium">{t("trips.invoiceSheet.fVoidReason", lang)}</span>
@@ -1597,11 +2213,6 @@ export default function InvoiceDetailModal({
                 </div>
               )}
 
-              {status === "paid" && !unpaying && (
-                <Btn variant="outline" onClick={() => setUnpaying(true)}>
-                  <AlertTriangle className="h-4 w-4" /> {t("trips.invoiceSheet.adminUnpay", lang)}
-                </Btn>
-              )}
               {status === "paid" && unpaying && (
                 <div className="space-y-2 max-w-sm">
                   <label className="flex flex-col gap-1 text-sm">
@@ -1879,9 +2490,17 @@ function PrepaidTripTable({
   // The balance row's value: the paid-up figure, or the reason there isn't one.
   // A union, not a nullable number — "unreadable" and "zero" are different
   // content and the choice between them is not this component's to make.
-  balance: { amount: number } | { note: string };
+  //
+  // OMITTED ENTIRELY on a ledger-era invoice, which is why it is optional and
+  // why it governs BOTH rows rather than one. The 0203 document states its
+  // settlement ONCE, in the closing chain under Grand Total; a balance repeated
+  // inside every trips table is the duplication that batch removed, and a
+  // paid-up balance is a lib/prepaid figure this era does not use at all.
+  // One prop, because the pair is one block.
+  balance?: { amount: number } | { note: string };
   // Balance minus this table's subtotal; null when the balance is unreadable.
-  remaining: number | null;
+  // Ignored when `balance` is omitted — neither row renders.
+  remaining?: number | null;
   fallbackWaterType?: WaterType | null;
   // v3.1 (item 6) — lets the Unpaid Trips table host the hide-amount-due
   // toggle at its header, same row as the title. Undefined for Covered.
@@ -1961,25 +2580,29 @@ function PrepaidTripTable({
               <span className="tabular-nums font-medium">{formatSar(subtotal)}</span>
             </span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="muted">{t("trips.invoiceSheet.paidUpBalance", lang)}</span>
-            {/* The unreadable arm is set as WORDS — no tabular numerals — so it
-                cannot be skimmed as an amount. A dash stood here for the legacy
-                pre-0036 case the chained balance had; the paid-up balance has
-                no such case, so the only reason this cell holds no figure now
-                is a failed read, and it says so. */}
-            {"note" in balance ? (
-              <span className="text-xs italic text-amber-600 dark:text-amber-400">{balance.note}</span>
-            ) : (
-              <span className="tabular-nums">{formatSar(balance.amount)}</span>
-            )}
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="font-medium">{t("trips.invoiceSheet.remaining", lang)}</span>
-            <span className={"tabular-nums font-semibold " + (remaining != null && remaining < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
-              {remaining == null ? <span className="muted font-normal">—</span> : formatSar(remaining)}
-            </span>
-          </div>
+          {balance && (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="muted">{t("trips.invoiceSheet.paidUpBalance", lang)}</span>
+                {/* The unreadable arm is set as WORDS — no tabular numerals — so
+                    it cannot be skimmed as an amount. A dash stood here for the
+                    legacy pre-0036 case the chained balance had; the paid-up
+                    balance has no such case, so the only reason this cell holds
+                    no figure now is a failed read, and it says so. */}
+                {"note" in balance ? (
+                  <span className="text-xs italic text-amber-600 dark:text-amber-400">{balance.note}</span>
+                ) : (
+                  <span className="tabular-nums">{formatSar(balance.amount)}</span>
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-medium">{t("trips.invoiceSheet.remaining", lang)}</span>
+                <span className={"tabular-nums font-semibold " + (remaining != null && remaining < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
+                  {remaining == null ? <span className="muted font-normal">—</span> : formatSar(remaining)}
+                </span>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </section>
@@ -2016,6 +2639,7 @@ function SpecialChargesSection({
   chargeAmountPreview,
   setChargeImageFile,
   chargeImageInputKey,
+  showStatus = true,
 }: {
   lang: Lang;
   chargeLines: InvoiceLineSnapshot[];
@@ -2039,6 +2663,14 @@ function SpecialChargesSection({
   chargeAmountPreview: number;
   setChargeImageFile: (f: File | null) => void;
   chargeImageInputKey: number;
+  // LEDGER ERA (0203) turns this off. The Status column carried a PER-CHARGE
+  // coverage verdict — "Covered" / "Rolls forward" — produced by the FIFO walk
+  // that decided, charge by charge, how much of the prepaid pool each one ate.
+  // That walk is gone: the draw is one document-level figure taken at confirm,
+  // so every charge on a ledger-era invoice is simply BILLED on it and a column
+  // whose only two values are "yes" and "yes" is noise on a bookkeeping table.
+  // Defaults true so the legacy document, which still means it, is untouched.
+  showStatus?: boolean;
 }) {
   const canSubmit = !!chargeLabel.trim() && Number(chargeQty) > 0 && Number(chargePrice) >= 0;
 
@@ -2064,7 +2696,7 @@ function SpecialChargesSection({
                     <TH>{t("trips.invoiceSheet.colQuantity", lang)}</TH>
                     <TH>{t("trips.invoiceSheet.colPrice", lang)}</TH>
                     <TH>{t("common.amount", lang)}</TH>
-                    <TH>{t("common.status", lang)}</TH>
+                    {showStatus && <TH>{t("common.status", lang)}</TH>}
                     <TH></TH>
                   </tr>
                 </thead>
@@ -2076,6 +2708,7 @@ function SpecialChargesSection({
                       <TD className="tabular-nums">{l.quantity ?? 1}</TD>
                       <TD className="tabular-nums">{formatSar(l.price_sar ?? l.amount_sar)}</TD>
                       <TD className="tabular-nums">{formatSar(l.amount_sar)}</TD>
+                      {showStatus && (
                       <TD>
                         {/* v3 §9 — this table is prepaid-only (postpaid never
                             renders SpecialChargesSection here), so `covered`
@@ -2098,6 +2731,7 @@ function SpecialChargesSection({
                           </span>
                         )}
                       </TD>
+                      )}
                       <TD>
                         <div className="flex items-center gap-2.5">
                           {l.image_path ? (
@@ -2251,16 +2885,36 @@ function TotalCard({
 // The rows must sum, with `vat`, to `total`. That is the caller's job and the
 // caller checks it — see prepaidStackReconciles. This component does not
 // re-derive money, on purpose: a frozen document's figures are read verbatim.
+//
+// `settlement` (0203, prepaid, ledger era) appends the document's own closing
+// chain and MOVES THE HERO. Without it the big figure is the Grand Total, which
+// is what postpaid and every legacy invoice want. With it the reader gets:
+//
+//     TOTAL                      17,825.00      ← demoted to a plain row
+//     Prepaid Applied           −12,000.00
+//     ─────────────────────────────────────
+//     AMOUNT PAYABLE              5,825.00      ← the hero
+//
+// which is the identical shape, wording and order the printed sheet and the
+// downloaded PDF render (lib/invoicePrintTemplate.ts / invoicePdfTemplate.ts,
+// both driven by vm.hero + vm.settlementRows). Three surfaces, one chain.
+//
+// AMOUNT PAYABLE IS NOT RE-DERIVED FROM total − applied. Both figures are
+// frozen columns off the invoice row, and subtracting them here would be a
+// fourth opinion on a sum the database already took under a lock. If they ever
+// fail to reconcile, the document must SHOW that rather than paper over it.
 function GrandTotalStack({
   lang,
   rows,
   vat,
   total,
+  settlement,
 }: {
   lang: Lang;
   rows: { label: string; amount: number }[];
   vat: number;
   total: number;
+  settlement?: { applied: number; payable: number };
 }) {
   return (
     <section className="space-y-2 break-inside-avoid">
@@ -2276,9 +2930,41 @@ function GrandTotalStack({
           <span className="tabular-nums">{formatSar(vat)}</span>
         </div>
         <div className="flex items-center justify-between pt-2 mt-1 border-t border-app">
-          <span className="font-semibold">{t("trips.invoiceSheet.grandTotal", lang)}</span>
-          <span className="text-xl font-semibold tabular-nums text-brand-600 dark:text-brand-300">{formatSar(total)}</span>
+          <span className={settlement ? "muted" : "font-semibold"}>{t("trips.invoiceSheet.grandTotal", lang)}</span>
+          <span
+            className={
+              settlement
+                ? "tabular-nums"
+                : "text-xl font-semibold tabular-nums text-brand-600 dark:text-brand-300"
+            }
+          >
+            {formatSar(total)}
+          </span>
         </div>
+        {settlement && (
+          <>
+            {/* NEGATIVE, and shown as such. It is a deduction sitting under a
+                total; printed positive it reads as an addition, and the chain
+                above it stops being one a customer can check in their head. */}
+            <div className="flex items-center justify-between">
+              <span className="muted">{t("trips.invoiceSheet.prepaidApplied", lang)}</span>
+              <span className="tabular-nums">{formatSar(round2(-settlement.applied))}</span>
+            </div>
+            <div className="flex items-center justify-between pt-2 mt-1 border-t border-app">
+              <span className="font-semibold">{t("trips.invoiceSheet.amountPayable", lang)}</span>
+              <span
+                className={
+                  "text-xl font-semibold tabular-nums " +
+                  (settlement.payable > 0
+                    ? "text-brand-600 dark:text-brand-300"
+                    : "text-emerald-600 dark:text-emerald-400")
+                }
+              >
+                {formatSar(settlement.payable)}
+              </span>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );

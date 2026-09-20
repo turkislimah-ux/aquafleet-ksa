@@ -215,6 +215,10 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
 // Special charges. Six columns — the sheet's seven minus its actions column,
 // which holds internal-only attach/delete controls that have no meaning on a
 // customer's document.
+// Status column present or absent as ONE unit — header, body cell and the
+// foot's colspan arithmetic together. See the same note in
+// lib/invoicePdfTemplate.ts: leaving the colspans at 4+2 over a five-column
+// table makes the browser invent a sixth, blank column.
 function chargesSection(s: VmChargesSection, labels: InvoiceVm["labels"]): string {
   const body = s.rows
     .map(
@@ -225,7 +229,7 @@ function chargesSection(s: VmChargesSection, labels: InvoiceVm["labels"]): strin
         <td class="num">${numPlain(r.quantity)}</td>
         <td class="num">${num2(r.price)}</td>
         <td class="num">${num2(r.amount)}</td>
-        <td><span class="pill ${r.covered ? "on" : "off"}">${bl(r.statusLabel, "ar inline")}</span></td>
+        ${s.showStatus ? `<td><span class="pill ${r.covered ? "on" : "off"}">${bl(r.statusLabel, "ar inline")}</span></td>` : ""}
       </tr>`,
     )
     .join("");
@@ -240,14 +244,14 @@ function chargesSection(s: VmChargesSection, labels: InvoiceVm["labels"]): strin
           <th class="num" style="width:15mm">${bl(labels.colQuantity)}</th>
           <th class="num" style="width:23mm">${bl(labels.colPrice)}</th>
           <th class="num" style="width:25mm">${bl(labels.colAmount)} <span class="cur-tag">(${esc(labels.currency.en)})</span></th>
-          <th style="width:28mm">${bl(labels.colStatus)}</th>
+          ${s.showStatus ? `<th style="width:28mm">${bl(labels.colStatus)}</th>` : ""}
         </tr>
       </thead>
       <tbody>${body}</tbody>
       <tfoot>
         <tr class="first grand">
           <td colspan="4" class="lbl">${bl(fillBi(labels.chargesSubtotal, { net: num2(s.preVat), vat: num2(s.vat) }), "ar inline")}</td>
-          <td class="num" colspan="2">${num2(s.total)}</td>
+          <td class="num" colspan="${s.showStatus ? 2 : 1}">${num2(s.total)}</td>
         </tr>
       </tfoot>
     </table>
@@ -307,19 +311,22 @@ export async function buildInvoicePrintHtml(data: PdfInvoiceData): Promise<strin
   const qr = await qrSvg(vm);
 
   // The settlement panel. ONE panel, not two: the grand-total stack and the
-  // Amount Due figure are the same conversation, and printing them as two
-  // competing blocks makes the document ask the reader which number to pay.
+  // hero figure are the same conversation, and printing them as two competing
+  // blocks makes the document ask the reader which number to pay.
   //
-  // Prepaid: the stack's rows and TOTAL are the document's value, and Amount
-  // Due — what is actually collectible after the prepaid pool — is the hero
-  // figure. Postpaid (and prepaid with the hide toggle on): there is no
-  // separate due figure, so TOTAL itself is the hero. `vm.amountDue` is null in
-  // exactly those two cases, so this branch needs no status or mode test.
+  // Reads top to bottom: subtotal rows → Total VAT → [Grand Total] →
+  // [settlement] → the hero. Ledger-era prepaid puts Prepaid Applied in the
+  // settlement slot and heroes Amount Payable, so the panel spells out an
+  // arithmetic the reader can follow — total, minus what the balance covered,
+  // equals what to pay. Legacy prepaid heroes Amount Due; postpaid (and
+  // anything with the hide toggle on) heroes TOTAL itself.
+  //
+  // WHICH of those it is was decided once, in the view model. This renderer
+  // reads `vm.hero` and never re-derives it — three surfaces each writing
+  // their own `vm.amountDue ? … : …` is how they drifted apart before.
   const stackRows = vm.totals.rows
     .map((r) => `<div class="r0"><span>${bl(r.label, "ar inline")}</span><b>${num2(r.amount)}</b></div>`)
     .join("");
-  const heroLabel = vm.amountDue ? L.amountDue : L.grandTotal;
-  const heroAmount = vm.amountDue ? vm.amountDue.totals.total : vm.totals.total;
 
   const body = `
 <div class="doc">
@@ -385,13 +392,28 @@ export async function buildInvoicePrintHtml(data: PdfInvoiceData): Promise<strin
         // on) printing it here too puts the same number in the panel twice, a
         // few millimetres apart — which reads as two different figures that
         // happen to match, and invites the customer to look for the difference.
-        vm.amountDue
-          ? `<div class="r0"><span>${bl(L.grandTotal, "ar inline")}</span><b>${num2(vm.totals.total)}</b></div>`
-          : ""
+        vm.heroIsGrandTotal
+          ? ""
+          : `<div class="r0"><span>${bl(L.grandTotal, "ar inline")}</span><b>${num2(vm.totals.total)}</b></div>`
+      }
+      ${
+        // Settlement sits BELOW the Grand Total and ABOVE the hero, because
+        // that is the order the arithmetic happens in. Hairline, not the
+        // panel's thick rule: the thick rule is reserved for the one edge
+        // before the figure the customer acts on, and a second heavy line
+        // would split the panel into two blocks that argue.
+        //
+        // Empty array everywhere except ledger-era prepaid, so this prints by
+        // iterating and never by testing the mode.
+        vm.settlementRows.length === 0
+          ? ""
+          : `<div class="settled">${vm.settlementRows
+              .map((r) => `<div class="r0"><span>${bl(r.label, "ar inline")}</span><b>${num2(r.amount)}</b></div>`)
+              .join("")}</div>`
       }
       <div class="sep"></div>
-      <div class="lab">${esc(heroLabel.en)}<span class="ar" dir="rtl">${esc(heroLabel.ar)}</span></div>
-      <div class="amt" dir="ltr">${num2(heroAmount)}<span class="cur">${esc(L.currency.en)}</span></div>
+      <div class="lab">${esc(vm.hero.label.en)}<span class="ar" dir="rtl">${esc(vm.hero.label.ar)}</span></div>
+      <div class="amt" dir="ltr">${num2(vm.hero.amount)}<span class="cur">${esc(L.currency.en)}</span></div>
     </div>
   </div>
 

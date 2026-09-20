@@ -1,15 +1,46 @@
-// Invoice assembly engine (Finance Commit 5a, spec §6/§7/§8/§10/§11 — v3
-// cutover per finance-invoice-spec.md v3 §5/§9). Pure math, no I/O — mirrors
-// lib/prepaid.ts / lib/vat.ts's discipline (pure functions, own test harness
-// before the lifecycle actions / UI touch it).
+// Invoice assembly engine (Finance Commit 5a, spec §6/§7/§8/§10/§11). Pure
+// math, no I/O — mirrors lib/prepaid.ts / lib/vat.ts's discipline (pure
+// functions, own test harness before the lifecycle actions / UI touch it).
 //
-// v3 CUTOVER: reuses the v3 engines exclusively —
-//   - splitCoveredUnpaidItems (lib/prepaid.ts) for the prepaid covered/unpaid
-//     split (ONE combined trips+charges FIFO queue, VAT-inclusive consumption)
-//   - consumingItems (lib/prepaid.ts) for postpaid's plain delivered-trip list
-//   - calculateVat (lib/vat.ts) for every document-level VAT figure
-// No legacy (v2) consumption function is imported or called anywhere in this
-// file — see lib/prepaid.ts's header for the retired-functions note.
+// ===========================================================================
+// LEDGER ERA (0203) — READ THIS BEFORE THE REST OF THIS HEADER
+// ===========================================================================
+// THIS FILE NO LONGER SPLITS A PREPAID INVOICE INTO COVERED AND UNPAID, and
+// the several hundred lines below describing how it did are kept because the
+// documents they produced are still on the books and still render — NOT
+// because anything here still computes them.
+//
+// What changed: the prepaid draw is a LEDGER fact, decided by
+// confirm_invoice() server-side at the moment of confirm —
+// `draw = min(max(Available,0), grand_total)`, frozen onto
+// invoices.prepaid_applied_sar / amount_payable_sar. Nothing app-side computes
+// it, so nothing app-side may present a per-LINE coverage verdict either. A
+// FIFO walk here would be a second, competing opinion about the same money,
+// arrived at from a slice of history the document happens to see — which is
+// the exact class of bug the running-balance removal already settled once.
+//
+// So BOTH arms of this function now have the same shape: every delivered trip
+// in the period, every charge FK-bound to this invoice, ONE document-level VAT
+// pass, `covered` zeros, `amountDue === grand`, no `tripTotals`. The prepaid
+// arm keeps its separate `chargeLines` array (the prepaid document has always
+// printed a Special Charges section and that structure stays), and that is now
+// the ONLY structural difference between the two.
+//
+// `covered` and `amountDue` are NOT deleted from InvoiceAssembly: confirm_invoice
+// still takes the covered/due/grand triple and still asserts covered + due ===
+// grand (TIER B), so the zeros are load-bearing, not vestigial. Frozen rows
+// carrying real covered figures render AS ISSUED — see the VM's `era` flag.
+//
+// The `covered` flag on a charge line is likewise not set any more. A ledger-era
+// invoice bills every charge it lists; nothing rolls forward. Frozen rows keep
+// their flags and keep printing their pills.
+// ===========================================================================
+//
+// ENGINES: consumingItems (lib/prepaid.ts) for the delivered-trip list, and
+// calculateVat (lib/vat.ts) for every document-level VAT figure.
+// splitCoveredUnpaidItems is NOT imported here any more; it is still live in
+// lib/prepaid.ts and still tested there (scripts/frozen-split-check.ts reads
+// frozen rows through it), it just no longer decides what a document says.
 //
 // PERIOD-MEMBERSHIP RULE (the one subtle correctness point in this file):
 // splitCoveredUnpaidItems/consumingItems are called over the customer's FULL
@@ -24,7 +55,12 @@
 // linkage — this reuses that guarantee correctly. Callers MUST pass the
 // customer's full trip/topup/charge history, not a period-prefiltered slice.
 //
-// THREE-TABLE / LEDGER MODEL (v3 §9, prepaid only — replaces the old
+// ── FROM HERE TO THE IMPORTS: THE SUPERSEDED (PRE-0203) PREPAID LAW ────────
+// Every paragraph below describes what this file did BEFORE the ledger era and
+// is retained for the invoices frozen under it, which render as issued and are
+// never re-derived (freeze law 0027). None of it runs.
+//
+// THREE-TABLE / LEDGER MODEL (v3 §9, prepaid only — replaced the old
 // two-table model):
 //   Covered TRIPS table — trips only (never charges), already paid from
 //     balance.
@@ -198,13 +234,11 @@
 // items, it doesn't un-consume it).
 
 import {
-  splitCoveredUnpaidItems,
   consumingItems,
   VAT_RATE,
   round2,
   type BalanceReturnLite,
   type ConsumingTrip,
-  type ConsumingCharge,
   type ConsumedItem,
   type TopupLite,
 } from "./prepaid";
@@ -416,8 +450,10 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     periodStart,
     periodEnd,
     trips,
-    topups,
-    returns = [],
+    // `topups` and `returns` are ACCEPTED AND IGNORED since 0203. They fed the
+    // FIFO coverage walk, which no longer runs here — the draw is a ledger fact
+    // decided by confirm_invoice(). They stay on AssembleInvoiceInput so no
+    // caller has to churn this release; removing them from the type is Batch 3.
     specialCharges,
     sellerSnapshot = null,
     buyerSnapshot = null,
@@ -495,140 +531,77 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     };
   }
 
-  // --- Prepaid: v3 three-table model -------------------------------------
-  const chargesForEngine: ConsumingCharge[] = specialCharges.map((c) => ({
-    id: c.id,
-    charge_date: resolveChargeDate(c, periodEnd),
-    amount_sar: round2(c.amount_sar),
-    label: c.label,
-  }));
-
-  // periodEnd scopes TRIP consumption only. consumingItems() no longer gates
-  // charges by date, so a charge dated after periodEnd now reaches the FIFO
-  // walk and can be covered like any other — it used to be displayed by
-  // chargeLines below, deducted by v_customer_prepaid_balance, and refused
-  // coverage here, all at once (026-000017).
-  const split = splitCoveredUnpaidItems(topups, trips, chargesForEngine, periodEnd, returns);
-
-  const coveredTripEntries = split.covered
+  // --- Prepaid, LEDGER ERA (0203) ----------------------------------------
+  // Same shape as the postpaid arm above: every delivered trip in the period,
+  // every charge FK-bound to this invoice, ONE document-level VAT pass. NO
+  // coverage walk — `min(Available, grand_total)` is drawn by confirm_invoice()
+  // and frozen onto invoices.prepaid_applied_sar, so no per-LINE verdict exists
+  // to compute here any more.
+  //
+  // The ONE structural difference that survives: the prepaid document keeps its
+  // charges in a SEPARATE `chargeLines` array (its own Special Charges table),
+  // where postpaid merges them into unpaidLines. That is layout, not money.
+  const unpaidTripEntries = consumingItems(trips, [], periodEnd)
     .filter((e): e is ConsumedItem & { kind: "trip" } => e.kind === "trip")
     .filter((e) => inPeriod(e.trip_date))
     .filter(notReservedElsewhere);
-  const unpaidTripEntries = split.unpaid
-    .filter((e): e is ConsumedItem & { kind: "trip" } => e.kind === "trip")
-    .filter((e) => inPeriod(e.trip_date))
-    .filter(notReservedElsewhere);
-  const coveredChargeIds = new Set(split.covered.filter((e) => e.kind === "charge").map((e) => e.id));
 
-  const coveredLines = coveredTripEntries.map(toTripLine);
+  const coveredLines: InvoiceLine[] = [];
   const unpaidLines = unpaidTripEntries.map(toTripLine);
 
   // Special Charges table: ALL of THIS invoice's charges (not reserved
-  // elsewhere), covered+uncovered together, each tagged.
+  // elsewhere).
   //
-  // NOT period-filtered — deliberately. Every charge is FK-bound to exactly one
-  // invoice at creation, so notReservedElsewhere alone scopes this correctly,
-  // while v_customer_prepaid_balance consumes EVERY charge on a non-void
-  // invoice with no date filter whatsoever. A charge_date filter here made the
-  // invoice omit charges the balance had already been deducted for (0181).
+  // NOT period-filtered — deliberately, and unchanged from both old arms. Every
+  // charge is FK-bound to exactly one invoice at creation, so
+  // notReservedElsewhere alone scopes this correctly. A charge_date filter here
+  // made the invoice omit charges the balance had already been deducted for
+  // (0181).
   //
-  // 0181 removed the filter from THIS half only. The MATH half kept it one
-  // level down, inside consumingItems(), so the disagreement survived in the
-  // shape that mattered more: the charge was listed here and refused coverage
-  // there. Both halves are ungated now — see splitCoveredUnpaidItems above.
-  const chargeLines: InvoiceLine[] = specialCharges
-    .filter(notReservedElsewhere)
-    .map((c) => ({
-      id: c.id,
-      kind: "charge",
-      trip_date: resolveChargeDate(c, periodEnd),
-      description: c.label,
-      amount_sar: round2(c.amount_sar),
-      vat_sar: round2(c.amount_sar * VAT_RATE),
-      quantity: c.quantity ?? 1,
-      price_sar: c.price_sar ?? c.amount_sar,
-      image_path: c.image_path ?? null,
-      covered: coveredChargeIds.has(c.id),
-    }));
-
-  // ---- Trips-table feet: one VAT-inclusive total each ----
-  // Σ consumedAmount over the lines each table actually prints. Nothing chains,
-  // nothing walks a pool: see InvoiceTripTableTotals above for what was deleted
-  // here and why. `unpaid` is still load-bearing beyond display — Amount Due
-  // reads it verbatim below rather than rounding the same trips a second time.
-  const coveredTripsInclVat = round2(coveredTripEntries.reduce((s, e) => s + e.consumedAmount, 0));
-  const unpaidTripsInclVat = round2(unpaidTripEntries.reduce((s, e) => s + e.consumedAmount, 0));
-
-  const tripTotals: InvoiceTripTableTotals = {
-    covered: coveredTripsInclVat,
-    unpaid: unpaidTripsInclVat,
-  };
+  // No `covered` flag: every charge on a ledger-era invoice is BILLED on it.
+  const ownCharges = specialCharges.filter(notReservedElsewhere);
+  const chargeLines: InvoiceLine[] = ownCharges.map((c) => ({
+    id: c.id,
+    kind: "charge",
+    trip_date: resolveChargeDate(c, periodEnd),
+    description: c.label,
+    amount_sar: round2(c.amount_sar),
+    vat_sar: round2(c.amount_sar * VAT_RATE),
+    quantity: c.quantity ?? 1,
+    price_sar: c.price_sar ?? c.amount_sar,
+    image_path: c.image_path ?? null,
+  }));
 
   // ---- covered / amountDue / grand (InvoiceTableTotals) ----
-  // ORDER OF DERIVATION IS THE WHOLE RULE (see the GRAND TOTAL header note):
-  // grand is computed FIRST, from every line; amountDue keeps its own
-  // pool-exact rule; covered is what is left. covered is therefore never
-  // computed from its own line set — deriving it was how covered charges went
-  // missing from covered_subtotal while sitting inside grand.
-  const coveredTripVatItems = toVatItems(coveredTripEntries);
-
-  // Amount Due = unpaid TRIPS + UNCOVERED special charges, VAT-inclusive.
-  // The trips half is still taken verbatim from tripTotals.unpaid (never
-  // independently rounded); the charges half is summed per-item at
-  // round2(amount * 1.15), which is exactly ConsumedItem.consumedAmount — see
-  // the AMOUNT DUE note in the file header for why both halves are built this
-  // way and why this figure is no longer equal to ledger.unpaid.subtotal.
+  // ONE document-level calculateVat() pass over every line this document shows
+  // — trips + every special charge — so the printed VAT is rounded once against
+  // the full taxable base exactly as ZATCA requires (lib/vat.ts). Identical
+  // treatment to the postpaid arm.
   //
-  // `covered !== true` rather than `covered === false`: covered is optional on
-  // InvoiceLine and undefined for postpaid/trip lines. It is always set on the
-  // prepaid charge lines built above, so the two are equivalent here — the
-  // stricter form is written to survive a future line that omits the flag,
-  // because an unflagged charge belongs in Amount Due (billable), never
-  // silently in Grand Total (settled).
-  const uncoveredChargeLines = chargeLines.filter((l) => l.covered !== true);
-  const uncoveredChargePreVat = round2(uncoveredChargeLines.reduce((s, l) => s + l.amount_sar, 0));
-  const uncoveredChargeInclVat = round2(
-    uncoveredChargeLines.reduce((s, l) => s + round2(l.amount_sar * (1 + VAT_RATE)), 0),
-  );
-
-  const unpaidTripPreVat = round2(unpaidTripEntries.reduce((s, e) => s + e.amount, 0));
-  const amountDueSubtotal = round2(unpaidTripPreVat + uncoveredChargePreVat);
-  const amountDueTotal = round2(unpaidTripsInclVat + uncoveredChargeInclVat);
-  const amountDue: InvoiceTableTotals = {
-    subtotal: amountDueSubtotal,
-    vat: round2(amountDueTotal - amountDueSubtotal),
-    total: amountDueTotal,
-  };
-
-  // GRAND TOTAL = the whole invoice. EVERY line this document shows: covered
-  // trips + unpaid trips + every special charge, covered or not. ONE
-  // document-level calculateVat() pass, so the printed VAT is rounded once
-  // against the full taxable base exactly as ZATCA requires (lib/vat.ts).
-  const grandVat = calculateVat([
-    ...coveredTripVatItems,
+  // covered is ZERO and amountDue === grand. The whole invoice is billable; the
+  // prepaid draw against it happens AFTER this, in confirm_invoice(), and shows
+  // on the document as the frozen `prepaid_applied_sar` / `amount_payable_sar`
+  // pair — not as a per-line split. These two fields are NOT vestigial:
+  // confirm_invoice still takes the covered/due/grand triple and still asserts
+  // covered + due === grand on all three components (TIER B, 0191), so the
+  // zeros are load-bearing and must keep being sent.
+  const docVat = calculateVat([
     ...toVatItems(unpaidTripEntries),
-    ...chargesToVatItems(chargeLines.map((l) => ({ id: l.id, label: l.description, amount_sar: l.amount_sar }))),
+    ...chargesToVatItems(ownCharges),
   ]);
-  const grand: InvoiceTableTotals = {
-    subtotal: grandVat.subtotal,
-    vat: grandVat.vatAmount,
-    total: grandVat.grandTotal,
-  };
 
-  // COVERED = GRAND − AMOUNT DUE, component-wise. Not its own VAT pass, on
-  // purpose: subtraction is what makes covered + amountDue === grand hold on
-  // all three figures identically rather than approximately, and it is the
-  // only arrangement in which BOTH the ZATCA document-level rounding of grand
-  // AND the pool-exact per-item rounding of amountDue survive. The <= 0.01
-  // residue between the two conventions lands here, in the already-SETTLED
-  // figure, where it settles nothing — never in the collectible.
-  //
-  // The subtotals are exact sums either way (no rounding to disagree about),
-  // so this only ever moves a halala of VAT.
-  const covered: InvoiceTableTotals = {
-    subtotal: round2(grand.subtotal - amountDue.subtotal),
-    vat: round2(grand.vat - amountDue.vat),
-    total: round2(grand.total - amountDue.total),
+  const covered: InvoiceTableTotals = { subtotal: 0, vat: 0, total: 0 };
+  // Two separate literals, never one shared reference — a caller that mutated
+  // one would otherwise silently move the other.
+  const amountDue: InvoiceTableTotals = {
+    subtotal: docVat.subtotal,
+    vat: docVat.vatAmount,
+    total: docVat.grandTotal,
+  };
+  const grand: InvoiceTableTotals = {
+    subtotal: docVat.subtotal,
+    vat: docVat.vatAmount,
+    total: docVat.grandTotal,
   };
 
   return {
@@ -642,7 +615,8 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     covered,
     amountDue,
     grand,
-    tripTotals,
+    // NO tripTotals. The prepaid document has one trips table now, and it foots
+    // with the document-level total like postpaid's does.
     sellerSnapshot,
     buyerSnapshot,
     customerEmail,

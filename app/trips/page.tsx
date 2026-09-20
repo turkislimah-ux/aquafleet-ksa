@@ -167,7 +167,15 @@ export default async function TripsPage() {
           // Finance 5c: vat_number/cr_number/billing_address/email added —
           // buyer identity + mailto target for the invoice UI. Batch D: name_ar
           // added — now wired into ProjectModal's Customer section (edit prefill).
-          "id, name, name_ar, default_station, delivery_site_address, customer_type, contact_name, phone, delivery_lat, delivery_lng, vat_number, cr_number, billing_address, email"
+          //
+          // payment_mode (0203) — THE arrangement, read from the customer and
+          // not from the project. confirm_invoice draws the prepaid pool on
+          // `customers.payment_mode` (0203 §10), so every surface that predicts
+          // that draw has to read the same column or it will predict it for the
+          // wrong people. projects.payment_mode survives as the edit surface
+          // (ProjectModal, behind can_switch_payment_mode) and 0203's backfill
+          // guarantees the two agreed at migration time.
+          "id, name, name_ar, default_station, delivery_site_address, customer_type, contact_name, phone, delivery_lat, delivery_lng, vat_number, cr_number, billing_address, email, payment_mode"
         )
         .is("archived_at", null)
         .order("name", { ascending: true }),
@@ -350,6 +358,11 @@ export default async function TripsPage() {
     cr_number: string | null;
     billing_address: string | null;
     email: string | null;
+    // NOT NULL in the database since 0203 (backfilled, then constrained), so
+    // this is the one payment-mode field on the page that never needs a null
+    // arm. Typed as the union, not `string`, so a third mode cannot arrive
+    // silently.
+    payment_mode: PaymentMode;
   }[];
   const trucks = (trucksRes.data ?? []) as {
     id: string;

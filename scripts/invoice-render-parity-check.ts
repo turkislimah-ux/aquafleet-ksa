@@ -109,9 +109,20 @@ function round2(n: number): number {
 
 const totals = (sub: number) => ({ subtotal: sub, vat: round2(sub * 0.15), total: round2(sub * 1.15) });
 
-// Prepaid: trips split covered/unpaid, one covered charge and one that rolls
-// forward, a frozen ledger, and a bank account flagged for the invoice.
+// LEGACY-ERA prepaid: trips split covered/unpaid, one covered charge and one
+// that rolls forward, a frozen ledger, and a bank account flagged for the
+// invoice. This is an invoice CONFIRMED BEFORE 0203, and it must keep rendering
+// exactly this way forever — 0027's freeze law. Every assertion below that
+// names `prepaid` is therefore a REGRESSION guard on the old document, not a
+// description of what the app produces today; the ledger-era fixtures follow.
 const prepaid: PdfInvoiceData = {
+  era: "legacy",
+  // No frozen figures — that absence IS what makes it legacy (see invoiceEra()
+  // in app/trips/invoiceActions.ts). Spelling them out rather than relying on
+  // the type, because a future default of 0 here would silently reclassify
+  // every case built off this fixture.
+  prepaidAppliedSar: null,
+  amountPayableSar: null,
   status: "confirmed",
   paymentMode: "prepaid",
   invoiceNumber: "026-000009",
@@ -200,12 +211,87 @@ const draft: PdfInvoiceData = {
   bankAccounts: [],
 };
 
+// ---------------------------------------------------------------------------
+// LEDGER ERA (0203) — the document the app produces from here on
+// ---------------------------------------------------------------------------
+// ONE trips table. No covered arm, no per-line coverage verdict, no trips-table
+// feet. The draw against the customer's balance is not a property of any LINE:
+// confirm_invoice() takes min(Available, grand_total) at the confirm instant
+// and freezes the two figures below, and the document reports them under the
+// totals. Charges keep their own table (layout, not money) but lose the Status
+// column along with the verdict it displayed.
+//
+// SHORTFALL CASE: 15,500 net → 17,825.00 gross, of which the balance covered
+// 12,000.00, leaving 5,825.00 to collect. Deliberately NOT derivable from any
+// subtotal above — the draw is a fact about the CUSTOMER's pool at one instant,
+// and no renderer may reconstruct it from the document's own rows.
+const ledgerPrepaid: PdfInvoiceData = {
+  ...prepaid,
+  era: "ledger",
+  invoiceNumber: "026-000101",
+  coveredLines: [],
+  unpaidLines: [trip(1, 12, 450), trip(2, 8, 450), trip(3, 10, 450)],
+  // `covered` stays at zero and `amountDue` equals `grand` — the shape
+  // lib/invoice.ts now produces, and the shape confirm_invoice()'s TIER B
+  // assertion (covered + due === grand) still requires.
+  covered: totals(0),
+  amountDue: totals(15500),
+  grand: totals(15500),
+  tripTotals: undefined,
+  prepaidAppliedSar: 12000,
+  amountPayableSar: 5825,
+};
+
+// FULLY COVERED: the balance swallowed the whole invoice, so the payable is
+// 0.00 and confirm_invoice() flipped it straight to paid without anyone
+// recording a payment. The zero must still PRINT — a customer whose balance
+// paid the lot is exactly who needs to see the arithmetic.
+const ledgerPrepaidCovered: PdfInvoiceData = {
+  ...ledgerPrepaid,
+  status: "paid",
+  invoiceNumber: "026-000102",
+  prepaidAppliedSar: 17825,
+  amountPayableSar: 0,
+  paidAt: "2026-07-02",
+};
+
+// LEDGER-ERA POSTPAID. 0203 freezes a payable in BOTH modes — 0 applied, the
+// full grand total payable — so `amountPayableSar` being non-null is NOT by
+// itself a licence to print the settlement pair. This case exists to prove the
+// postpaid document is byte-identical to the pre-0203 one: no applied line, no
+// payable line, TOTAL still the hero.
+const ledgerPostpaid: PdfInvoiceData = {
+  ...postpaid,
+  era: "ledger",
+  invoiceNumber: "026-000103",
+  prepaidAppliedSar: 0,
+  amountPayableSar: round2(14700 * 1.15),
+};
+
+// LEDGER-ERA DRAFT. Nothing is frozen until confirm, so both figures are null
+// and the settlement pair must not appear. Printing "Prepaid Applied 0.00"
+// here would tell the customer their balance was checked and found empty.
+const ledgerDraft: PdfInvoiceData = {
+  ...ledgerPrepaid,
+  status: "draft",
+  invoiceNumber: null,
+  issueDate: null,
+  bankAccounts: [],
+  prepaidAppliedSar: null,
+  amountPayableSar: null,
+};
+
 const CASES: ReadonlyArray<readonly [string, PdfInvoiceData]> = [
   ["prepaid / confirmed", prepaid],
   ["prepaid / hide amount due", { ...prepaid, hideAmountDue: true }],
   ["postpaid / paid", postpaid],
   ["prepaid / void", voided],
   ["prepaid / draft, no bank", draft],
+  ["LEDGER prepaid / confirmed, shortfall", ledgerPrepaid],
+  ["LEDGER prepaid / fully covered, paid", ledgerPrepaidCovered],
+  ["LEDGER prepaid / hide amount due", { ...ledgerPrepaid, hideAmountDue: true }],
+  ["LEDGER postpaid / paid", ledgerPostpaid],
+  ["LEDGER prepaid / draft", ledgerDraft],
 ];
 
 // ---------------------------------------------------------------------------
@@ -317,18 +403,46 @@ async function main() {
     `lines ${lineSum} != grand subtotal ${prepaid.grand.subtotal}`,
   );
 
-  console.log("\n=== 5. Hero figure follows vm.amountDue, nothing else ===");
-  const heroCases: ReadonlyArray<readonly [string, PdfInvoiceData, "due" | "total"]> = [
-    ["prepaid, toggle off", prepaid, "due"],
-    ["prepaid, toggle ON", { ...prepaid, hideAmountDue: true }, "total"],
-    ["postpaid", postpaid, "total"],
+  console.log("\n=== 5. Hero figure — one decision, made in the view model ===");
+  // THE BIG NUMBER IN THE BOX, per era and per mode. It used to be re-derived
+  // by each renderer writing its own `vm.amountDue ? … : …`, which is how the
+  // sheet and the PDF drifted; it is `vm.hero` now, and this pins what that
+  // resolves to from the OUTSIDE — reading the rendered document, not the VM.
+  const heroCases: ReadonlyArray<readonly [string, PdfInvoiceData, "due" | "total" | "payable"]> = [
+    ["legacy prepaid, toggle off", prepaid, "due"],
+    ["legacy prepaid, toggle ON", { ...prepaid, hideAmountDue: true }, "total"],
+    ["legacy postpaid", postpaid, "total"],
+    // Ledger era: the payable is the ONLY figure the customer acts on, and it
+    // is a frozen column — not amountDue, which now equals grand exactly.
+    ["LEDGER prepaid, shortfall", ledgerPrepaid, "payable"],
+    ["LEDGER prepaid, fully covered", ledgerPrepaidCovered, "payable"],
+    // Toggle ON suppresses the whole balance disclosure, so the hero falls back
+    // to TOTAL — the customer's copy says what the work cost and nothing about
+    // their pool.
+    ["LEDGER prepaid, toggle ON", { ...ledgerPrepaid, hideAmountDue: true }, "total"],
+    // Postpaid freezes a payable too (= grand). It must NOT become the hero
+    // label: that would rename TOTAL on every postpaid invoice we issue.
+    ["LEDGER postpaid", ledgerPostpaid, "total"],
+    // Draft: nothing frozen, so nothing to hero but the total.
+    ["LEDGER prepaid draft", ledgerDraft, "total"],
   ];
   for (const [name, data, want] of heroCases) {
     const html = await buildInvoicePrintHtml(data);
     const hero = heroOf(html);
-    const wantAmt = want === "due" ? data.amountDue.total : data.grand.total;
+    const wantAmt =
+      want === "due" ? data.amountDue.total : want === "payable" ? (data.amountPayableSar ?? -1) : data.grand.total;
     const shows = hero.includes(wantAmt.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-    check(`${name} — hero is the ${want === "due" ? "Amount Due" : "grand total"}: ${hero}`, shows);
+    const wantLabel = want === "due" ? "Amount Due" : want === "payable" ? "Amount Payable" : "grand total";
+    check(`${name} — hero is the ${wantLabel}: ${hero}`, shows);
+    // THE LABEL, not just the figure. On the fully-covered case the payable is
+    // 0.00 and on a toggle-ON case the hero equals the grand total, so a check
+    // that only compared NUMBERS would pass while the box said the wrong word.
+    const saysPayable = /Amount Payable/i.test(hero);
+    check(
+      `${name} — the box is titled "${wantLabel}"`,
+      want === "payable" ? saysPayable : !saysPayable,
+      hero,
+    );
   }
 
   console.log("\n=== 6. QR survives on both, and the plain sheet has NO ornament ===");
@@ -582,42 +696,164 @@ async function main() {
     check("…and the one path expression carries the template version", liveHits(src, "PDF_CACHE_VERSION", "ts").length >= 2);
   }
 
-  console.log("\n=== 11. PAY-WITH-BALANCE PANEL — previews the payment, not a frozen column ===");
-  // The panel promises the balance a payment will leave behind. It may only
-  // subtract the figure the payment itself subtracts — `settlementSar`, summed
-  // server-side by lib/prepaid's `settlementGross`, which IS paidUpCore's debit
-  // side. `view.grand.total` is the stored `grand_total_sar`, and on invoices
-  // frozen by the covered-only engine that column EXCLUDES lines the document
-  // lists: 026-000017 previewed 7,544.00 against a real 8,694.00 draw-down,
-  // 026-000009 previewed 0.00 against 4,761.00.
+  console.log("\n=== 11. THE TWO SETTLEMENT PANELS — each reads its own era's figure ===");
+  // TWO panels now, because there are two eras, and the failure mode is the
+  // same in both: a panel that promises what is outstanding while reading a
+  // figure computed for something else.
   //
-  // SCOPED TO THE PANEL, deliberately. `grand.total` is correct and live
+  //   LEDGER (v_invoice_settlement) — what is outstanding TODAY. Must come from
+  //   the view's `remainder_sar`, which subtracts payments, applied balances and
+  //   write-offs in SQL under the same lock the RPCs take. `grand.total` is the
+  //   billed amount and never moves; reading it here would show a fully-paid
+  //   invoice still owing its full total.
+  //
+  //   LEGACY (pre-0203, pay_invoice) — the balance a full-amount payment will
+  //   leave behind. Must subtract `settlementSar`, summed server-side by
+  //   lib/prepaid's `settlementGross`, which IS paidUpCore's debit side.
+  //   `view.grand.total` is the stored `grand_total_sar`, and on invoices frozen
+  //   by the covered-only engine that column EXCLUDES lines the document lists:
+  //   026-000017 previewed 7,544.00 against a real 8,694.00 draw-down,
+  //   026-000009 previewed 0.00 against 4,761.00. Those invoices still exist and
+  //   still reach this panel, so the guard outlives the engine that needed it.
+  //
+  // SCOPED TO THE PANELS, deliberately. `grand.total` is correct and live
   // elsewhere in this file — the Grand Total stack is literally that figure —
   // so a whole-file scan would fail on right code, and a check that fails on
   // right code gets widened until it guards nothing (see section 9).
+  //
+  // stripComments preserves line numbering (liveHits maps stripped lines back
+  // onto source lines), so slicing the stripped text by those line numbers
+  // yields each panel's CODE with its prose removed. That matters twice over
+  // here: both panels carry comments naming `grand.total` to explain why they
+  // do not use it.
   {
     const rel = "app/trips/InvoiceDetailModal.tsx";
     const src = readFileSync(join(process.cwd(), rel), "utf8");
-    const open = liveHits(src, "payingOpen && isPrepaid", "ts");
-    const close = liveHits(src, "payingOpen && !isPrepaid", "ts");
-    check("the prepaid pay panel is locatable, exactly once", open.length === 1 && close.length === 1);
-    check("…and the postpaid form follows it", open.length === 1 && close.length === 1 && open[0].line < close[0].line);
+    const stripped = stripComments(src, "ts").split("\n");
 
+    // ── Ledger settlement panel ────────────────────────────────────────────
+    // Bounded by its own title string and the payment-history block that
+    // follows it — both are `no-print` i18n keys used exactly once, which makes
+    // them stabler landmarks than a JSX condition that may gain a clause.
+    const sOpen = liveHits(src, "trips.invoiceSheet.sTitle", "ts");
+    const sClose = liveHits(src, "trips.invoiceSheet.historyTitle", "ts");
+    check("the ledger settlement panel is locatable, exactly once", sOpen.length === 1 && sClose.length === 1);
+    check(
+      "…and the payment history follows it",
+      sOpen.length === 1 && sClose.length === 1 && sOpen[0].line < sClose[0].line,
+    );
+    if (sOpen.length === 1 && sClose.length === 1 && sOpen[0].line < sClose[0].line) {
+      const panel = stripped.slice(sOpen[0].line - 1, sClose[0].line - 1).join("\n");
+      check("the settlement panel does NOT read grand.total", !panel.includes("grand.total"));
+      check("…nor the document's amountDue", !panel.includes("amountDue"));
+      check("…and DOES state the view's own remainder", panel.includes("remainderSar"));
+      check("…off the frozen payable, not a recomputed one", panel.includes("payable_sar"));
+    }
+
+    // ── Legacy pay-with-balance panel ──────────────────────────────────────
+    const open = liveHits(src, "payingOpen && !isLedger && isPrepaid", "ts");
+    const close = liveHits(src, "payingOpen && !isLedger && !isPrepaid", "ts");
+    check("the legacy prepaid pay panel is locatable, exactly once", open.length === 1 && close.length === 1);
+    check(
+      "…and the legacy postpaid form follows it",
+      open.length === 1 && close.length === 1 && open[0].line < close[0].line,
+    );
     if (open.length === 1 && close.length === 1 && open[0].line < close[0].line) {
-      // stripComments preserves line numbering (liveHits maps stripped lines
-      // back onto source lines), so slicing the stripped text by those line
-      // numbers yields the panel's CODE with its prose removed — which matters
-      // here, because the comment above the panel discusses `grand.total` by
-      // name to explain why it is not used.
-      const panel = stripComments(src, "ts").split("\n").slice(open[0].line - 1, close[0].line - 1).join("\n");
-      check("the panel does NOT read grand.total", !panel.includes("grand.total"));
+      const panel = stripped.slice(open[0].line - 1, close[0].line - 1).join("\n");
+      check("the legacy panel does NOT read grand.total", !panel.includes("grand.total"));
       check("…and DOES subtract the server-computed settlementSar", panel.includes("settlementSar"));
     }
 
-    // INVERTED — a slice that always came back empty would pass the first check
-    // forever. Plant the old reading and the same test must reject it.
+    // ── The era gate itself ────────────────────────────────────────────────
+    // Every panel above is chosen by ONE field. If this screen ever recomputes
+    // the era from a status or a date, the two panels can both be reachable for
+    // one invoice — which is how a ledger invoice gets settled by the RPC that
+    // refuses it.
+    check("the modal takes its era from the payload, never a local status test", liveHits(src, 'raw?.era === "ledger"', "ts").length === 1);
+
+    // INVERTED — a slice that always came back empty would pass every
+    // does-NOT-read check forever. Plant the old reading and the same test must
+    // reject it.
     const planted = stripComments("<span>{formatSar(view.grand.total)}</span>", "ts");
     check("the scan rejects a planted grand.total", planted.includes("grand.total"));
+  }
+
+  // =========================================================================
+  // 12. THE SETTLEMENT PAIR — ledger era, prepaid, disclosed or suppressed
+  // =========================================================================
+  // The one thing the 0203 document says that the old one could not: how much
+  // of this invoice the customer's balance paid. It is TWO claims on a tax
+  // document — what was drawn, and what is left — so each gets pinned from the
+  // rendered HTML, in both languages, on BOTH surfaces.
+  //
+  // EVERY CASE HERE HAS A TWIN THAT MUST NOT PRINT IT. A test that only proves
+  // the line appears is satisfied by a renderer that prints it unconditionally,
+  // which would put a balance disclosure on postpaid invoices and on drafts.
+  console.log("\n=== 12. SETTLEMENT PAIR — the ledger document's one new claim ===");
+  {
+    const AR_APPLIED = "المخصوم من الرصيد المسبق";
+    const shows: ReadonlyArray<readonly [string, PdfInvoiceData, boolean]> = [
+      ["LEDGER prepaid, shortfall", ledgerPrepaid, true],
+      ["LEDGER prepaid, fully covered", ledgerPrepaidCovered, true],
+      // Suppressed: the toggle's whole job on a ledger invoice.
+      ["LEDGER prepaid, toggle ON", { ...ledgerPrepaid, hideAmountDue: true }, false],
+      // Frozen but not prepaid — the payable exists and must stay invisible.
+      ["LEDGER postpaid", ledgerPostpaid, false],
+      // Nothing frozen yet.
+      ["LEDGER prepaid draft", ledgerDraft, false],
+      // The old document, untouched forever.
+      ["legacy prepaid", prepaid, false],
+    ];
+    for (const [name, data, want] of shows) {
+      const p = await buildInvoicePrintHtml(data);
+      const d = await buildInvoicePdfHtml(data);
+      const hasEn = (h: string) => /Prepaid Applied/.test(h);
+      const hasAr = (h: string) => h.includes(AR_APPLIED);
+      check(`${name} — "Prepaid Applied" ${want ? "prints" : "is absent"} on the sheet`, hasEn(p) === want);
+      check(`${name} — …and on the PDF`, hasEn(d) === want);
+      // ARABIC IS NOT OPTIONAL ON THIS DOCUMENT. Every other label on the
+      // invoice is bilingual; a settlement line that appeared in English only
+      // would be the single English-only row on a sheet an Arabic-reading
+      // customer files for ZATCA.
+      check(`${name} — the Arabic half ${want ? "prints" : "is absent"} on both`, hasAr(p) === want && hasAr(d) === want);
+    }
+
+    // THE ARITHMETIC THE PANEL CLAIMS. Grand Total − Prepaid Applied = the
+    // hero. If the three figures do not reconcile, the document is doing
+    // subtraction in front of the customer and getting it wrong.
+    for (const [name, data] of [
+      ["shortfall", ledgerPrepaid],
+      ["fully covered", ledgerPrepaidCovered],
+    ] as const) {
+      check(
+        `${name} — grand ${data.grand.total} − applied ${data.prepaidAppliedSar} = payable ${data.amountPayableSar}`,
+        round2(data.grand.total - (data.prepaidAppliedSar ?? 0)) === round2(data.amountPayableSar ?? -1),
+      );
+    }
+
+    // THE APPLIED FIGURE PRINTS NEGATIVE. A deduction rendered as a positive
+    // number under a total reads as an addition — the customer sees 17,825.00
+    // and 12,000.00 stacked and adds them.
+    const sheet12 = await buildInvoicePrintHtml(ledgerPrepaid);
+    check("the applied figure carries a minus sign", /-12,000\.00/.test(sheet12), "applied printed unsigned");
+
+    // NO COVERAGE VERDICT SURVIVES. The ledger document has no per-line
+    // Covered/Unpaid judgement, and the Status column went with it.
+    for (const [name, data] of [
+      ["LEDGER prepaid", ledgerPrepaid],
+      ["LEDGER prepaid draft", ledgerDraft],
+    ] as const) {
+      const toks = textOf(await buildInvoicePrintHtml(data));
+      const verdicts = toks.filter((s) => /^(Covered|Unpaid|مغطاة|غير مدفوعة)$/i.test(s));
+      check(`${name} — no line carries a coverage verdict`, verdicts.length === 0, JSON.stringify(verdicts));
+    }
+    // INVERTED — the same scan on the LEGACY document must still find them, or
+    // the check above is passing because the tokenizer stopped seeing words.
+    const legacyToks = textOf(await buildInvoicePrintHtml(prepaid));
+    check(
+      "…and the legacy document still shows them (the scan works)",
+      legacyToks.some((s) => /^(Covered|Unpaid)$/i.test(s)),
+    );
   }
 
   console.log(failures === 0 ? "\nAll parity checks passed." : `\n${failures} FAILED.`);

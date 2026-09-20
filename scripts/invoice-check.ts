@@ -51,6 +51,55 @@ function reconciles(name: string, r: InvoiceAssembly) {
     [...r.coveredLines, ...r.unpaidLines, ...r.chargeLines].reduce((s, l) => s + l.amount_sar, 0),
   );
   check(`${name}: every line is inside grand.subtotal (nothing dropped)`, everyLine, r.grand.subtotal);
+
+  // 3. LEDGER ERA (0203). The whole document is billable, in BOTH modes:
+  //    covered is zero, amountDue === grand, and no line carries a coverage
+  //    verdict. The prepaid draw is min(Available, grand_total), decided by
+  //    confirm_invoice() and frozen onto the invoice row — it is not a property
+  //    of any line, so this engine cannot express it and must not pretend to.
+  //    Asserted on EVERY case, so a re-introduced split fails everywhere at
+  //    once rather than in the one case someone remembered to write.
+  check(`${name}: covered is zero (the draw is a ledger fact, not a line split)`, r.covered, {
+    subtotal: 0,
+    vat: 0,
+    total: 0,
+  });
+  checkTrue(
+    `${name}: amountDue === grand EXACTLY (the whole invoice is billable)`,
+    JSON.stringify(r.amountDue) === JSON.stringify(r.grand),
+  );
+  check(`${name}: coveredLines is empty in both modes`, r.coveredLines, []);
+  checkTrue(
+    `${name}: no line carries a coverage verdict`,
+    [...r.coveredLines, ...r.unpaidLines, ...r.chargeLines].every((l) => l.covered === undefined),
+  );
+  check(`${name}: no tripTotals — one trips table, document-level foot`, r.tripTotals, undefined);
+}
+
+// THE POOL CANNOT MOVE THE DOCUMENT. Asserts that an assembly is byte-identical
+// under any topup/refund history whatsoever — the single sharpest statement of
+// the 0203 cutover, and the one that fails loudest if a FIFO walk ever returns
+// to this engine. Call it with the case's own input.
+function poolCannotMove(name: string, input: Parameters<typeof assembleInvoice>[0]) {
+  const baseline = JSON.stringify(assembleInvoice({ ...input, topups: [], returns: [] }));
+  const drowning = JSON.stringify(
+    assembleInvoice({
+      ...input,
+      topups: [{ id: "flood", amount_sar: 9_999_999, topup_date: "2000-01-01" }],
+      returns: [],
+    }),
+  );
+  const broke = JSON.stringify(
+    assembleInvoice({
+      ...input,
+      topups: [{ id: "tiny", amount_sar: 0.01, topup_date: "2000-01-01" }],
+      returns: [{ id: "ref", amount_sar: 5_000, returned_on: "2000-01-02" }],
+    }),
+  );
+  checkTrue(
+    `${name}: identical assembly with an empty pool, a flooded pool, and a refunded pool`,
+    baseline === drowning && baseline === broke,
+  );
 }
 
 // --- Postpaid: no covered table, Amount Due === Grand exactly (same input) ---
@@ -95,33 +144,36 @@ function reconciles(name: string, r: InvoiceAssembly) {
   reconciles("postpaid charge", r);
 }
 
-// --- Prepaid: global-then-filter rule — an EARLIER period's trip drains the --
-// --- pool before THIS period's trips are evaluated, even though only this ---
-// --- period's trips are passed to the caller's period window. ---------------
+// --- Prepaid: the period window is the ONLY scope. An out-of-period trip is --
+// --- absent from the document and cannot influence it. ----------------------
+// WAS THE "global-then-filter" CASE. Under the pre-0203 law this fixture proved
+// something subtler: May's trip had to be PASSED IN (full history) because it
+// drained the pool BEFORE June's trip was evaluated, which is what made June's
+// trip Unpaid. That coupling is gone — no pool is walked here — so what this
+// fixture now proves is the plainer rule that replaced it: the period window
+// scopes the document, full stop. Passing extra history changes nothing.
 {
-  // Pool = 300 (one topup). Trip A (earlier period, already consumed 300 of
-  // the pool) + Trip B (THIS period, 300) — caller must pass Trip A too
-  // (full history), even though only Trip B's period is being invoiced.
   const trips: ConsumingTrip[] = [
     { id: "tA-prior-period", trip_date: "2026-05-15", delivered_at: "2026-05-15T10:00:00Z", rate_sar: 300 },
     { id: "tB-this-period", trip_date: "2026-06-15", delivered_at: "2026-06-15T10:00:00Z", rate_sar: 300 },
   ];
+  // A pool that EXACTLY covers one trip — the amount that used to flip the
+  // verdict. It is now inert, which poolCannotMove() states outright.
   const topups: TopupLite[] = [{ id: "top1", amount_sar: 300, topup_date: "2026-05-01" }];
-  const r = assembleInvoice({
+  const input = {
     customerId: "c1",
-    paymentMode: "prepaid",
+    paymentMode: "prepaid" as const,
     periodStart: "2026-06-01", // THIS period only covers June
     periodEnd: "2026-06-30",
     trips, // full history passed, including May's trip
     topups,
     specialCharges: [],
-  });
-  checkTrue(
-    "global-then-filter: June trip is Unpaid (May's trip already drained the pool), not falsely Covered",
-    r.unpaidLines.some((l) => l.id === "tB-this-period") && !r.coveredLines.some((l) => l.id === "tB-this-period"),
-  );
-  checkTrue("global-then-filter: May's trip does not appear in this invoice at all (outside period)", !r.unpaidLines.some((l) => l.id === "tA-prior-period") && !r.coveredLines.some((l) => l.id === "tA-prior-period"));
-  reconciles("global-then-filter", r);
+  };
+  const r = assembleInvoice(input);
+  check("period scope: June's trip is billed on this invoice", r.unpaidLines.map((l) => l.id), ["tB-this-period"]);
+  check("period scope: May's trip does not appear at all (outside period)", r.grand, { subtotal: 300, vat: 45, total: 345 });
+  poolCannotMove("period scope", input);
+  reconciles("period scope", r);
 }
 
 // --- Prepaid: period boundary excludes trips just outside it -----------------
@@ -174,28 +226,23 @@ function reconciles(name: string, r: InvoiceAssembly) {
   reconciles("reconciliation", r);
 }
 
-// --- THE covered/unpaid boundary-flip + two-table rounding-divergence proof -
-// --- (v3 CUTOVER — the boundary itself moved, not just the rounding). --------
-// Pool = 0.10. Three trips of 0.05 each now consume round2(0.05*1.15) = 0.06
-// apiece (VAT-INCLUSIVE consumption, PRD v3 §2/§5), not 0.05 as under the old
-// pre-VAT engine. Old v2 math: 0.10 exactly covered t1+t2 (2 covered/1
-// unpaid). New v3 math: 0.10 covers only t1 (0.10-0.06=0.04 left, t2 needs
-// 0.06 -> doesn't fit -> hitWall -> t2 AND t3 both unpaid) — the boundary
-// flips to 1 covered/2 unpaid. This is the exact divergence the user flagged
-// when specifying the v3 cutover.
-// IT IS ALSO THE ROUNDING-RESIDUE PROOF, and this is where the two rounding
-// conventions are furthest apart at the smallest scale:
-//   grand:     ALL THREE trips, one document-level pass — subtotal 0.15,
-//              vat round2(0.0225) = 0.02, total 0.17
-//   amountDue: subtotal 0.10 (t2+t3), total = tripTotals.unpaid 0.12
-//              (per-item VAT-inclusive consumedAmount, 0.06+0.06), vat 0.02
-//   covered:   grand - amountDue = 0.05 / 0.00 / 0.05
+// --- THE ROUNDING-CONVERGENCE PROOF — the halala the old engine argued over --
+// --- no longer exists, because there is only ONE rounding convention left. ---
+// WAS THE "boundary flip / divergence proof" CASE, kept at the same fixture
+// (pool 0.10, three trips of 0.05) because this is where the two old
+// conventions were furthest apart at the smallest scale. Under the pre-0203 law
+// the pool covered t1 only, and the document carried TWO roundings at once:
+//   grand:     one document-level pass over all three — 0.15 / 0.02 / 0.17
+//   amountDue: per-item VAT-inclusive, pool-exact — 0.10 / 0.02 / 0.12
+//   covered:   grand - amountDue = 0.05 / 0.00 / 0.05, and a standalone pass
+//              over that same single line would have said 0.06 instead. That
+//              halala had to be parked in a settled figure to keep the invoice
+//              adding up.
 //
-// A STANDALONE calculateVat() pass over covered's own line would say
-// 0.05/0.01/0.06 — a halala more. THAT HALALA IS THE POINT: the two
-// conventions genuinely differ, and the derived form is what puts the
-// difference somewhere harmless (a settled figure) instead of leaving the
-// invoice not adding up. covered.total is deliberately 0.05, not 0.06.
+// There is now ONE pass over ONE line set, so there is nothing for a second
+// convention to disagree with: 0.15 / 0.02 / 0.17, billed in full. The halala
+// is not resolved, it is UNREACHABLE. If a per-item pool-exact total ever
+// returns to this engine, amountDue drops to 0.12 here and this fails.
 {
   const trips: ConsumingTrip[] = [
     { id: "t1", trip_date: "2026-06-01", delivered_at: "2026-06-01T10:00:00Z", rate_sar: 0.05 },
@@ -203,211 +250,179 @@ function reconciles(name: string, r: InvoiceAssembly) {
     { id: "t3", trip_date: "2026-06-03", delivered_at: "2026-06-03T10:00:00Z", rate_sar: 0.05 },
   ];
   const topups: TopupLite[] = [{ id: "top1", amount_sar: 0.1, topup_date: "2026-06-01" }];
-  const r = assembleInvoice({
+  const input = {
     customerId: "c1",
-    paymentMode: "prepaid",
+    paymentMode: "prepaid" as const,
     periodStart: "2026-06-01",
     periodEnd: "2026-06-30",
     trips,
     topups,
     specialCharges: [],
-  });
-  check("boundary flip: only t1 covered (was t1+t2 under old pre-VAT math)", r.coveredLines.map((l) => l.id), ["t1"]);
-  check("boundary flip: t2+t3 unpaid (was just t3 under old pre-VAT math)", r.unpaidLines.map((l) => l.id), ["t2", "t3"]);
-  check("divergence proof: grand = ALL THREE trips, one document pass = 0.15/0.02/0.17", r.grand, { subtotal: 0.15, vat: 0.02, total: 0.17 });
-  check("divergence proof: amountDue table = 0.10/0.02/0.12 (per-item, pool-exact)", r.amountDue, { subtotal: 0.1, vat: 0.02, total: 0.12 });
-  check("divergence proof: covered = grand - amountDue = 0.05/0.00/0.05", r.covered, { subtotal: 0.05, vat: 0, total: 0.05 });
-  // THE RESIDUE, NAMED. A standalone calculateVat() over covered's own single
-  // 0.05 line returns vat 0.01 / total 0.06 — one halala MORE than the derived
-  // covered above. Both are defensible roundings; they cannot both be used at
-  // once without the invoice failing to add up. This asserts the halala landed
-  // in covered.vat (settled, display-only) and NOT in amountDue (what the
-  // customer is actually asked to pay, which stays pool-exact).
-  check("divergence proof: a standalone pass over covered's line would say 0.06", r2(0.05 * 1.15), 0.06);
-  checkTrue("divergence proof: the residue is absorbed by covered.vat, not amountDue", r.covered.total !== r2(0.05 * 1.15) && r.amountDue.total === 0.12);
-  reconciles("divergence proof", r);
+  };
+  const r = assembleInvoice(input);
+  check("convergence: all three trips billed (the pool covers none of them here)", r.unpaidLines.map((l) => l.id), ["t1", "t2", "t3"]);
+  check("convergence: grand = one document pass over all three = 0.15/0.02/0.17", r.grand, { subtotal: 0.15, vat: 0.02, total: 0.17 });
+  check("convergence: amountDue is the SAME figure, not the per-item 0.12", r.amountDue, { subtotal: 0.15, vat: 0.02, total: 0.17 });
+  // THE DEAD RESIDUE, NAMED. Per-item VAT-inclusive consumption of two of these
+  // lines is 0.12 and of one is 0.06 — the figures the old covered/unpaid split
+  // produced. Neither appears anywhere on the document now.
+  checkTrue(
+    "convergence: neither old per-item figure (0.12 / 0.06) survives on any total",
+    [r.grand, r.amountDue, r.covered].every((t) => t.total !== 0.12 && t.total !== 0.06),
+  );
+  check("convergence: per-item rounding of one line would still say 0.06 — nothing reads it", r2(0.05 * 1.15), 0.06);
+  poolCannotMove("convergence", input);
+  reconciles("convergence", r);
 }
 
-// --- THE STRANDED-CHARGE FIX: an uncovered charge reaches Amount Due --------
+// --- THE STRANDED CHARGE CANNOT RECUR: every charge is billed, always -------
 // This is invoice 026-000009's exact shape, in miniature, and it is the case
-// that used to lose money. Pool 1,000. One trip of 500 consumes
-// round2(500*1.15) = 575 -> covered, 425 left. One charge of 450 needs
-// round2(450*1.15) = 517.50 -> does NOT fit -> uncovered.
+// that used to lose money. Under the pre-0203 law the 450 charge did not fit in
+// what the pool had left after the trip (425 < 517.50), so it was tagged
+// UNCOVERED — and in the version before that it then appeared in NO document
+// total at all, while v_customer_prepaid_balance had already deducted its
+// 517.50. A charge is FK-bound to one invoice at creation and hidden from every
+// other by reservedElsewhereIds, so it could never be billed later either.
 //
-// BEFORE THE FIX: grand = covered trip only (575). amountDue = unpaid TRIPS
-// only = 0, because there are no unpaid trips and charges were excluded by
-// rule. So the 450 charge appeared in NO document total at all, while
-// lib/prepaid.ts had already deducted its 517.50 from the balance — and
-// because a charge is FK-bound to one invoice at creation and hidden from
-// every other by reservedElsewhereIds, it could never be billed later either.
-// AFTER: it lands in amountDue AND in grand. Two fixes stacked here — the
-// earlier one widened Amount Due to carry uncovered charges; this one widened
-// grand to carry every line, so the charge is no longer asked for in one figure
-// and absent from the document's own total. covered falls out as the remainder.
+// The fit question is gone: there is no per-line coverage verdict to get wrong.
+// Every charge on the document is in amountDue AND in grand, whatever the pool
+// held. THE POOL SIZE IS THE INVERTED PART — 1,000 is deliberately the amount
+// that used to strand this charge, and poolCannotMove() proves no pool strands
+// it now.
 {
   const trips: ConsumingTrip[] = [
     { id: "t1", trip_date: "2026-07-17", delivered_at: "2026-07-17T10:00:00Z", rate_sar: 500 },
   ];
   const topups: TopupLite[] = [{ id: "top1", amount_sar: 1000, topup_date: "2026-07-01" }];
-  const r = assembleInvoice({
+  const input = {
     customerId: "c1",
-    paymentMode: "prepaid",
+    paymentMode: "prepaid" as const,
     periodStart: "2026-07-01",
     periodEnd: "2026-07-31",
     trips,
     topups,
     specialCharges: [{ id: "ch1", label: "emergency hours", amount_sar: 450, charge_date: "2026-07-18" }],
-  });
-  check("stranded-charge: the charge is tagged uncovered (517.50 did not fit in 425)", r.chargeLines.find((l) => l.id === "ch1")?.covered, false);
-  check("stranded-charge: covered trip still covered", r.coveredLines.map((l) => l.id), ["t1"]);
-  check("stranded-charge: no unpaid TRIPS at all", r.unpaidLines, []);
-  check("stranded-charge: amountDue = the uncovered charge, VAT-inclusive (was 0/0/0 and lost)", r.amountDue, {
-    subtotal: 450,
-    vat: 67.5,
-    total: 517.5,
-  });
-  check("stranded-charge: grand = covered trip 500 + the uncovered charge 450, one VAT pass", r.grand, {
+  };
+  const r = assembleInvoice(input);
+  check("stranded-charge: the charge carries NO coverage verdict", r.chargeLines.find((l) => l.id === "ch1")?.covered, undefined);
+  check("stranded-charge: the trip is billed like any other", r.unpaidLines.map((l) => l.id), ["t1"]);
+  check("stranded-charge: amountDue = trip 500 + charge 450, one VAT pass (was 0/0/0 and lost)", r.amountDue, {
     subtotal: 950,
     vat: 142.5,
     total: 1092.5,
   });
-  check("stranded-charge: covered = grand - amountDue = the trip alone", r.covered, {
-    subtotal: 500,
-    vat: 75,
-    total: 575,
-  });
-  // tripTotals.unpaid is the Unpaid TRIPS table's own foot and must keep
-  // describing that table's rows — it stays at zero here even though Amount Due
-  // is 517.50. This inequality is the fix, not a bug: see lib/invoice.ts's
-  // AMOUNT DUE note. (Was `ledger.unpaid.subtotal`, same VAT-inclusive figure;
-  // the ledger's balance/remaining terms are what died, not this sum.)
-  check("stranded-charge: tripTotals.unpaid stays TRIPS-only (0), not widened", r.tripTotals?.unpaid, 0);
-  checkTrue(
-    "stranded-charge: amountDue.total is NO LONGER equal to tripTotals.unpaid",
-    r.amountDue.total !== r.tripTotals?.unpaid,
-  );
-  check(
-    "stranded-charge: amountDue.total - tripTotals.unpaid = the uncovered charge exactly",
-    Math.round((r.amountDue.total - (r.tripTotals?.unpaid ?? 0)) * 100) / 100,
-    517.5,
-  );
+  check("stranded-charge: grand is the same figure", r.grand, { subtotal: 950, vat: 142.5, total: 1092.5 });
+  poolCannotMove("stranded-charge", input);
   reconciles("stranded-charge", r);
 }
 
-// --- Unpaid TRIPS and an uncovered charge TOGETHER (the two halves add) -----
-// Pool 600. Trip A 500 -> consumes 575, covered, 25 left. Trip B 200 ->
-// consumes 230, does not fit -> unpaid (and hitWall, so everything after is
-// unpaid too). Charge 100 -> consumes 115, uncovered.
-// amountDue = tripTotals.unpaid (230, trips) + 115 (charge) = 345.
-// Pre-VAT subtotal = 200 + 100 = 300. VAT = 345 - 300 = 45.
+// --- Trips and charges TOGETHER, one document-level VAT pass ----------------
+// WAS "both halves" — under the old law the pool (600) covered trip A, stranded
+// trip B behind the FIFO wall, and left the charge uncovered, so the document
+// carried a 575 covered half and a 345 due half. Both halves are now one
+// number: 500 + 200 + 100 = 800 pre-VAT, one pass, 920.
 {
   const trips: ConsumingTrip[] = [
     { id: "tA", trip_date: "2026-07-01", delivered_at: "2026-07-01T10:00:00Z", rate_sar: 500 },
     { id: "tB", trip_date: "2026-07-02", delivered_at: "2026-07-02T10:00:00Z", rate_sar: 200 },
   ];
   const topups: TopupLite[] = [{ id: "top1", amount_sar: 600, topup_date: "2026-07-01" }];
-  const r = assembleInvoice({
+  const input = {
     customerId: "c1",
-    paymentMode: "prepaid",
+    paymentMode: "prepaid" as const,
     periodStart: "2026-07-01",
     periodEnd: "2026-07-31",
     trips,
     topups,
-    specialCharges: [{ id: "ch1", label: "uncovered charge", amount_sar: 100, charge_date: "2026-07-03" }],
-  });
-  check("both halves: tA covered, tB unpaid", [r.coveredLines.map((l) => l.id), r.unpaidLines.map((l) => l.id)], [["tA"], ["tB"]]);
-  check("both halves: charge uncovered", r.chargeLines.find((l) => l.id === "ch1")?.covered, false);
-  check("both halves: tripTotals.unpaid is the TRIP half only (230)", r.tripTotals?.unpaid, 230);
-  check("both halves: amountDue = 230 (trips) + 115 (charge)", r.amountDue, { subtotal: 300, vat: 45, total: 345 });
-  check("both halves: grand = tA 500 + tB 200 + charge 100, one VAT pass", r.grand, { subtotal: 800, vat: 120, total: 920 });
-  check("both halves: covered = grand - amountDue = tA alone", r.covered, { subtotal: 500, vat: 75, total: 575 });
-  reconciles("both halves", r);
+    specialCharges: [{ id: "ch1", label: "a charge", amount_sar: 100, charge_date: "2026-07-03" }],
+  };
+  const r = assembleInvoice(input);
+  check("one table: both trips billed together, no wall between them", r.unpaidLines.map((l) => l.id), ["tA", "tB"]);
+  check("one table: the charge sits in its own table, untagged", [r.chargeLines.map((l) => l.id), r.chargeLines[0]?.covered], [["ch1"], undefined]);
+  check("one table: amountDue = tA 500 + tB 200 + charge 100, one VAT pass", r.amountDue, { subtotal: 800, vat: 120, total: 920 });
+  // 575 was the old covered half and 345 the old due half. Their absence from
+  // every total is what says the split is gone, not merely unused.
+  checkTrue(
+    "one table: the old 575 / 345 halves appear nowhere",
+    [r.grand, r.amountDue, r.covered].every((t) => t.total !== 575 && t.total !== 345),
+  );
+  poolCannotMove("one table", input);
+  reconciles("one table", r);
 }
 
-// --- A COVERED charge must NOT leak into Amount Due (the complement) --------
-// Pool 2,000 covers the trip (575) and the charge (115) both. The charge
-// belongs in grand, and Amount Due must stay at zero — the fix widens Amount
-// Due for UNCOVERED charges only, and this is what proves it did not widen it
-// for all of them.
+// --- A FULLY-FUNDED customer is still billed the full amount ----------------
+// WAS "covered charge" — pool 2,000 against a 690 invoice, i.e. the customer
+// can pay for all of it out of credit. Under the old law that made Amount Due
+// ZERO and the whole document "settled" before confirm. Now the document says
+// 690 due, and the draw against the 2,000 happens at confirm_invoice() and is
+// reported as prepaid_applied / amount_payable — NOT by zeroing the invoice.
+// This is the case most likely to be "fixed" back by someone who reads a
+// funded prepaid invoice as paid.
 {
   const trips: ConsumingTrip[] = [
     { id: "t1", trip_date: "2026-07-01", delivered_at: "2026-07-01T10:00:00Z", rate_sar: 500 },
   ];
   const topups: TopupLite[] = [{ id: "top1", amount_sar: 2000, topup_date: "2026-07-01" }];
-  const r = assembleInvoice({
+  const input = {
     customerId: "c1",
-    paymentMode: "prepaid",
+    paymentMode: "prepaid" as const,
     periodStart: "2026-07-01",
     periodEnd: "2026-07-31",
     trips,
     topups,
-    specialCharges: [{ id: "ch1", label: "covered charge", amount_sar: 100, charge_date: "2026-07-02" }],
-  });
-  check("covered charge: tagged covered", r.chargeLines.find((l) => l.id === "ch1")?.covered, true);
-  check("covered charge: amountDue stays ZERO", r.amountDue, { subtotal: 0, vat: 0, total: 0 });
-  check("covered charge: grand = trip 500 + charge 100, one VAT pass", r.grand, { subtotal: 600, vat: 90, total: 690 });
-  check("covered charge: covered = the whole invoice (nothing due)", r.covered, { subtotal: 600, vat: 90, total: 690 });
-  reconciles("covered charge", r);
+    specialCharges: [{ id: "ch1", label: "a charge", amount_sar: 100, charge_date: "2026-07-02" }],
+  };
+  const r = assembleInvoice(input);
+  check("fully funded: the charge carries NO coverage verdict", r.chargeLines.find((l) => l.id === "ch1")?.covered, undefined);
+  check("fully funded: amountDue is the FULL invoice, not zero", r.amountDue, { subtotal: 600, vat: 90, total: 690 });
+  check("fully funded: grand is the same figure", r.grand, { subtotal: 600, vat: 90, total: 690 });
+  poolCannotMove("fully funded", input);
+  reconciles("fully funded", r);
 }
 
-// --- A FUTURE-DATED charge is covered when the pool suffices ----------------
-// THE INVERTED REGRESSION GUARD. This case FAILS LOUDLY if the charge_date
-// gate ever returns to consumingItems().
+// --- A FUTURE-DATED charge is LISTED AND BILLED. STILL THE LIVE GUARD. ------
+// THE ONE CASE IN THIS GROUP THAT 0203 DID NOT WEAKEN. It fails loudly if a
+// charge_date gate ever returns — to consumingItems(), or to the charge filter
+// in lib/invoice.ts's prepaid arm, which is still deliberately un-period-
+// filtered and is the easier of the two to "tidy up" by mistake.
 //
 // The charge is dated 2026-08-15, AFTER periodEnd 2026-07-31. Under the old
-// `charge_date <= asOfDate` filter it never reached the FIFO walk, so it could
-// not be covered no matter how large the pool — while chargeLines listed it and
-// v_customer_prepaid_balance (no date predicate, ever) had already deducted its
-// 115.00. Live invoice 026-000017 is exactly this: a 1,000.00 charge dated
-// after its period, shown, deducted, and billed to nobody.
+// `charge_date <= asOfDate` filter it never reached the money at all, while
+// chargeLines listed it and v_customer_prepaid_balance (no date predicate,
+// ever) had already deducted it. Live invoice 026-000017 is exactly this: a
+// 1,000.00 charge dated after its period, shown, deducted, billed to nobody.
 //
-// Note the old filter was ONE-SIDED (`<=`), so only FUTURE-dated charges were
+// The old filter was ONE-SIDED (`<=`), so only FUTURE-dated charges were
 // stranded — a past-dated charge always passed, which is why this went unseen.
 // A charge is scoped by its invoice FK, never by date; periodEnd scopes TRIPS.
-{
+//
+// Run over both a rich and a poor pool. Under the old law these two fixtures
+// produced DIFFERENT documents (covered vs uncovered); identical output is now
+// the assertion.
+for (const [poolName, pool] of [
+  ["rich pool", 2000],
+  ["poor pool", 600],
+] as const) {
   const trips: ConsumingTrip[] = [
     { id: "t1", trip_date: "2026-07-10", delivered_at: "2026-07-10T10:00:00Z", rate_sar: 500 },
   ];
-  const topups: TopupLite[] = [{ id: "top1", amount_sar: 2000, topup_date: "2026-07-01" }];
-  const r = assembleInvoice({
+  const topups: TopupLite[] = [{ id: "top1", amount_sar: pool, topup_date: "2026-07-01" }];
+  const input = {
     customerId: "c1",
-    paymentMode: "prepaid",
+    paymentMode: "prepaid" as const,
     periodStart: "2026-07-01",
     periodEnd: "2026-07-31",
     trips,
     topups,
     specialCharges: [{ id: "ch1", label: "charge dated after periodEnd", amount_sar: 100, charge_date: "2026-08-15" }],
-  });
-  check("future-dated charge: still listed on the invoice (was already true — 0181)", r.chargeLines.map((l) => l.id), ["ch1"]);
-  check("future-dated charge: COVERED — pool 2000 easily holds 575 + 115", r.chargeLines.find((l) => l.id === "ch1")?.covered, true);
-  check("future-dated charge: amountDue stays ZERO (was 115 due on a settled charge)", r.amountDue, { subtotal: 0, vat: 0, total: 0 });
-  check("future-dated charge: inside grand = trip 500 + charge 100", r.grand, { subtotal: 600, vat: 90, total: 690 });
-  reconciles("future-dated charge", r);
-}
-
-// --- A FUTURE-DATED charge is UNCOVERED when the pool does not suffice ------
-// The complement of the case above, and the half that proves the gate's removal
-// did not simply flip every charge to covered. Pool 600: the trip consumes 575,
-// leaving 25, so the charge's 115 does not fit. It reaches the FIFO walk (no
-// date gate) and is refused there on the MERITS, which is the difference.
-{
-  const trips: ConsumingTrip[] = [
-    { id: "t1", trip_date: "2026-07-10", delivered_at: "2026-07-10T10:00:00Z", rate_sar: 500 },
-  ];
-  const topups: TopupLite[] = [{ id: "top1", amount_sar: 600, topup_date: "2026-07-01" }];
-  const r = assembleInvoice({
-    customerId: "c1",
-    paymentMode: "prepaid",
-    periodStart: "2026-07-01",
-    periodEnd: "2026-07-31",
-    trips,
-    topups,
-    specialCharges: [{ id: "ch1", label: "charge dated after periodEnd", amount_sar: 100, charge_date: "2026-08-15" }],
-  });
-  check("future-dated charge (poor pool): uncovered on the merits, not by date", r.chargeLines.find((l) => l.id === "ch1")?.covered, false);
-  check("future-dated charge (poor pool): amountDue = the charge alone", r.amountDue, { subtotal: 100, vat: 15, total: 115 });
-  check("future-dated charge (poor pool): inside grand all the same", r.grand, { subtotal: 600, vat: 90, total: 690 });
-  reconciles("future-dated charge (poor pool)", r);
+  };
+  const r = assembleInvoice(input);
+  const label = `future-dated charge (${poolName})`;
+  check(`${label}: still listed on the invoice (0181)`, r.chargeLines.map((l) => l.id), ["ch1"]);
+  check(`${label}: BILLED — inside amountDue = trip 500 + charge 100`, r.amountDue, { subtotal: 600, vat: 90, total: 690 });
+  check(`${label}: grand is the same figure`, r.grand, { subtotal: 600, vat: 90, total: 690 });
+  poolCannotMove(label, input);
+  reconciles(label, r);
 }
 
 // --- Empty period / no trips --------------------------------------------------
@@ -469,17 +484,16 @@ function reconciles(name: string, r: InvoiceAssembly) {
 }
 
 // --- Reserve-at-draft exclusion (0030): a trip reserved by ANOTHER invoice --
-// --- is excluded from THIS invoice's output — proof that exclusion is a ----
-// --- POST-split display filter, not a pool-math re-drain. ------------------
-// Pool = 230 (was 200 pre-VAT) — 2 x 115 (100 * 1.15, VAT-inclusive
-// consumedAmount), so it still covers t1+t2 exactly with 0 leftover under
-// v3's VAT-inclusive consumption. FIFO t1(115)/t2(115)/t3(115): t1 covered
-// (pool->115), t2 covered (pool->0), t3 doesn't fit -> unpaid. t2 is
-// reserved by another invoice. If exclusion were (wrongly) applied BEFORE
-// the FIFO walk, t3 would flip to covered once t2 "disappears" (115 fits in
-// the freed pool). The correct behavior: t3 stays unpaid — the pool was
-// already spent on t2 when it was walked, exclusion only hides t2 from this
-// invoice's tables afterward, it doesn't un-spend the pool.
+// --- is excluded from THIS invoice's output, and from its totals. ----------
+// STILL LIVE, and the half that matters most survived 0203 intact: a trip
+// claimed by another non-void invoice must appear in NO table and in NO total
+// here, or the same trip is billed on two documents.
+//
+// What the fixture used to ALSO prove is gone. Pool 230 = exactly 2 x 115, and
+// the old question was whether excluding t2 "un-spent" the pool and flipped t3
+// to covered (it must not — exclusion was a POST-split display filter). There
+// is no split and no pool walk left to order wrongly, so the pool is kept at
+// 230 only to show it no longer decides anything.
 {
   const trips: ConsumingTrip[] = [
     { id: "t1", trip_date: "2026-06-01", delivered_at: "2026-06-01T10:00:00Z", rate_sar: 100 },
@@ -487,24 +501,23 @@ function reconciles(name: string, r: InvoiceAssembly) {
     { id: "t3", trip_date: "2026-06-03", delivered_at: "2026-06-03T10:00:00Z", rate_sar: 100 },
   ];
   const topups: TopupLite[] = [{ id: "top1", amount_sar: 230, topup_date: "2026-06-01" }];
-  const r = assembleInvoice({
+  const input = {
     customerId: "c1",
-    paymentMode: "prepaid",
+    paymentMode: "prepaid" as const,
     periodStart: "2026-06-01",
     periodEnd: "2026-06-30",
     trips,
     topups,
     specialCharges: [],
     reservedElsewhereIds: ["t2"],
-  });
-  check("reserve-exclusion: t2 (reserved elsewhere) absent from coveredLines", r.coveredLines.map((l) => l.id), ["t1"]);
-  checkTrue("reserve-exclusion: t3 stays Unpaid (pool already spent on t2, not un-drained by exclusion)", r.unpaidLines.some((l) => l.id === "t3"));
-  check("reserve-exclusion: t2 absent from unpaidLines too (never appears anywhere on this invoice)", r.unpaidLines.some((l) => l.id === "t2"), false);
-  check("reserve-exclusion: covered totals recomputed over remaining line only", r.covered, { subtotal: 100, vat: 15, total: 115 });
+  };
+  const r = assembleInvoice(input);
+  check("reserve-exclusion: t1 + t3 billed, t2 (reserved elsewhere) absent", r.unpaidLines.map((l) => l.id), ["t1", "t3"]);
   // grand drops t2 with the tables. A line reserved by ANOTHER invoice is that
   // invoice's to total; carrying it here would bill the same trip on two
   // documents. reconciles() proves the exclusion reached all three figures.
   check("reserve-exclusion: grand = t1 + t3 only, t2 excluded from the total too", r.grand, { subtotal: 200, vat: 30, total: 230 });
+  poolCannotMove("reserve-exclusion", input);
   reconciles("reserve-exclusion", r);
 }
 

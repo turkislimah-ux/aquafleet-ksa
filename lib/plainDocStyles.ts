@@ -299,6 +299,16 @@ export const PLAIN_DOC_CSS = `
                padding: 1.5px 0; color: var(--ink-soft); }
   .panel .r0 b { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 700;
                  white-space: nowrap; }
+  /* SETTLEMENT — the deduction between the total and the figure to pay.
+     A hairline and a small indent, not a second heavy rule: the panel already
+     owns one weighted line (.sep, immediately below) and it points at the hero.
+     A second rule of equal weight would cut the panel into two blocks that
+     argue about which one the reader should act on. The indent is what says
+     "this belongs to the total above" without drawing anything at all. */
+  .panel .settled { border-top: 1px solid var(--rule-mid); margin-top: 4px; padding: 3px 0 0 6px; }
+  .panel .settled .r0 { color: var(--ink-faint); }
+  .panel .settled .r0 b { font-weight: 600; color: var(--ink-soft); }
+
   .panel .sep { border-top: 1px solid var(--ink); margin: 5px 0 6px; }
   .panel .lab { font-size: 7.4px; letter-spacing: .16em; text-transform: uppercase; font-weight: 700;
                 color: var(--ink-faint); }

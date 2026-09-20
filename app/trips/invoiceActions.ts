@@ -13,6 +13,9 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type SpecialChargeInput } from "@/lib/invoice";
+// Pure, and outside this file BECAUSE this file is `"use server"` — see the
+// header of lib/invoice-era.ts.
+import { invoiceEra } from "@/lib/invoice-era";
 import {
   paidUpBalance,
   paidUpBalanceAsOf,
@@ -33,6 +36,17 @@ import {
   type CompanyBankAccount,
 } from "@/lib/bankAccounts";
 import { round2 } from "@/lib/vat";
+// THE ledger reader (0203). Settlement and payment history come from here and
+// nowhere else — this file must never query v_invoice_settlement or
+// invoice_payments directly, for the same reason lib/prepaid.ts owns the legacy
+// figures: one module per money model, so a schema change lands in one place.
+import {
+  fetchCustomerAvailable,
+  fetchInvoicePayments,
+  fetchInvoiceSettlement,
+  type InvoicePaymentRow,
+  type InvoiceSettlementRow,
+} from "@/lib/customer-ledger";
 
 export type ActionResult<T = undefined> = { error: string | null; data?: T };
 
@@ -73,7 +87,15 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // this rule serves worst if skipped: v3 bytes are not merely older, they render
 // a layout that was rejected, so leaving them cached would keep serving the
 // rejected design from the one surface no re-render reaches.
-const PDF_CACHE_VERSION = 4;
+//
+// v5: the LEDGER ERA (0203). A prepaid document no longer splits its trips into
+// Covered and Unpaid — it has one trips table, and under the totals it carries
+// Prepaid Applied and Amount Payable, the two figures confirm_invoice() froze.
+// Fourth template change, and the one with the sharpest reason to bump: v4
+// bytes of a prepaid invoice show a coverage verdict per LINE that the ledger
+// model no longer computes anywhere. That is not an old layout, it is a claim
+// about the customer's money that is no longer true.
+const PDF_CACHE_VERSION = 5;
 // All four cache sites go through here — a read, a write and two invalidations.
 // They shared a hand-written `${invoiceId}.pdf` in four places, so a versioned
 // key that any one of them missed would silently stop invalidating instead of
@@ -733,11 +755,31 @@ export async function previewInvoice(invoiceId: string): Promise<ActionResult<In
 // figure for prepaid customers and it is computed HERE, server-side, once, by
 // the shared expression. The modal renders it and never derives a balance of
 // its own — that is what the removed per-invoice running balance did.
+//
+// The era it reports comes from invoiceEra() in lib/invoice-era.ts. That
+// expression is PURE and lives outside this file deliberately: a `"use server"`
+// module may export only async functions, so a synchronous export here fails
+// the module and every importer with it. The popup, both documents and the
+// offline harness all need the same answer without crossing a server boundary.
 export async function getInvoice(
   invoiceId: string,
 ): Promise<
   ActionResult<
     Invoice & {
+      era: "ledger" | "legacy";
+      // v_invoice_settlement for THIS invoice — the ONE source for "how much is
+      // still outstanding". Null only if the read failed; the row exists for
+      // every invoice (its payable_sar is what is null on drafts and legacy).
+      settlement: InvoiceSettlementRow | null;
+      // Recorded payments, oldest first. Empty for an invoice nobody has paid
+      // against — which is NOT the same as an invoice that is settled, since
+      // balance applications are ledger rows and never appear here.
+      payments: InvoicePaymentRow[];
+      // The customer's Available (Balance − Uninvoiced) RIGHT NOW. Feeds the
+      // apply-balance affordance only: the actual draw is min(Available,
+      // remainder) computed inside the RPC under its lock, so this figure is a
+      // preview and is never sent anywhere.
+      availableSar: number | null;
       projectWaterType: WaterType | null;
       projectPaymentMode: PaymentMode;
       paidUpBalanceSar: number | null;
@@ -796,10 +838,30 @@ export async function getInvoice(
     paymentMode == null
       ? { ok: false, error: PAID_UP_UNAVAILABLE }
       : await loadPaidUpBalance(supabase, invoice, paymentMode);
+
+  // Three independent reads, fired together — none of them feeds another, and
+  // the popup renders nothing until all of them are back anyway.
+  //
+  // Availability is read for prepaid ONLY. A postpaid customer has no ledger,
+  // so asking for their Available would return a row full of zeros that looks
+  // like a real answer; the panel reads null and shows no apply affordance.
+  const [settlementRes, paymentsRes, availableRes] = await Promise.all([
+    fetchInvoiceSettlement(supabase, invoiceId),
+    fetchInvoicePayments(supabase, invoiceId),
+    paymentMode === "prepaid" ? fetchCustomerAvailable(supabase, invoice.customer_id) : Promise.resolve(null),
+  ]);
+
   return {
     error: null,
     data: {
       ...invoice,
+      era: invoiceEra(invoice),
+      // A FAILED READ IS NULL/EMPTY, NOT A ZERO. The popup gates its settlement
+      // panel on the row being present, so a lost read hides the panel rather
+      // than announcing a fully-outstanding invoice that might be fully paid.
+      settlement: settlementRes.error ? null : (settlementRes.data ?? null),
+      payments: paymentsRes.error ? [] : (paymentsRes.data ?? []),
+      availableSar: availableRes && !availableRes.error ? (availableRes.data?.available_sar ?? null) : null,
       projectWaterType: (project?.water_type as WaterType | null) ?? null,
       projectPaymentMode: (project?.payment_mode as PaymentMode | null) ?? "postpaid",
       paidUpBalanceSar: paidUp.ok ? paidUp.amount : null,
@@ -837,6 +899,33 @@ export async function getProofSignedUrl(invoiceId: string): Promise<ActionResult
   const { data, error } = await supabase.storage
     .from(PROOF_BUCKET)
     .createSignedUrl(invoice.proof_of_payment_path, 300);
+  if (error || !data) return { error: error?.message ?? "Could not generate a link to the proof file." };
+  return { error: null, data: { url: data.signedUrl } };
+}
+
+// THE SAME BUCKET, A DIFFERENT ROW. getProofSignedUrl above reads
+// invoices.proof_of_payment_path — one path per invoice, which is all the
+// pre-0203 model could hold because an invoice was paid exactly once. Under the
+// ledger model an invoice can take several payments, each with its own slip, so
+// the proof lives on the invoice_payments row and is signed by PAYMENT id.
+//
+// Neither function replaces the other: a legacy invoice has a path on the
+// invoice and no payment rows, a ledger invoice has payment rows and (unless it
+// was also settled through the legacy flow) nothing on the invoice column. The
+// caller picks by which list it is rendering, never by era.
+export async function getPaymentProofSignedUrl(paymentId: string): Promise<ActionResult<{ url: string }>> {
+  const supabase = createClient();
+  const { data: payment, error: payErr } = await supabase
+    .from("invoice_payments")
+    .select("proof_path")
+    .eq("id", paymentId)
+    .single();
+  if (payErr || !payment) return { error: payErr?.message ?? "Payment not found." };
+  if (!payment.proof_path) return { error: "No proof of payment on file for this payment." };
+
+  const { data, error } = await supabase.storage
+    .from(PROOF_BUCKET)
+    .createSignedUrl(payment.proof_path, 300);
   if (error || !data) return { error: error?.message ?? "Could not generate a link to the proof file." };
   return { error: null, data: { url: data.signedUrl } };
 }
@@ -938,6 +1027,8 @@ export async function getUndeliveredTripsForInvoice(invoiceId: string): Promise<
 // ---------------------------------------------------------------------------
 export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ invoiceNumber: string }>> {
   const supabase = createClient();
+  const { data: auth } = await supabase.auth.getUser();
+  const actor = auth?.user?.email ?? "unknown";
 
   const { data: invoice } = await supabase.from("invoices").select("status").eq("id", invoiceId).single();
   if (!invoice || invoice.status !== "review") {
@@ -993,6 +1084,18 @@ export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ 
     p_unpaid_ledger_balance: null,
     p_unpaid_ledger_remaining: null,
     p_payment_mode: assembly.paymentMode,
+    // 0203 — WHO confirmed. The prepaid draw this call performs writes a
+    // customer_ledger row, and a money row with no author is an audit hole.
+    // Derived server-side from the session, never a UI field (same convention
+    // as unpay's `p_by` and drivers' `approved_by`).
+    //
+    // NOTE WHAT IS *NOT* SENT: the draw itself. min(Available, grand_total) is
+    // computed inside confirm_invoice() under the same lock that writes it, so
+    // nothing app-side can race it or disagree with it. That is why the prepaid
+    // arm of lib/invoice.ts stopped splitting lines — there is no app-side
+    // coverage figure to send any more, and inventing one here to "help" would
+    // be a second answer to how much of this invoice the balance paid.
+    p_actor: actor,
   });
   if (error) return { error: error.message };
   revalidatePath("/trips");
@@ -1000,68 +1103,93 @@ export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ 
 }
 
 // ---------------------------------------------------------------------------
-// Void — the only undo for a Confirmed invoice. Number/VAT ref retained
-// forever (see migration 0027).
+// Void — the undo for a Confirmed invoice, and since 0203 for a PAID one too.
+// Number/VAT ref retained forever (see migration 0027).
+//
+// Voiding from paid is the correct undo now that a prepaid invoice can be
+// settled out of the balance: un-pay refuses an invoice that has payments or
+// applied balance against it, because reversing money by flipping a status
+// would leave the ledger holding a draw for a document that no longer exists.
+// void_invoice() reverses it properly — it writes a paired reversal row for
+// every un-reversed draw AND every balance_applied row, so the customer's
+// Balance comes back to the halala. Recorded payments are deliberately NOT
+// deleted: cash that changed hands is a fact about the world, and a voided
+// invoice with payments on it is a refund conversation, not a data-entry slip.
 // ---------------------------------------------------------------------------
 export async function voidInvoice(invoiceId: string, reason: string): Promise<ActionResult> {
   const supabase = createClient();
-  const { error } = await supabase.rpc("void_invoice", { p_invoice_id: invoiceId, p_reason: reason });
+  const { data: auth } = await supabase.auth.getUser();
+  const actor = auth?.user?.email ?? "unknown";
+
+  // DROP THE CACHED PDF FIRST — clear then write, same order and reasoning as
+  // unpayInvoice and setHideAmountDue, so a failed clear aborts with the
+  // invoice still paid and the cached file still matching it.
+  //
+  // This matters specifically for VOID FROM PAID. `paid` and `void` are both
+  // cacheable states, so the path stays live across the transition: without
+  // this drop, the void would serve the PAID document's bytes forever — a
+  // document with no VOID stamp on it, for an invoice that has been reversed.
+  const { error: cacheErr } = await supabase.storage.from(PDF_BUCKET).remove([pdfCachePath(invoiceId)]);
+  if (cacheErr) return { error: cacheErr.message };
+
+  const { error } = await supabase.rpc("void_invoice", {
+    p_invoice_id: invoiceId,
+    p_reason: reason,
+    p_actor: actor,
+  });
   if (error) return { error: error.message };
+  // ONE path, and it is the right one: the Finance tab is a tab of /trips, not
+  // a route of its own (lib/actions/finance.ts revalidates the same path for
+  // every ledger write). The reversal this void just wrote moves the
+  // customer's Balance, and that figure is rendered there.
   revalidatePath("/trips");
   return { error: null };
 }
 
 // ---------------------------------------------------------------------------
-// Pay — Confirmed -> Paid. bank_transfer requires exactly one proof file,
-// uploaded to Storage before the RPC call (the RPC only persists a path,
-// upload is plain I/O). cash needs no file. Locks both covered AND unpaid
-// trips (migration 0027's pay_invoice()).
+// LEGACY settlement — pay_invoice(), full amount, one go. THE ONLY PATH LEFT
+// FOR AN INVOICE CONFIRMED BEFORE 0203, and it exists for exactly that reason.
 //
-// v3 Batch 2 (migration 0039, APPLIED) — three postpaid-only fields:
-// reference/date/note. bank_transfer requires reference AND date (a real bank
-// transaction exists to point to — same reasoning as the existing proof-file
-// requirement); cash leaves both optional. note is always optional. Trimmed to
-// null here (not in the RPC), same convention as recordTopup
-// (lib/actions/finance.ts).
+// record_invoice_payment() below refuses those rows itself ("no frozen amount
+// payable … settle it with the legacy flow"), because a partial payment needs a
+// payable to count down against and a pre-0203 row has none. Deleting this
+// action alongside the RPC call it wraps would therefore leave every already-
+// confirmed, not-yet-paid invoice with no way to be settled at all — real money
+// on the books with no button. So the old flow stays reachable, for old rows
+// only, and dies with them.
 //
-// THREE METHODS, AND 'balance' IS NOT A THIRD WAY TO HAND OVER MONEY.
-// 'balance' (migration 0134) is what prepaid's "Pay with Balance" writes: the
-// prepaid engine already deducted the money at delivery / add-to-draft, so this
-// records WHICH settlement happened. It therefore requires no proof file, no
-// reference and no date — the bank_transfer branch below is the only one that
-// gates on those, and 'balance' deliberately does not fall into it. Sending
-// those fields would be inventing a bank transaction that never took place.
-//
-// THIS ALLOWLIST IS NOT THE PREPAID GUARD, AND MUST NOT BE MISTAKEN FOR IT.
-// It admits 'balance' flatly. What refuses 'balance' on a POSTPAID invoice is
-// pay_invoice() itself (0134), which resolves the invoice's mode — snapshot
-// first, else the customer's project mode — BEFORE its update and raises if the
-// result is not exactly 'prepaid'. Enforcement is server-side in the database on
-// purpose: a client-side check here would be bypassable and would also be a
-// second expression of a money rule. If that error surfaces to a user, the RPC's
-// message is what they see, unwrapped.
+// NOT A SECOND PAY PATH FOR NEW INVOICES. The modal offers it only when
+// invoiceEra() says `legacy`, and pay_invoice() cannot reach a ledger-era
+// invoice usefully in any case. Nothing here is to be widened: any new
+// behaviour belongs to the 0203 path.
 // ---------------------------------------------------------------------------
-export async function markInvoicePaid(formData: FormData): Promise<ActionResult> {
+export async function markInvoicePaidLegacy(formData: FormData): Promise<ActionResult> {
   const supabase = createClient();
+  // NO ACTOR, DELIBERATELY. pay_invoice()'s signature (0039, extended by 0134)
+  // has six parameters and none of them is the caller — the 0203 RPCs added
+  // p_actor, this one never had it, and supabase-js matches by name, so passing
+  // one here fails at the database rather than being ignored. The audit trail
+  // for these rows is what it always was: paid_at plus the payment note.
   const invoiceId = String(formData.get("invoiceId") ?? "");
-  const paymentMethod = String(formData.get("paymentMethod") ?? "");
+  const method = String(formData.get("paymentMethod") ?? "");
   const file = formData.get("proofFile");
   const reference = String(formData.get("paymentReference") ?? "").trim() || null;
   const paymentDate = String(formData.get("paymentDate") ?? "").trim() || null;
   const note = String(formData.get("paymentNote") ?? "").trim() || null;
 
   if (!invoiceId) return { error: "Missing invoice id." };
-  if (paymentMethod !== "cash" && paymentMethod !== "bank_transfer" && paymentMethod !== "balance") {
+  // 'balance' survives HERE and only here: it is what a prepaid invoice frozen
+  // under the old model recorded, and 0134's guard inside pay_invoice() still
+  // enforces that only a prepaid invoice may send it.
+  if (method !== "cash" && method !== "bank_transfer" && method !== "balance") {
     return { error: "Payment method must be cash, bank_transfer or balance." };
   }
 
   let proofPath: string | null = null;
-  if (paymentMethod === "bank_transfer") {
+  if (method === "bank_transfer") {
     if (!(file instanceof File) || file.size === 0) {
       return { error: "bank_transfer requires a proof-of-payment file." };
     }
-    if (!reference) return { error: "bank_transfer requires a payment reference." };
-    if (!paymentDate) return { error: "bank_transfer requires a payment date." };
     if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
     const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
     const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
@@ -1072,13 +1200,166 @@ export async function markInvoicePaid(formData: FormData): Promise<ActionResult>
     if (uploadErr) return { error: `Proof upload failed: ${uploadErr.message}` };
   }
 
+  // Clear-then-write, same ordering and same reason as every other cache site
+  // in this file: paying flips the invoice into a cacheable state.
+  const { error: cacheErr } = await supabase.storage.from(PDF_BUCKET).remove([pdfCachePath(invoiceId)]);
+  if (cacheErr) return { error: cacheErr.message };
+
+  // Parameter names are 0134's, NOT record_invoice_payment's — the two RPCs
+  // spell the same concepts differently (p_payment_method vs p_method,
+  // p_payment_reference vs p_reference) and supabase-js matches by name, so a
+  // copy-paste between them fails at the database with a "function does not
+  // exist" that names no column.
   const { error } = await supabase.rpc("pay_invoice", {
     p_invoice_id: invoiceId,
-    p_payment_method: paymentMethod,
+    p_payment_method: method,
     p_proof_path: proofPath,
     p_payment_reference: reference,
     p_payment_date: paymentDate,
     p_payment_note: note,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/trips");
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Record a payment — THE settlement path for BOTH modes since 0203, and it
+// REPLACES markInvoicePaid()/pay_invoice() for every ledger-era invoice. Not a
+// rename: the shape of the act changed.
+//
+// pay_invoice() could only settle an invoice IN FULL, in one go, which made the
+// paid flag and the money the same event. Real invoices are paid in pieces —
+// half now, half on the 30th — and under the old path the first half had
+// nowhere to live, so it was either not recorded or recorded as a full payment
+// that was not one. record_invoice_payment() appends ONE row per arrival to
+// invoice_payments and lets the RPC decide, under its own lock, whether the
+// running total has reached the payable. `paid` is now a CONSEQUENCE of the
+// money rather than a thing an operator asserts.
+//
+// Consequences worth knowing before changing anything here:
+//  - invoices.payment_method / paid_at are DISPLAY-ONLY HISTORY now. Never read
+//    them to answer "is this settled" — v_invoice_settlement does that, and a
+//    half-paid invoice still reads `confirmed` with a null payment_method.
+//  - The method list lost 'balance'. Settlement out of the prepaid balance is
+//    not money arriving and has its own action, applyBalanceToInvoice() below.
+//  - LEGACY INVOICES ARE REFUSED, by the RPC, with a sentence that says so: an
+//    invoice confirmed before 0203 has no frozen payable, so there is no figure
+//    for a partial payment to count down against. That refusal is deliberate
+//    and belongs to the database, not to a status test up here.
+//
+// bank_transfer still requires a proof file, a reference and a date (a real
+// bank transaction exists to point to); cash requires none of them. Which of
+// those checks runs here and which runs in the RPC is explained inline below.
+// ---------------------------------------------------------------------------
+export async function recordInvoicePayment(formData: FormData): Promise<ActionResult> {
+  const supabase = createClient();
+  const { data: auth } = await supabase.auth.getUser();
+  const actor = auth?.user?.email ?? "unknown";
+
+  const invoiceId = String(formData.get("invoiceId") ?? "");
+  const method = String(formData.get("paymentMethod") ?? "");
+  const file = formData.get("proofFile");
+  const reference = String(formData.get("paymentReference") ?? "").trim() || null;
+  const paidOn = String(formData.get("paymentDate") ?? "").trim() || null;
+  const note = String(formData.get("paymentNote") ?? "").trim() || null;
+  const amountRaw = String(formData.get("amount") ?? "").trim();
+
+  if (!invoiceId) return { error: "Missing invoice id." };
+  // METHOD IS A TWO-WAY CHOICE NOW. 'balance' is gone from this path — it never
+  // described money arriving, it described a settlement, and settlement out of
+  // the prepaid balance has its own action below (applyBalanceToInvoice). Mixing
+  // the two here is what let a prepaid invoice be "paid" by a form that also
+  // accepted a bank reference.
+  if (method !== "cash" && method !== "bank_transfer") {
+    return { error: "Payment method must be cash or bank_transfer." };
+  }
+
+  // INPUT HYGIENE, NOT A MONEY RULE. Whether this amount is allowed against
+  // this invoice (status, era, overpayment) is decided by the RPC under its own
+  // lock. All that happens here is refusing to send a string that is not a
+  // positive number — which would otherwise reach Postgres as a cast error
+  // rather than a sentence anyone can act on.
+  const amount = Number(amountRaw);
+  if (!amountRaw || !Number.isFinite(amount) || amount <= 0) {
+    return { error: "Enter a payment amount greater than zero." };
+  }
+
+  // The proof FILE is checked here because the upload happens here — it is an
+  // I/O precondition, not a rule about money, and the RPC only ever persists a
+  // path. The reference and the date are NOT re-checked: record_invoice_payment
+  // raises its own message for each of those, and two copies of one rule drift
+  // into two different sentences for the same refusal.
+  let proofPath: string | null = null;
+  if (method === "bank_transfer") {
+    if (!(file instanceof File) || file.size === 0) {
+      return { error: "bank_transfer requires a proof-of-payment file." };
+    }
+    if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
+    const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
+    const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
+    proofPath = `${invoiceId}/proof-${Date.now()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from(PROOF_BUCKET).upload(proofPath, file, {
+      contentType: file.type || "application/octet-stream",
+    });
+    if (uploadErr) return { error: `Proof upload failed: ${uploadErr.message}` };
+  }
+
+  // DROP THE CACHED PDF FIRST. A payment can flip the invoice to `paid`, which
+  // is a cacheable state, and the document's status chip changes with it.
+  // Clear-then-write, same order as every other cache site here: a failed clear
+  // aborts before the money moves.
+  const { error: cacheErr } = await supabase.storage.from(PDF_BUCKET).remove([pdfCachePath(invoiceId)]);
+  if (cacheErr) return { error: cacheErr.message };
+
+  const { error } = await supabase.rpc("record_invoice_payment", {
+    p_invoice_id: invoiceId,
+    p_amount: amount,
+    p_method: method,
+    p_reference: reference,
+    p_proof_path: proofPath,
+    p_paid_on: paidOn,
+    p_actor: actor,
+    p_note: note,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/trips");
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Apply balance — settle (part of) a confirmed invoice out of the customer's
+// prepaid balance AFTER confirm.
+//
+// This is the second draw, and it exists because the first one is a snapshot.
+// confirm_invoice() draws min(Available, grand_total) at the confirm instant
+// and freezes the shortfall as amount_payable_sar. If the customer tops up the
+// next day, that top-up cannot retroactively change a frozen figure — so it is
+// applied here instead, as its own dated ledger row, against the remainder.
+//
+// EVERY RULE IS THE RPC'S. Prepaid-only, confirmed-only, remainder > 0, and
+// the amount itself (min(Available, remainder), computed under the row lock).
+// Nothing is passed but the invoice and who asked: an app-side amount would be
+// a second opinion on how much balance the customer has, read a moment earlier
+// than the write. When there is nothing to apply the RPC says so in figures
+// ("Available is X and the remainder is Y") and that sentence reaches the user
+// unwrapped.
+// ---------------------------------------------------------------------------
+export async function applyBalanceToInvoice(invoiceId: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const { data: auth } = await supabase.auth.getUser();
+  const actor = auth?.user?.email ?? "unknown";
+
+  if (!invoiceId) return { error: "Missing invoice id." };
+
+  // Same clear-then-write ordering as the payment path, for the same reason:
+  // applying the last of a remainder flips the invoice to `paid`.
+  const { error: cacheErr } = await supabase.storage.from(PDF_BUCKET).remove([pdfCachePath(invoiceId)]);
+  if (cacheErr) return { error: cacheErr.message };
+
+  const { error } = await supabase.rpc("apply_balance_to_invoice", {
+    p_invoice_id: invoiceId,
+    p_actor: actor,
   });
   if (error) return { error: error.message };
   revalidatePath("/trips");
@@ -1418,6 +1699,10 @@ async function toPdfInvoiceData(
     const seller = assembly.sellerSnapshot as SellerSnap;
     const buyer = assembly.buyerSnapshot as BuyerSnap;
     pdfData = {
+      // Draft/review is ALWAYS ledger era — see invoiceEra()'s header. What is
+      // being printed here was assembled seconds ago by the ledger engine, so
+      // the era of the row it will one day freeze into is irrelevant.
+      era: invoiceEra(inv),
       status: inv.status,
       paymentMode: assembly.paymentMode,
       invoiceNumber: inv.invoice_number,
@@ -1458,6 +1743,13 @@ async function toPdfInvoiceData(
       // Draft/review -> CURRENT. Nothing about this document is frozen yet, so
       // its balance tracks reality (see loadPaidUpBalance's status table).
       paidUpBalanceSar: paidUp.amount,
+      // BOTH NULL ON PURPOSE, and the renderers depend on it. No draw has
+      // happened on an unconfirmed invoice, so there is no applied figure and
+      // no payable. Sending 0.00 instead would print "Prepaid Applied 0.00" on
+      // a draft — a sentence that tells the customer their balance was checked
+      // and found empty, which is a different and false claim.
+      prepaidAppliedSar: null,
+      amountPayableSar: null,
       hideAmountDue: inv.hide_amount_due,
       paymentMethod: null,
       paidAt: null,
@@ -1479,6 +1771,11 @@ async function toPdfInvoiceData(
     const paidUp = await loadPaidUpBalance(supabase, inv, paymentMode);
     if (!paidUp.ok) return { error: paidUp.error };
     pdfData = {
+      // THE FROZEN ROW DECIDES ITS OWN ERA, off whether a payable was frozen
+      // onto it. An invoice issued before 0203 keeps printing the covered/
+      // unpaid split it was confirmed with — 0027's freeze law, and the reason
+      // this is a column test and not a release-date test.
+      era: invoiceEra(inv),
       status: inv.status,
       paymentMode,
       invoiceNumber: inv.invoice_number,
@@ -1555,6 +1852,19 @@ async function toPdfInvoiceData(
       // that must drop as the customer settles others. That last case is why
       // `cacheable` below excludes confirmed.
       paidUpBalanceSar: paidUp.amount,
+      // THE TWO FROZEN LEDGER FIGURES, PASSED RAW. Non-null on every invoice
+      // confirmed from 0203 on (both modes), null on every older one — which is
+      // exactly the `era` test above, and the renderers never re-derive it:
+      // they print the settlement pair when `era` says ledger and the figures
+      // are there, and nothing else decides.
+      //
+      // Read off the INVOICE ROW, never off v_invoice_settlement. The view's
+      // remainder moves as payments arrive; these two do not. A tax document
+      // states what was billed and what the balance covered AT ISSUE — putting
+      // a live remainder on it would make the customer's filed copy disagree
+      // with the one in the drawer the moment they paid a riyal.
+      prepaidAppliedSar: inv.prepaid_applied_sar,
+      amountPayableSar: inv.amount_payable_sar,
       hideAmountDue: inv.hide_amount_due,
       paymentMethod: inv.payment_method,
       paidAt: inv.paid_at,

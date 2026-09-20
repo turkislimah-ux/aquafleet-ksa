@@ -733,6 +733,21 @@ export type Invoice = {
   // fall back to the customer's current project.payment_mode for those.
   payment_mode: PaymentMode | null;
 
+  // 0203 — FROZEN BY confirm_invoice(), never written by the app.
+  //   prepaid_applied_sar = min(Available, grand_total) at the confirm instant
+  //   amount_payable_sar  = grand_total − prepaid_applied_sar
+  // The postpaid arm freezes 0 and the full grand total respectively, so every
+  // invoice confirmed from 0203 onward carries a non-null payable in BOTH
+  // modes. That is exactly what makes `amount_payable_sar == null` the era
+  // discriminator on a confirmed row: null means confirmed under the old model,
+  // and such an invoice must stay on the legacy settlement flow (its
+  // record_invoice_payment call raises by design).
+  //
+  // Null on drafts/reviews too — nothing is frozen until confirm. So a null
+  // here does NOT by itself mean legacy; read it together with status.
+  prepaid_applied_sar: number | null;
+  amount_payable_sar: number | null;
+
   created_at: string;
   reviewed_at: string | null;
   confirmed_at: string | null;
