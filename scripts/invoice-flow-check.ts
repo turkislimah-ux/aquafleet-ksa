@@ -130,8 +130,11 @@ function doc(opts: {
   mode?: "prepaid" | "postpaid";
   era?: "ledger" | "legacy";
   hide?: boolean;
+  // Pre-VAT special-charge amount, case 7 only — the hidden document is
+  // charges-only, so proving what it totals needs a charge to total.
+  charge?: number;
 }): PdfInvoiceData {
-  const net = opts.net;
+  const net = round2(opts.net + (opts.charge ?? 0));
   const totals = { subtotal: net, vat: round2(net * 0.15), total: round2(net * 1.15) };
   return {
     era: opts.era ?? "ledger",
@@ -148,8 +151,23 @@ function doc(opts: {
     // `amountDue` equals `grand`. That is the shape lib/invoice.ts produces
     // now that the FIFO split is off the confirm path.
     coveredLines: [],
-    unpaidLines: [line(net)],
-    chargeLines: [],
+    unpaidLines: [line(opts.net)],
+    chargeLines:
+      opts.charge != null
+        ? [
+            {
+              id: "c1",
+              kind: "charge",
+              trip_date: "2026-06-12",
+              description: "Standby waiting time",
+              amount_sar: opts.charge,
+              vat_sar: round2(opts.charge * 0.15),
+              quantity: 1,
+              price_sar: opts.charge,
+              covered: false,
+            },
+          ]
+        : [],
     covered: { subtotal: 0, vat: 0, total: 0 },
     amountDue: totals,
     grand: totals,
@@ -169,27 +187,26 @@ function doc(opts: {
 /** The hero and the settlement deduction, read out of the real view model. */
 function printed(data: PdfInvoiceData): {
   hero: number;
-  heroPrinted: boolean;
+  heroLabel: string;
   deduction: number | null;
   heroIsGrand: boolean;
   grand: number;
+  hasTrips: boolean;
+  hasCharges: boolean;
 } {
   const vm = buildInvoiceViewModel(data);
   return {
-    // NaN when the document presents NO hero figure at all — the 0204 state,
-    // where a ledger-era prepaid invoice with hide-amount-due on prints its
-    // tables and its Grand Total stack and names nothing as owed.
-    //
-    // NaN and not 0, and not a coalesced null: every arithmetic assertion
-    // below is an equality, and NaN loses all of them. A 0 would quietly
-    // satisfy some, and a null would have to be `?? 0`-ed at each site, which
-    // is the same thing written longer. So a case that is supposed to have a
-    // hero and silently stops having one goes RED here instead of drifting.
-    hero: vm.hero ? vm.hero.amount : NaN,
-    heroPrinted: vm.hero != null,
+    // EVERY document closes on a hero now (Turki's ruling): hiding changes
+    // WHAT the figure speaks for — the charges total on a hidden, charges-only
+    // document — never whether one exists. So the interesting outputs are the
+    // AMOUNT, the LABEL it prints under, and which sections survived.
+    hero: vm.hero.amount,
+    heroLabel: vm.hero.label.en,
     deduction: vm.settlementRows.length ? vm.settlementRows[0].amount : null,
     heroIsGrand: vm.heroIsGrandTotal,
     grand: vm.totals.total,
+    hasTrips: vm.sections.some((sec) => sec.kind === "trips"),
+    hasCharges: vm.sections.some((sec) => sec.kind === "charges"),
   };
 }
 
@@ -381,37 +398,43 @@ console.log("\n-- case 6: the printed chain, Grand Total − Prepaid Applied = h
 }
 
 // ---------------------------------------------------------------------------
-// CASE 7 — the hide-from-customer toggle. It removes the pair AND the hero.
+// CASE 7 — the hide-from-customer toggle: WHOLE-SECTION omission.
 //
-// THIS CASE USED TO ASSERT THE OPPOSITE, and the assertion was the bug. It
-// pinned the hidden document's hero to the Grand Total, on the reasoning that
-// a hidden deduction under a visible payable would be a document that does not
-// add up. True as far as it went — and it made the toggle a no-op, because
-// since 0204 froze amount_payable_sar AT the grand total, "Amount Payable" and
-// "Grand Total" are THE SAME NUMBER. The toggle changed a caption and hid
-// nothing. An operator who used it handed the customer the figure they had
-// just asked to withhold.
-//
-// The rule now: the hidden document presents NO figure as owed. The line
-// tables print, the Grand Total stack prints (it is a tax document and its
-// total is not optional), and the hero slot is empty. Asserting an ABSENCE is
-// weaker than asserting a number unless the absence is pinned from both sides,
-// so this pins it from three: the hero is gone, nothing took its place, and
-// the parts that must survive are byte-identical to the shown document.
+// THIS CASE HAS NOW PINNED THREE RULINGS, which is why it pins the current
+// one from every side. It first asserted the hidden hero falls back to Grand
+// Total (a no-op once 0204 froze payable AT grand — the toggle renamed a
+// caption and hid nothing). Then it asserted NO hero at all — but the trips
+// stayed itemised above the empty slot, so the customer still read every
+// priced delivery. Turki's ruling closes the hole where the money actually
+// shows: the TRIPS SECTION LEAVES THE DOCUMENT, the totals speak for the
+// charges alone, and the document still closes on an Amount Payable — equal
+// to the charges total it just reached, so it adds up to what it shows.
+// Frozen money on the invoice row is untouched throughout; the flag only
+// decides what this render presents.
 // ---------------------------------------------------------------------------
-console.log("\n-- case 7: hiding the pair removes the hero entirely");
+console.log("\n-- case 7: hiding omits the trips section and totals charges only");
 {
-  const shown = printed(doc({ net: 1234.6, applied: 580.21, payable: 839.58, hide: false }));
-  const hidden = printed(doc({ net: 1234.6, applied: 580.21, payable: 839.58, hide: true }));
+  // 1,234.60 net of trips + a 200.00 charge → grand 1,649.79. The charge is
+  // the point: a hidden document with no charges would total 0.00, which
+  // satisfies almost any equality by accident.
+  const shown = printed(doc({ net: 1234.6, charge: 200, applied: 580.21, payable: 1069.58, hide: false }));
+  const hidden = printed(doc({ net: 1234.6, charge: 200, applied: 580.21, payable: 1069.58, hide: true }));
+  check("shown — the trips section prints", shown.hasTrips);
   check("shown — the deduction prints", shown.deduction !== null);
-  check("shown — the hero prints, and it is the frozen payable", shown.heroPrinted && round2(shown.hero) === 839.58);
-  check("hidden — the deduction is gone", hidden.deduction === null);
-  check("hidden — NO hero figure is presented at all", hidden.heroPrinted === false);
-  check("hidden — and nothing moved into the empty slot", Number.isNaN(hidden.hero));
-  check("hidden — heroIsGrandTotal is false, so no renderer prints one either", hidden.heroIsGrand === false);
-  // What must NOT change: the document is still a tax invoice.
-  eq("hidden — the Grand Total stack still prints, unchanged", hidden.grand, shown.grand);
-  check("the two documents really do differ (the toggle is not a no-op)", shown.heroPrinted !== hidden.heroPrinted);
+  check("shown — the hero is the frozen payable", round2(shown.hero) === 1069.58);
+  eq("shown — the stack total is the grand", shown.grand, round2(1434.6 * 1.15));
+  check("hidden — the trips section is GONE", hidden.hasTrips === false);
+  check("hidden — the charges section stays", hidden.hasCharges);
+  check("hidden — the deduction is gone with the trip money", hidden.deduction === null);
+  // The document adds up to what it shows: charges 200.00 + VAT 30.00.
+  eq("hidden — the stack total is the CHARGES total", hidden.grand, 230);
+  eq("hidden — the hero equals it", round2(hidden.hero), 230);
+  check("hidden — and still calls itself Amount Payable", hidden.heroLabel === "Amount Payable");
+  check(
+    "hidden — heroIsGrandTotal stays false, so the total row AND the payable both print",
+    hidden.heroIsGrand === false,
+  );
+  check("the two documents really do differ (the toggle is not a no-op)", shown.grand !== hidden.grand);
 }
 
 // ---------------------------------------------------------------------------

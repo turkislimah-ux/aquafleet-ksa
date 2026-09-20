@@ -105,7 +105,24 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // v5 bytes of the same invoice state a payable and say nothing about how it
 // was met. Fifth template change, and the first where leaving the old bytes
 // in place discloses a figure the customer was told would be withheld.
-const PDF_CACHE_VERSION = 6;
+//
+// v7: two output changes, both to what a customer reads. First, a hidden
+// ledger-era prepaid invoice no longer prints the Balance / Remaining foot
+// under its trips table — v6 bytes of such an invoice still disclose the pool
+// and what it leaves, under a payable the operator asked to withhold, which is
+// the v6 failure again one row up. Second, the subtotal note prints once: v6
+// bytes carry it twice, the second copy bidi-reordered ("VAT 1,260.00 +
+// 8,400.00"), on every prepaid and postpaid invoice alike. The hide-toggle's
+// own `.remove()` cannot reach either — it fires on a data event, and neither
+// of these is one.
+//
+// v8: hide-from-customer became WHOLE-SECTION omission (Turki's ruling). A
+// hidden ledger-era prepaid invoice now drops its trips section entirely and
+// totals charges only, closing on Amount Payable = the charges total. v7
+// bytes of a hidden invoice still itemise every trip — priced, dated,
+// subtotalled — above a panel that merely named no figure as owed: half the
+// old disclosure, cached under the new law's name.
+const PDF_CACHE_VERSION = 8;
 // All four cache sites go through here — a read, a write and two invalidations.
 // They shared a hand-written `${invoiceId}.pdf` in four places, so a versioned
 // key that any one of them missed would silently stop invalidating instead of
@@ -1465,7 +1482,12 @@ export async function setHideAmountDue(invoiceId: string, hide: boolean): Promis
 
   const { error } = await supabase.from("invoices").update({ hide_amount_due: hide }).eq("id", invoiceId);
   if (error) return { error: error.message };
-  revalidatePath("/trips");
+  // NO revalidatePath here, alone among this file's actions, and on purpose.
+  // No server-rendered surface reads hide_amount_due (the /trips page's
+  // invoice selects don't carry the column) — so there is nothing to
+  // revalidate, and the page-wide RSC reload it triggered is what was closing
+  // the invoice popup under the operator mid-toggle. The popup re-reads its
+  // own invoice after this returns (InvoiceDetailModal.toggleHideAmountDue).
   return { error: null };
 }
 

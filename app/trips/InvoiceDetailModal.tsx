@@ -568,6 +568,31 @@ export default function InvoiceDetailModal({
     URL.revokeObjectURL(url);
   }
 
+  // The hide toggle saves and re-reads IN PLACE — deliberately NOT runAction().
+  // runAction ends in refresh() → onMutated() + router.refresh(), the full
+  // list-and-page reload a money action needs; this flag is a display
+  // preference no server-rendered surface reads (app/trips/page.tsx's invoice
+  // selects carry no hide_amount_due), and that global reload is what closed
+  // this popup under the operator mid-toggle. Save, re-read this ONE invoice
+  // so the switch reflects the stored state, stay open.
+  async function toggleHideAmountDue() {
+    if (!invoiceId || !raw) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      const res = await setHideAmountDue(invoiceId, !raw.hide_amount_due);
+      if (res.error) {
+        setActionError(res.error);
+        return;
+      }
+      await load();
+    } catch {
+      setActionError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runAction(fn: () => Promise<{ error: string | null }>) {
     setBusy(true);
     setActionError(null);
@@ -1399,7 +1424,7 @@ export default function InvoiceDetailModal({
                       lang={lang}
                       hidden={raw.hide_amount_due}
                       busy={busy}
-                      onToggle={() => runAction(() => setHideAmountDue(invoiceId, !raw.hide_amount_due))}
+                      onToggle={toggleHideAmountDue}
                     />
                   }
                 />
@@ -1518,7 +1543,7 @@ export default function InvoiceDetailModal({
                       lang={lang}
                       hidden={raw.hide_amount_due}
                       busy={busy}
-                      onToggle={() => runAction(() => setHideAmountDue(invoiceId, !raw.hide_amount_due))}
+                      onToggle={toggleHideAmountDue}
                     />
                   }
                 />

@@ -232,11 +232,21 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
   // view-model hands over the UNFILLED template and the raw operands so this
   // renderer can substitute its own 2-decimal formatting — filling it upstream
   // would have frozen the sheet's whole-riyal format into the tax document.
+  //
+  // PRINTED ONCE, NOT AS A BILINGUAL PAIR. `vatSplit` is the one label on this
+  // sheet whose Arabic IS its English — "{net} + VAT {vat}", Latin figures and
+  // the Latin tax acronym in both (lib/i18n.ts says why). Running it through
+  // bl() printed that same string twice, and the second copy sat in an
+  // `.ar dir="rtl"` span, where the bidi algorithm reordered a Latin string
+  // that has no Arabic in it — so the customer read "8,400.00 + VAT 1,260.00"
+  // followed by "VAT 1,260.00 + 8,400.00". One run, no dir, is the text.
   const split = (net: number, vat: number) =>
-    `<span class="split">${bl(fillBi(labels.vatSplit, { net: num2(net), vat: num2(vat) }), "ar inline")}</span>`;
+    `<span class="split">${esc(fillBi(labels.vatSplit, { net: num2(net), vat: num2(vat) }).en)}</span>`;
 
   // Three stacked rows for a prepaid table, one for postpaid — the original
-  // footer, restored. What changed is the SOURCE of the middle row, not its
+  // footer, restored. (A hidden prepaid document prints no trips table at
+  // all, so no prepaid foot ever arrives without its Balance and Remaining
+  // rows.) What changed is the SOURCE of the middle row, not its
   // position: it carries whichever balance the view-model decided this era
   // prints — the paid-up figure on a legacy document, the ledger balance on a
   // 0203-onward one — never the chained per-invoice running balance the row
@@ -839,7 +849,8 @@ export async function buildInvoicePdfHtml(data: PdfInvoiceData): Promise<string>
       <div class="r0"><span>${bl(L.totalVat, "ar inline")}</span><b>${num2(vm.totals.vat)}</b></div>
       ${
         // Grand Total appears in the stack ONLY when something else is the hero
-        // figure. When it IS the hero (postpaid, and prepaid with the toggle on)
+        // figure. When it IS the hero (postpaid, drafts, and legacy prepaid with
+        // the toggle on)
         // printing it here too put the same number in the card twice, six
         // millimetres apart — which reads as two different figures that happen
         // to match, and invites the customer to look for the difference.
@@ -860,20 +871,9 @@ export async function buildInvoicePdfHtml(data: PdfInvoiceData): Promise<string>
               )
               .join("")}</div>`
       }
-      ${
-        // NO HERO, NO RULE. `vm.hero` is null on exactly one document — a
-        // ledger-era prepaid invoice with the amount hidden from the customer —
-        // and the rule, the caption and the figure leave together. A `sep` on
-        // its own would close the card with a hairline under empty space, which
-        // reads as a number that failed to render. The card still ends on its
-        // Grand Total row: `heroIsGrandTotal` is false whenever the hero is
-        // absent, so that row is already printed above.
-        vm.hero == null
-          ? ""
-          : `<div class="sep"></div>
+      <div class="sep"></div>
       <div class="lab">${esc(vm.hero.label.en)}<span class="ar" dir="rtl">${esc(vm.hero.label.ar)}</span></div>
-      <div class="amt" dir="ltr">${num2(vm.hero.amount)}<span class="cur">${esc(L.currency.en)}</span></div>`
-      }
+      <div class="amt" dir="ltr">${num2(vm.hero.amount)}<span class="cur">${esc(L.currency.en)}</span></div>
     </div>
   </div>
 

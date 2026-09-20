@@ -168,7 +168,11 @@ export default function FinanceTab({
 }: FinanceTabProps) {
   const { lang } = useApp();
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
-  const [topupTarget, setTopupTarget] = useState<AddBalanceCustomerOption | null | "global">(null);
+  // The Add Balance popup's target. Only the Ledger popup sets it now — the
+  // row buttons, the over-balance banner button and the global picker are
+  // gone (Turki's ruling: one entry point), so the old `"global"` arm and the
+  // customer-picker options went with them. Always a concrete customer.
+  const [topupTarget, setTopupTarget] = useState<AddBalanceCustomerOption | null>(null);
   const [ledgerFor, setLedgerFor] = useState<{ id: string; name: string } | null>(null);
   const [statementFor, setStatementFor] = useState<{ customerId: string; customerName: string } | null>(null);
   const [invoicesFor, setInvoicesFor] = useState<InvoiceCustomer | null>(null);
@@ -428,15 +432,6 @@ export default function FinanceTab({
     [ledgerCorrections],
   );
 
-  // Prepaid-only customer options for the global top-up picker.
-  const prepaidCustomerOptions: AddBalanceCustomerOption[] = useMemo(
-    () => prepaidRows.map((r) => ({ id: r.customer.id, name: r.customer.name })),
-    [prepaidRows],
-  );
-
-  const activeTopupCustomer: AddBalanceCustomerOption | null =
-    topupTarget && topupTarget !== "global" ? topupTarget : null;
-
   const activeStatementRow = statementFor ? rows.find((r) => r.customer.id === statementFor.customerId) : null;
 
   // Add Balance history — MERGED: legacy customer_topups rows (pre-0203,
@@ -445,8 +440,8 @@ export default function FinanceTab({
   // photo link calls the right signed-URL action. Newest first, like the old
   // single-source list.
   const addBalanceHistory: AddBalanceHistoryRow[] = useMemo(() => {
-    if (!activeTopupCustomer) return [];
-    const legacy: AddBalanceHistoryRow[] = (topupsByCustomer.get(activeTopupCustomer.id) ?? []).map((tp) => ({
+    if (!topupTarget) return [];
+    const legacy: AddBalanceHistoryRow[] = (topupsByCustomer.get(topupTarget.id) ?? []).map((tp) => ({
       id: tp.id,
       amount_sar: tp.amount_sar,
       topup_date: tp.topup_date,
@@ -456,7 +451,7 @@ export default function FinanceTab({
       source: "legacy",
       doc_number: null,
     }));
-    const fromLedger: AddBalanceHistoryRow[] = (entriesByCustomer.get(activeTopupCustomer.id) ?? [])
+    const fromLedger: AddBalanceHistoryRow[] = (entriesByCustomer.get(topupTarget.id) ?? [])
       .filter((e) => e.entry_type === "topup")
       .map((e) => ({
         id: e.id,
@@ -473,7 +468,7 @@ export default function FinanceTab({
     return [...legacy, ...fromLedger].sort((a, b) =>
       a.topup_date < b.topup_date ? 1 : a.topup_date > b.topup_date ? -1 : 0,
     );
-  }, [activeTopupCustomer, topupsByCustomer, entriesByCustomer]);
+  }, [topupTarget, topupsByCustomer, entriesByCustomer]);
 
   // Prepaid statement input — the customer's ledger rows mapped to the
   // view-model's shape, verbatim (signed amounts, doc numbers, the joined
@@ -535,17 +530,16 @@ export default function FinanceTab({
                 {overBalanceRows.map((r) => r.customer.name).join(", ")}
               </span>
             </div>
-            <Btn
-              variant="outline"
-              onClick={() => setTopupTarget({ id: overBalanceRows[0].customer.id, name: overBalanceRows[0].customer.name })}
-            >
-              {t("trips.finance.addBalance", lang)}
-            </Btn>
+            {/* No Add Balance button here any more — adding balance lives in
+                ONE place, the customer's Ledger popup (Turki's ruling,
+                adjustments batch). The banner names who is over; the ledger
+                is where the money moves. */}
           </div>
         </div>
       )}
 
-      {/* Mode filter + global action. */}
+      {/* Mode filter. The global Add Balance button that sat beside it is
+          gone with the row buttons — one entry point, the Ledger popup. */}
       <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
         <div className="inline-flex rounded-lg border border-app p-0.5">
           {(["all", "prepaid", "postpaid"] as ModeFilter[]).map((f) => (
@@ -571,15 +565,6 @@ export default function FinanceTab({
                   : t("labels.postpaid", lang)}
             </button>
           ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <Btn
-            variant="primary"
-            onClick={() => setTopupTarget("global")}
-            className={prepaidCustomerOptions.length === 0 ? "opacity-50 pointer-events-none" : ""}
-          >
-            {t("trips.finance.addBalance", lang)}
-          </Btn>
         </div>
       </div>
 
@@ -687,16 +672,11 @@ export default function FinanceTab({
                   </TD>
                   <TD>
                     <div className="inline-flex gap-2">
-                      {r.mode === "prepaid" && (
-                        <Btn
-                          variant="outline"
-                          onClick={() => setTopupTarget({ id: r.customer.id, name: r.customer.name })}
-                        >
-                          {t("trips.finance.addBalance", lang)}
-                        </Btn>
-                      )}
                       {/* Ledger — the prepaid drill-in (0203): every row,
-                          running balance, refund + correction gate. */}
+                          running balance, refund + correction gate. Add
+                          Balance lives INSIDE it now, beside Refund and
+                          Correction — one entry point for money in, not a
+                          twin button on every row (Turki's ruling). */}
                       {r.mode === "prepaid" && (
                         <Btn
                           variant="outline"
@@ -736,17 +716,10 @@ export default function FinanceTab({
         </div>
       )}
 
-      <AddBalanceModal
-        open={topupTarget !== null}
-        onClose={() => setTopupTarget(null)}
-        customers={prepaidCustomerOptions}
-        fixedCustomer={activeTopupCustomer}
-        history={addBalanceHistory}
-        company={company}
-      />
-
       {/* Prepaid ledger drill-in (0203) — every row, running balance walk,
-          refund + the two-vote correction gate, RCT/CN reprints. */}
+          refund + the two-vote correction gate, RCT/CN reprints. Its Add
+          Balance button opens the SAME popup the row button does, through the
+          same `topupTarget`, with the customer fixed. */}
       <CustomerLedgerModal
         open={ledgerFor !== null}
         onClose={() => setLedgerFor(null)}
@@ -758,6 +731,23 @@ export default function FinanceTab({
         corrections={ledgerFor ? (correctionsByCustomer.get(ledgerFor.id) ?? []) : []}
         votesByCorrection={votesByCorrection}
         currentUserEmail={currentUserEmail}
+        company={company}
+        onAddBalance={(c) => setTopupTarget(c)}
+      />
+
+      {/* RENDERED AFTER the ledger popup on purpose. Both overlays are z-50,
+          so DOM order is the stacking order — this one must paint on top when
+          the ledger popup asks for it, and stay on top while the ledger popup
+          waits underneath with the customer still open. */}
+      <AddBalanceModal
+        open={topupTarget !== null}
+        onClose={() => setTopupTarget(null)}
+        // Empty on purpose: the customer is always fixed now (the Ledger
+        // popup is the one launcher), so the modal's picker view is
+        // unreachable and there is no roster to hand it.
+        customers={[]}
+        fixedCustomer={topupTarget}
+        history={addBalanceHistory}
         company={company}
       />
 

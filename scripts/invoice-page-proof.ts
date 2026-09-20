@@ -192,9 +192,12 @@ const CASES: ReadonlyArray<readonly [string, PdfInvoiceData]> = [
   ["ledger-prepaid-hidden-pair", ledgerDoc({ tripCount: 3, applied: 12000, payable: 3525, hide: true })],
   // 24 DISTINCT rates → 24 printed rows. The worst realistic trips table.
   ["ledger-prepaid-LONG-24-rows", ledgerDoc({ tripCount: 24, applied: 60000, payable: 89355, vary: true })],
-  // THE CONTROL for the case above: same document, settlement pair suppressed.
-  // If both read the same page count, the pair is not what moved the break —
-  // without this line a 2pp LONG case reads like the batch cost a page.
+  // THE HIDDEN TWIN of the case above. Under Turki's ruling the toggle omits
+  // the trips section WHOLE — 24 priced rows, subtotal, Balance and Remaining
+  // all leave, and the document collapses to its charges and a charges-only
+  // totals block. So this is no longer a control that isolates one block's
+  // page cost; it is the proof that the hidden LONG document fits its page
+  // and that a 24-row visible twin's break is the trips table's own.
   [
     "ledger-prepaid-LONG-24-rows-hidden",
     ledgerDoc({ tripCount: 24, applied: 60000, payable: 89355, vary: true, hide: true }),

@@ -1,20 +1,19 @@
 # SESSION HANDOFF
 
 ## State
-- **Batch 1 = 48a2f1b, Batch 2 = 6500512. DB at 0204** (applied by Turki to
-  prod + test; the file is still UNTRACKED — stage it with the commit).
+- **Batch 1 = 48a2f1b, Batch 2 = 6500512 = main. DB at 0204** (prod + test).
+  **Branch prepaid-adjustments @ a8d14c7** holds Batch 3 + 0204 file.
 - **PREPAID BATCH 3 BUILT — UNCOMMITTED, awaiting Turki's in-browser pass.**
-  Ten items: merged statement timeline · confirmed-phase panel shows payable
-  vs Available · Add Balance in the ledger popup (AddBalanceForm.tsx, new) ·
-  refund photo · Balance/Remaining under the Trips subtotal ·
-  hide-from-customer · invoices by period_end desc · settlement on print+PDF ·
-  bank_transfer proof everywhere.
+  Ten items incl.: statement timeline · Add Balance ONLY from the ledger
+  popup (no Finance-tab buttons) · Balance/Remaining under Trips subtotal
+  (visible docs) · hide-from-customer = trips section OMITTED WHOLE on
+  print/PDF, charges-only totals, Amount Payable = charges total, screen
+  unchanged (PDF cache v8) · invoices by period_end desc · settlement on
+  print+PDF · bank_transfer proof everywhere.
 - **Item 1 REDONE.** invoice_payments is a 5th statement source (ranks
-  0/1|2/3/4), recordOnly — only ledger rows advance the run. Safe because
-  0204's money doors are DISJOINT: apply_balance_to_invoice writes only
-  customer_ledger, record_invoice_payment only invoice_payments. No de-dup
-  exists; do not add one. `payments` is LEGACY-ONLY now (amount_payable_sar
-  == null) or a modern invoice prints twice.
+  0/1|2/3/4), recordOnly — only ledger rows advance the run. 0204's money
+  doors are DISJOINT; no de-dup exists, do not add one. `payments` is
+  LEGACY-ONLY (amount_payable_sar == null) or a modern invoice prints twice.
 - **0204 law:** confirm moves NO money — freezes amount_payable = grand_total.
   record_refund is SEVEN args (p_photo_path 5th); the 6-arg one is DROPPED.
   Its proof guard runs BEFORE the Available cap — a cap test must use cash.

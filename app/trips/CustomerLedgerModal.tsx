@@ -10,11 +10,12 @@
 // figure — the headline Balance is always the view's own number.
 //
 // Writes go through the SECURITY DEFINER RPCs only:
-//   Add Balance → recordTopup       → record_topup    (the SAME form the Add
-//                 Balance popup shows — ./AddBalanceForm, rendered here with
-//                 the customer fixed, because adding balance belongs beside
-//                 the other two money actions rather than only behind its own
-//                 button on the row)
+//   Add Balance → NOT WRITTEN HERE. The button hands the customer to
+//                 `onAddBalance`, and the host opens the ONE Add Balance popup
+//                 (./AddBalanceModal) with that customer fixed — the same
+//                 popup the row button opens, so there is one form, one
+//                 required-flip and one receipt view for a top-up, not a copy
+//                 of them inlined under this action row.
 //   Refund      → recordRefund      → record_refund   (capped by Available IN
 //                                     THE DATABASE; its error shows VERBATIM)
 //   Correction  → proposeLedgerCorrection / voteLedgerCorrection — the 2-vote
@@ -38,7 +39,6 @@ import {
   type LedgerDocResult,
 } from "@/lib/actions/finance";
 import { prepareUploadFiles } from "@/lib/upload-image";
-import AddBalanceForm from "./AddBalanceForm";
 import { buildLedgerDocVm } from "@/lib/docvm/ledgerDoc";
 import { buildLedgerDocHtml } from "@/lib/docs/ledgerDoc";
 import { printHtml } from "@/lib/printHtml";
@@ -90,10 +90,14 @@ export default function CustomerLedgerModal({
   votesByCorrection,
   currentUserEmail,
   company,
+  onAddBalance,
 }: {
   open: boolean;
   onClose: () => void;
   customer: { id: string; name: string } | null;
+  /** Opens the ONE Add Balance popup for this customer. The host owns that
+   *  popup and its state; this modal only asks for it (see the header). */
+  onAddBalance: (customer: { id: string; name: string }) => void;
   /** customer_ledger rows for THIS customer, oldest-first (fetch order). */
   entries: LedgerEntryRow[];
   /** The three view figures — passed through, never derived here. */
@@ -109,15 +113,9 @@ export default function CustomerLedgerModal({
   const router = useRouter();
   const { lang } = useApp();
 
-  // Which inline panel is open under the action row. One at a time.
-  const [panel, setPanel] = useState<"addBalance" | "refund" | "correction" | null>(null);
-
-  // ── Add Balance panel ────────────────────────────────────────────────────
-  // The form itself is ./AddBalanceForm — the Add Balance popup's own form,
-  // rendered here with the customer fixed. Only the busy flag and the receipt
-  // it hands back live in this file.
-  const [toppingUp, setToppingUp] = useState(false);
-  const [topupReceipt, setTopupReceipt] = useState<LedgerDocResult | null>(null);
+  // Which inline panel is open under the action row. One at a time. Add
+  // Balance is not a panel — it opens the host's popup (see `onAddBalance`).
+  const [panel, setPanel] = useState<"refund" | "correction" | null>(null);
 
   // ── Refund form ──────────────────────────────────────────────────────────
   const [refAmount, setRefAmount] = useState("");
@@ -154,8 +152,6 @@ export default function CustomerLedgerModal({
   useEffect(() => {
     if (!open) return;
     setPanel(null);
-    setToppingUp(false);
-    setTopupReceipt(null);
     setRefAmount("");
     setRefMethod("");
     setRefReference("");
@@ -192,7 +188,7 @@ export default function CustomerLedgerModal({
     [corrections],
   );
 
-  const busy = toppingUp || refunding || proposing || votingId !== null;
+  const busy = refunding || proposing || votingId !== null;
 
   function close() {
     if (busy) return;
@@ -225,27 +221,6 @@ export default function CustomerLedgerModal({
       note: e.note,
       createdAt: e.created_at,
       createdBy: e.created_by,
-      company,
-    });
-    printHtml(buildLedgerDocHtml(vm));
-  }
-
-  // Print the receipt for the top-up that JUST saved in the panel above —
-  // from record_topup's own return, same trio as every other ledger print.
-  function onPrintTopupReceipt() {
-    if (!customer || !topupReceipt) return;
-    const vm = buildLedgerDocVm({
-      lang,
-      generatedAt: new Date(),
-      kind: "topup",
-      docNumber: topupReceipt.docNumber,
-      customerName: customer.name,
-      amountSar: topupReceipt.amountSar,
-      method: topupReceipt.method,
-      reference: topupReceipt.reference,
-      note: topupReceipt.note,
-      createdAt: topupReceipt.createdAt,
-      createdBy: topupReceipt.createdBy,
       company,
     });
     printHtml(buildLedgerDocHtml(vm));
@@ -423,12 +398,13 @@ export default function CustomerLedgerModal({
           />
         </div>
 
-        {/* Action row — each button opens its inline panel below. */}
+        {/* Action row. Refund and Correction open their inline panels below;
+            Add Balance opens the host's popup over this one, with the customer
+            fixed, and this modal stays put underneath — record_topup's
+            router.refresh() re-pulls the page, so the rows here are current
+            again the moment that popup closes. */}
         <div className="flex items-center gap-2 mb-4">
-          <Btn
-            variant={panel === "addBalance" ? "primary" : "outline"}
-            onClick={() => setPanel(panel === "addBalance" ? null : "addBalance")}
-          >
+          <Btn variant="outline" onClick={() => customer && onAddBalance(customer)}>
             <Plus className="h-4 w-4" /> {t("trips.finance.addBalance", lang)}
           </Btn>
           <Btn
@@ -444,40 +420,6 @@ export default function CustomerLedgerModal({
             <Scale className="h-4 w-4" /> {t("trips.ledger.proposeCorrection", lang)}
           </Btn>
         </div>
-
-        {panel === "addBalance" && (
-          <div className="card p-4 mb-4">
-            <p className="text-sm font-medium mb-1">{t("trips.finance.addBalance", lang)}</p>
-            <p className="text-sm muted mb-3">{t("trips.addBalance.formSubtitle", lang)}</p>
-            {/* The receipt sits ABOVE the form, not inside its button row like
-                the credit note below: the form under it has already been
-                re-keyed blank for the next top-up, and this line is the
-                previous one's number and its print. */}
-            {topupReceipt && (
-              <div className="flex items-center justify-between gap-2 mb-3">
-                <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                  {fill(t("trips.addBalance.successReceipt", lang), { n: topupReceipt.docNumber })}
-                </p>
-                <Btn type="button" variant="outline" onClick={onPrintTopupReceipt}>
-                  <Printer className="h-4 w-4" /> {t("trips.addBalance.printReceipt", lang)}
-                </Btn>
-              </div>
-            )}
-            {/* Keyed by the last receipt so a saved top-up leaves a BLANK form
-                behind — the Add Balance popup gets the same effect by
-                switching view, which this panel has no equivalent of.
-                `customers` is empty because the popup already fixed the
-                customer; the picker is a read-only field here. */}
-            <AddBalanceForm
-              key={topupReceipt?.docNumber ?? "new"}
-              customers={[]}
-              fixedCustomer={customer}
-              onSuccess={(r) => setTopupReceipt(r)}
-              onCancel={() => setPanel(null)}
-              onBusyChange={setToppingUp}
-            />
-          </div>
-        )}
 
         {panel === "refund" && (
           <div className="card p-4 mb-4">

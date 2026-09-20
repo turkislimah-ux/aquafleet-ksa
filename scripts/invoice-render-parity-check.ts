@@ -445,7 +445,7 @@ async function main() {
   // by each renderer writing its own `vm.amountDue ? … : …`, which is how the
   // sheet and the PDF drifted; it is `vm.hero` now, and this pins what that
   // resolves to from the OUTSIDE — reading the rendered document, not the VM.
-  const heroCases: ReadonlyArray<readonly [string, PdfInvoiceData, "due" | "total" | "payable" | "none"]> = [
+  const heroCases: ReadonlyArray<readonly [string, PdfInvoiceData, "due" | "total" | "payable" | "hidden"]> = [
     ["legacy prepaid, toggle off", prepaid, "due"],
     ["legacy prepaid, toggle ON", { ...prepaid, hideAmountDue: true }, "total"],
     ["legacy postpaid", postpaid, "total"],
@@ -453,19 +453,22 @@ async function main() {
     // is a frozen column — not amountDue, which now equals grand exactly.
     ["LEDGER prepaid, shortfall", ledgerPrepaid, "payable"],
     ["LEDGER prepaid, fully covered", ledgerPrepaidCovered, "payable"],
-    // Toggle ON suppresses the whole balance disclosure AND the hero with it.
+    // Toggle ON = WHOLE-SECTION omission (Turki's ruling, adjustments batch):
+    // the trips section leaves the document entirely and what remains is a
+    // charges-only invoice that still closes on a payable.
     //
-    // THIS LINE PINNED "total" UNTIL 0204, AND THAT WAS THE BUG IT WAS MEANT
-    // TO PREVENT. Since confirm_invoice() freezes amount_payable_sar AT the
-    // grand total, "Amount Payable" and "grand total" are the SAME NUMBER on
-    // this fixture — 15,500.00 either way. So the old assertion watched the
-    // hero move from one caption to another over an unchanged figure and
-    // called that hiding. The customer's copy still named what was owed.
-    //
-    // A hidden document now presents no figure as owed at all. The assertion
-    // is therefore an absence — see the "none" arm below, which pins it from
-    // three sides so it stays as hard to satisfy accidentally as an equality.
-    ["LEDGER prepaid, toggle ON", { ...ledgerPrepaid, hideAmountDue: true }, "none"],
+    // THIS LINE HAS NOW PINNED THREE DIFFERENT ANSWERS, which is why the
+    // "hidden" arm below pins the ruling from every side rather than with one
+    // equality. It said "total" until 0204 (wrong: payable = grand there, so
+    // the hero renamed itself and hid nothing), then "none" (no figure
+    // presented as owed — but every trip stayed itemised above it), and now
+    // "hidden": zero trip tokens, charges-only totals, Amount Payable = the
+    // charges total. The document must add up to what it still shows.
+    ["LEDGER prepaid, toggle ON", { ...ledgerPrepaid, hideAmountDue: true }, "hidden"],
+    // The settled twin carries a real ledger balance figure AND settlement
+    // events, so it has trip-money in three places (table, foot, settlement
+    // list) that must all leave together.
+    ["LEDGER prepaid settled, toggle ON", { ...ledgerPrepaidSettled, hideAmountDue: true }, "hidden"],
     // Postpaid freezes a payable too (= grand). It must NOT become the hero
     // label: that would rename TOTAL on every postpaid invoice we issue.
     ["LEDGER postpaid", ledgerPostpaid, "total"],
@@ -478,35 +481,91 @@ async function main() {
     const pdfHtml = await buildInvoicePdfHtml(data);
     const hero = heroOf(html);
 
-    if (want === "none") {
-      // AN ABSENCE, PINNED FROM THREE SIDES. "No hero" on its own is the
-      // assertion a broken renderer satisfies for free — an exception
-      // swallowed upstream, an empty document, a template that stopped
-      // emitting anything would all pass it. So each side says what must
-      // still be true alongside the absence:
+    if (want === "hidden") {
+      // THE HIDDEN DOCUMENT, PINNED FROM FOUR SIDES (Turki's ruling): the
+      // trips section is omitted WHOLE, the totals speak for charges alone,
+      // the hero is Amount Payable = the charges total, and the toggle-OFF
+      // twin is the control proving every absence below is a decision and not
+      // a renderer that stopped emitting.
       //
-      //   1. the hero slot is empty on BOTH renderers, not merely on the one
-      //      that happened to be checked;
-      //   2. the document is still a tax invoice — the Grand Total stack
-      //      prints its figure, because a VAT document's total is not
-      //      something a customer-facing toggle may withhold;
-      //   3. the line tables still print — the trips are itemised, so what
-      //      was hidden is the DEMAND, not the work.
-      check(`${name} — no hero figure on the sheet: ${hero}`, hero === "NO HERO");
-      check(`${name} — no hero figure on the PDF either: ${heroOf(pdfHtml)}`, heroOf(pdfHtml) === "NO HERO");
+      // The charges figures are derived from the FIXTURE's own lines, the way
+      // the view-model derives them, so a drift in either shows up as a
+      // failed equality rather than a stale constant.
+      const cPre = round2(data.chargeLines.reduce((sum, l) => sum + l.amount_sar, 0));
+      const cVat = round2(data.chargeLines.reduce((sum, l) => sum + (l.vat_sar ?? 0), 0));
+      const cTot = round2(cPre + cVat);
+
+      // 1. The hero: Amount Payable, equal to the charges total, both surfaces.
+      check(`${name} — hero is Amount Payable = charges total: ${hero}`, hero.includes(money(cTot)));
+      check(`${name} — …and on the PDF: ${heroOf(pdfHtml)}`, heroOf(pdfHtml).includes(money(cTot)));
       check(
-        `${name} — the Grand Total stack still prints ${money(data.grand.total)}`,
-        html.includes(money(data.grand.total)) && pdfHtml.includes(money(data.grand.total)),
+        `${name} — the box is titled "Amount Payable" on both`,
+        /Amount Payable/i.test(hero) && /Amount Payable/i.test(heroOf(pdfHtml)),
+      );
+
+      // 2. ZERO TRIP TOKENS. Every trip ref, the trips table's own subtotal,
+      // the trips-inclusive grand figures and the Balance/Remaining captions
+      // are all trip-money, and all of them must be off the page. Checked as
+      // a list so a failure names exactly what leaked.
+      const tripT = round2(data.unpaidLines.reduce((sum, l) => sum + l.amount_sar, 0));
+      const TRIP_TOKENS = [
+        ...data.unpaidLines.map((l) => l.ref ?? "").filter(Boolean),
+        money(tripT), // trips subtotal, pre-VAT
+        money(round2(tripT * 1.15)), // trips subtotal, VAT-inclusive
+        money(data.grand.total), // the trips-inclusive grand
+        money(data.grand.subtotal),
+      ];
+      const leaked = (h: string) => TRIP_TOKENS.filter((tok) => h.includes(tok));
+      check(
+        `${name} — zero trip tokens on the sheet`,
+        leaked(html).length === 0,
+        `leaked: ${JSON.stringify(leaked(html))}`,
       );
       check(
-        `${name} — the trips are still itemised`,
-        html.includes("TR-2026-0101") && pdfHtml.includes("TR-2026-0101"),
+        `${name} — zero trip tokens on the PDF`,
+        leaked(pdfHtml).length === 0,
+        `leaked: ${JSON.stringify(leaked(pdfHtml))}`,
       );
-      // And the caption is gone with the figure: no empty box carrying a word
-      // where a number used to be.
+      const FOOT_CAPTIONS = ["Balance", "الرصيد", "Remaining", "المتبقي"];
+      const captionsIn = (h: string) => {
+        const toks = new Set(textOf(h));
+        return FOOT_CAPTIONS.filter((c) => toks.has(c));
+      };
       check(
-        `${name} — "Amount Payable" appears nowhere on either document`,
-        !/Amount Payable/i.test(html) && !/Amount Payable/i.test(pdfHtml),
+        `${name} — no Balance / Remaining caption on either document`,
+        captionsIn(html).length === 0 && captionsIn(pdfHtml).length === 0,
+        `print ${JSON.stringify(captionsIn(html))}, pdf ${JSON.stringify(captionsIn(pdfHtml))}`,
+      );
+
+      // 3. CHARGES-ONLY TOTALS — the document adds up to what it shows. The
+      // charges stay itemised (hiding trip money is not hiding the charges
+      // the customer is being billed), and the stack's three figures are the
+      // charges' own.
+      check(
+        `${name} — the charges are still itemised`,
+        html.includes("Standby waiting time") && pdfHtml.includes("Standby waiting time"),
+      );
+      check(
+        `${name} — the stack totals are the charges': ${money(cPre)} + ${money(cVat)} = ${money(cTot)}`,
+        [money(cPre), money(cVat), money(cTot)].every((tok) => html.includes(tok) && pdfHtml.includes(tok)),
+      );
+
+      // 4. THE CONTROL — the toggle-OFF twin prints everything the hidden
+      // copy dropped: the trips, the four foot captions, the trips-inclusive
+      // grand. Without this, a renderer that never printed trips at all
+      // would sail through every absence above.
+      const twinHtml = await buildInvoicePrintHtml({ ...data, hideAmountDue: false });
+      const twinPdf = await buildInvoicePdfHtml({ ...data, hideAmountDue: false });
+      check(
+        `${name} — CONTROL: the toggle-OFF twin itemises the trips and prints the grand`,
+        [data.unpaidLines[0]?.ref ?? "", money(data.grand.total)].every(
+          (tok) => twinHtml.includes(tok) && twinPdf.includes(tok),
+        ),
+      );
+      check(
+        `${name} — CONTROL: the twin prints all four Balance / Remaining captions on both surfaces`,
+        captionsIn(twinHtml).length === FOOT_CAPTIONS.length && captionsIn(twinPdf).length === FOOT_CAPTIONS.length,
+        `print ${JSON.stringify(captionsIn(twinHtml))}, pdf ${JSON.stringify(captionsIn(twinPdf))}`,
       );
       continue;
     }
@@ -517,8 +576,9 @@ async function main() {
     const wantLabel = want === "due" ? "Amount Due" : want === "payable" ? "Amount Payable" : "grand total";
     check(`${name} — hero is the ${wantLabel}: ${hero}`, shows);
     // THE LABEL, not just the figure. On the fully-covered case the payable is
-    // 0.00 and on a toggle-ON case the hero equals the grand total, so a check
-    // that only compared NUMBERS would pass while the box said the wrong word.
+    // 0.00 and on the legacy toggle-ON case the hero equals the grand total,
+    // so a check that only compared NUMBERS would pass while the box said the
+    // wrong word.
     const saysPayable = /Amount Payable/i.test(hero);
     check(
       `${name} — the box is titled "${wantLabel}"`,
@@ -947,7 +1007,7 @@ async function main() {
   // IT IS CUSTOMER-FACING, so the hide-amount-due toggle governs it exactly as
   // it governs the hero. A document that names no amount owed and then lists
   // three receipts totalling the amount owed would have hidden nothing, which
-  // is the same failure §5's "none" case exists to catch, one section lower.
+  // is the same failure §5's "hidden" case exists to catch, one section lower.
   {
     for (const [name, build] of [
       ["sheet", buildInvoicePrintHtml],
@@ -978,9 +1038,12 @@ async function main() {
         `${name} — hidden: no event amount survives`,
         !["1,111\\.11", "2,222\\.22", "2,491\\.67"].some((a) => new RegExp(`(?<![\\d,])${a}`).test(hidden)),
       );
-      // …while the document is still an invoice.
-      check(`${name} — hidden: the Grand Total stack still prints`, hidden.includes("17,825.00"));
-      check(`${name} — hidden: the trips are still itemised`, hidden.includes("TR-2026-0101"));
+      // …while the document is still an invoice: charges-only under Turki's
+      // ruling, so what must survive is the charges total the hidden copy now
+      // adds up to — NOT the trips-inclusive 17,825.00 and NOT a trip ref,
+      // both of which left with the trips section (§5's "hidden" arm pins
+      // that side; this line pins that the toggle did not empty the page).
+      check(`${name} — hidden: the charges total still prints`, hidden.includes("2,300.00"));
     }
 
     // INVERTED — an invoice with NO settlement activity prints no section at
@@ -997,6 +1060,53 @@ async function main() {
     check(
       "a legacy invoice prints no settlement section even when handed events",
       !/How this invoice was settled/.test(legacyWithEvents),
+    );
+  }
+
+  // =========================================================================
+  // 14. THE SUBTOTAL NOTE PRINTS ONCE. `vatSplit` is the one label whose
+  // Arabic is its English — Latin figures, Latin acronym — so it must NOT go
+  // through the bilingual pair: the `.ar dir="rtl"` twin was the same string
+  // again, and bidi reordered it into "VAT 1,260.00 + 8,400.00" beside the
+  // real one. Cases 1-3 CANNOT see this regression: they compare the sheet to
+  // the download, and both renderers made the same mistake in the same place.
+  // So this reads each split span on its own, on both surfaces, every case.
+  // =========================================================================
+  console.log("\n=== 14. SUBTOTAL NOTE — one run, no bilingual twin ===");
+  {
+    // A split span that opens an `.ar` span inside itself is the defect.
+    const TWINNED = /<span class="split">[^<]*<span class="ar/;
+    for (const [name, data] of CASES) {
+      const p = await buildInvoicePrintHtml(data);
+      const d = await buildInvoicePdfHtml(data);
+      check(`${name} — no split span carries an Arabic twin (sheet)`, !TWINNED.test(p));
+      check(`${name} — …nor on the PDF`, !TWINNED.test(d));
+    }
+    // THE CONTROL — the scan must fire on what bl() used to emit here, or the
+    // twenty-four greens above (twelve cases × two surfaces) are a regex that
+    // matches nothing. Same rule as §5's toggle-OFF twin in this file and 11e
+    // in scripts/statement-parity-check.ts.
+    const planted = `<span class="split">8,400.00 + VAT 1,260.00<span class="ar inline" dir="rtl">8,400.00 + VAT 1,260.00</span></span>`;
+    check("CONTROL: the scan fires on the pre-fix markup", TWINNED.test(planted));
+    // THE LICENCE for a single-language emit on a bilingual document: the two
+    // languages of this one label are the same Latin string (lib/i18n.ts says
+    // why). Nothing else in this file would notice if someone localised the
+    // Arabic side — sections 1-3 compare the sheet to the download, and both
+    // would still agree while the tax document went English-only on that row.
+    check(
+      "vatSplit is the same Latin string in both languages — the single-run emit depends on it",
+      t("trips.invoiceSheet.vatSplit", "en") === t("trips.invoiceSheet.vatSplit", "ar"),
+      `en "${t("trips.invoiceSheet.vatSplit", "en")}" vs ar "${t("trips.invoiceSheet.vatSplit", "ar")}"`,
+    );
+    // And the note is still THERE — hiding the twin by dropping the note
+    // would pass every line above.
+    const sheet = await buildInvoicePrintHtml(ledgerPrepaid);
+    const notes = sheet.match(/<span class="split">([^<]*)<\/span>/g) ?? [];
+    check(`the subtotal note still prints (${notes.length} split span(s) on the ledger sheet)`, notes.length >= 1);
+    check(
+      "…and each one reads '{net} + VAT {vat}' exactly once",
+      notes.every((n) => (n.match(/VAT/g) ?? []).length === 1),
+      notes.join(" | "),
     );
   }
 
