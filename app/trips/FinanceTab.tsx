@@ -32,7 +32,7 @@ import { type PaymentMode, type CompanySettings } from "@/lib/db-types";
 import { round2, VAT_RATE, type ConsumingTrip } from "@/lib/prepaid";
 import { computeAmountPayable, toConsumingTrip } from "./amountPayable";
 import type { WaterType } from "@/lib/db-types";
-import type { SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { SpecialChargeRow, PaidInvoiceRow, InvoicePaymentStatementRow } from "./page";
 import type {
   CustomerLedgerBalanceRow,
   CustomerUninvoicedRow,
@@ -136,6 +136,9 @@ export type FinanceTabProps = {
   // COUNT of uninvoiced deliveries per customer (statement footer); the
   // AMOUNT beside it is always the view's. Record, not Map — RSC boundary.
   uninvoicedTripCounts: Record<string, number>;
+  // Every customer's invoice payments — grouped per customer below and handed
+  // to the statement, where each one renders as its own dated row.
+  invoicePayments: InvoicePaymentStatementRow[];
   // Letterhead for the printable RCT/CN sheets. null prints unheaded sheets.
   company: CompanySettings | null;
   // Signed-in email — the correction gate hides vote controls from the
@@ -159,6 +162,7 @@ export default function FinanceTab({
   ledgerCorrections,
   ledgerCorrectionVotes,
   uninvoicedTripCounts,
+  invoicePayments,
   company,
   currentUserEmail,
 }: FinanceTabProps) {
@@ -299,6 +303,17 @@ export default function FinanceTab({
     }
     return m;
   }, [paidInvoices]);
+
+  // Settlement rows grouped by customer. Same shape as the memo above and for
+  // the same reason — the modal opens on ONE customer and must not scan the
+  // whole payment set to find that customer's rows on every render.
+  const invoicePaymentsByCustomer = useMemo(() => {
+    const m = new Map<string, InvoicePaymentStatementRow[]>();
+    for (const p of invoicePayments) {
+      (m.get(p.customer_id) ?? m.set(p.customer_id, []).get(p.customer_id)!).push(p);
+    }
+    return m;
+  }, [invoicePayments]);
 
   // Per-customer row. PREPAID figures are the three VIEW COLUMNS looked up by
   // customer id — nothing here derives, sums or rounds a prepaid number any
@@ -770,6 +785,16 @@ export default function FinanceTab({
         projectName={activeStatementRow?.project?.name ?? null}
         tripMetaById={tripMetaById}
         payments={activeStatementRow?.customerPaidInvoices ?? []}
+        // Settlement rows — the modern (0204) payment source. `payments` above
+        // now serves LEGACY invoices only; the view model picks between them
+        // per invoice on invoiceEra()'s test, so both are passed unfiltered.
+        invoicePayments={statementFor ? (invoicePaymentsByCustomer.get(statementFor.customerId) ?? []) : []}
+        // Special charges belong on the statement for the same reason delivered
+        // trips do: they are work the customer was billed for, and a statement
+        // that lists the money but not what it was for explains nothing. Like
+        // trips they are RECORD-ONLY — raising a charge does not move the money
+        // held on account, so the running balance carries forward across them.
+        charges={statementFor ? (chargesByCustomer.get(statementFor.customerId) ?? []) : []}
       />
 
       <InvoicesModal

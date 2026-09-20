@@ -45,6 +45,7 @@ import {
   buildStatementVm,
   type StatementLedgerEntry,
   type StatementPaymentInput,
+  type StatementInvoicePaymentInput,
   type StatementTripMeta,
   type StatementVm,
   type StatementVmInput,
@@ -133,6 +134,13 @@ const payments: StatementPaymentInput[] = [
     payment_date: "2026-03-15",
     paid_at: "2026-03-15T09:00:00Z",
     grand_total_sar: 4259.03,
+    // LEGACY BY CONSTRUCTION. A null amount_payable_sar is invoiceEra()'s test
+    // for an invoice confirmed before 0203 — settled on the invoice row
+    // itself, with no invoice_payments history behind it. This fixture must
+    // stay null: it is the ONLY input in this file that exercises the
+    // whole-paid-invoice row, and a non-null value here would silence that
+    // arm while every case still read green.
+    amount_payable_sar: null,
   },
 ];
 
@@ -154,6 +162,11 @@ const basePrepaid: StatementVmInput = {
   // passing real trips here would let a defect that CROSSES the arms hide.
   trips: [],
   payments: [],
+  // Empty on the BASE prepaid fixture on purpose: cases 3-9 pin the ledger's
+  // own arithmetic, and a settlement row sitting among them would make a
+  // running-balance defect and a double-count defect look alike. Case 14
+  // builds its own input with payments on it.
+  invoicePayments: [],
   tripMetaById: new Map(),
   projectWaterType: "potable",
   dateFrom: "",
@@ -833,6 +846,240 @@ check(
   "13c. postpaid statement never carries it, even with the figures in its input",
   vmPostpaid.uninvoicedFooter === null && !documentMarkup(htmlPostpaid).includes("stmt-uninv"),
   "basePostpaid deliberately holds the prepaid figures; the postpaid arm must ignore them",
+);
+
+// ---------------------------------------------------------------------------
+// 14. PARTIAL INVOICE PAYMENTS — the 0204 normal case
+// ---------------------------------------------------------------------------
+// Since 0204 confirming an invoice moves NO money: it freezes the payable and
+// stops. Money moves only through apply_balance_to_invoice (a ledger row) or
+// record_invoice_payment (an invoice_payments row), so an invoice is normally
+// settled in INSTALMENTS and the whole-paid-invoice row alone understates the
+// account — it says nothing until the last riyal lands, and then says it all
+// at once on the wrong date.
+//
+// The three properties this pins are the three ways the fix could be wrong:
+//   14a — both instalments appear, ON THEIR OWN DATES, with their own
+//         amounts, methods and references. (The defect being fixed: they did
+//         not appear at all.)
+//   14b — neither moves the running balance, so the closing figure still
+//         equals the headline the view publishes. A payment settles an
+//         INVOICE; the balance held on account is untouched.
+//   14c — a modern invoice does not print TWICE. The whole-invoice row and
+//         the per-payment rows are alternatives chosen per invoice on
+//         invoiceEra()'s test, not two sources rendered together.
+// And 14d is the control: strip the payments back out and the rows must go,
+// or 14a is measuring nothing.
+
+const PARTIAL_1 = 1800;
+const PARTIAL_2 = 2459.03;
+
+const partialPayments: StatementInvoicePaymentInput[] = [
+  {
+    id: "ip-1",
+    invoice_id: "inv-9",
+    invoice_number: "026-000009",
+    amount_sar: PARTIAL_1,
+    method: "bank_transfer",
+    reference: "TRF-88410",
+    paid_on: "2026-03-12",
+    note: null,
+    created_at: "2026-03-12T10:00:00Z",
+  },
+  {
+    id: "ip-2",
+    invoice_id: "inv-9",
+    invoice_number: "026-000009",
+    amount_sar: PARTIAL_2,
+    method: "cash",
+    reference: null,
+    paid_on: "2026-03-22",
+    note: "Balance settled at site",
+    created_at: "2026-03-22T14:30:00Z",
+  },
+];
+
+const basePartial: StatementVmInput = { ...basePrepaid, invoicePayments: partialPayments };
+const vmPartial = buildStatementVm(basePartial);
+const htmlPartial = buildStatementHtml(vmPartial);
+const textPartialEn = documentText(htmlPartial);
+
+const partialRows = vmPartial.rows.filter((r) => r.key.startsWith("invoice-payment-"));
+
+check(
+  "14a. two partial payments on ONE invoice render as two dated rows",
+  (() => {
+    if (partialRows.length !== 2) return false;
+    const dates = partialRows.map((r) => (r.cells[0].kind === "date" ? r.cells[0].value : ""));
+    const amounts = partialRows.map((r) => (r.cells[5].kind === "num" ? r.cells[5].value : NaN));
+    // paid_on, not created_at: the day the money arrived is the day the
+    // customer reconciles against.
+    return (
+      dates[0] === "2026-03-12" &&
+      dates[1] === "2026-03-22" &&
+      amounts[0] === PARTIAL_1 &&
+      amounts[1] === PARTIAL_2
+    );
+  })(),
+  `rows: ${JSON.stringify(partialRows.map((r) => r.cells[0]))}`,
+);
+check(
+  "14a-ii. each carries its own method and reference, and the invoice it settled",
+  (() => {
+    const [a, b] = partialRows;
+    if (!a || !b) return false;
+    const refOf = (r: (typeof partialRows)[number]) => (r.cells[2].kind === "text" ? r.cells[2].value : "");
+    // Method is a bilingual cell — both languages must be there, because the
+    // Arabic statement is the same document and gets no second chance at it.
+    const methodAr = (r: (typeof partialRows)[number]) => (r.cells[3].kind === "bi" ? r.cells[3].value.ar : "");
+    const methodEn = (r: (typeof partialRows)[number]) => (r.cells[3].kind === "bi" ? r.cells[3].value.en : "");
+    const noteOf = (r: (typeof partialRows)[number]) => (r.cells[4].kind === "text" ? r.cells[4].value : "");
+    return (
+      refOf(a) === "026-000009" &&
+      refOf(b) === "026-000009" &&
+      methodEn(a) !== "" &&
+      methodAr(a) !== "" &&
+      methodEn(a) !== methodEn(b) &&
+      methodAr(a) !== methodAr(b) &&
+      // note ?? reference, in that precedence: the transfer has only a
+      // reference, the cash payment has a note.
+      noteOf(a) === "TRF-88410" &&
+      noteOf(b) === "Balance settled at site"
+    );
+  })(),
+);
+check(
+  "14a-iii. and the document prints both, in both languages",
+  (() => {
+    const ar = documentText(buildStatementHtml(vmPartial));
+    return (
+      textPartialEn.includes(num2(PARTIAL_1)) &&
+      textPartialEn.includes(num2(PARTIAL_2)) &&
+      textPartialEn.includes("2026-03-12") &&
+      textPartialEn.includes("2026-03-22") &&
+      // The row's own type label, .ar side — the document carries both runs.
+      ar.includes(vmPartial.rows.find((r) => r.key.startsWith("invoice-payment-"))!.cells[1].kind === "bi"
+        ? (vmPartial.rows.find((r) => r.key.startsWith("invoice-payment-"))!.cells[1] as { value: { ar: string } }).value.ar
+        : "\u0000")
+    );
+  })(),
+  "a settlement row the customer cannot read in his own language is not on the statement",
+);
+// THE CARRY-FORWARD IS A PER-ROW PROPERTY, NOT A GLOBAL ONE. An earlier
+// version of this case asserted the two settlement rows carried the SAME
+// figure — and went red on a correct statement, because a top-up landed
+// between 12 March and 22 March and legitimately moved the balance in the gap.
+// What must hold is narrower and stronger: the balance does not move ACROSS
+// each settlement row, i.e. each one repeats the row above it. An assertion
+// that forbids the ledger from moving at all is not the money law; it is a
+// misreading of it that happens to be green on a statement with no top-ups.
+check(
+  "14b. neither payment moves the running balance — closing still equals the headline",
+  (() => {
+    if (partialRows.length !== 2) return false;
+    if (!partialRows.every((r) => r.recordOnly)) return false;
+    if (!partialRows.every((r) => r.cells[5].kind === "num" && r.cells[5].sign === "none")) return false;
+
+    const runAt = (vm: StatementVm, i: number) => {
+      const c = vm.rows[i]?.cells[6];
+      return c && c.kind === "num" ? c.value : null;
+    };
+    // Each settlement row repeats the run figure of the row above it.
+    const carried = vmPartial.rows.every((r, i) =>
+      !r.key.startsWith("invoice-payment-") ? true : i > 0 && runAt(vmPartial, i) === runAt(vmPartial, i - 1),
+    );
+    // The LEDGER's own sequence is untouched: strip the record-only rows and
+    // what is left must be byte-for-byte the payment-free statement. This is
+    // the double-count check — a payment counted into the walk would shift
+    // every ledger run figure after it.
+    const ledgerRunsOf = (vm: StatementVm) =>
+      vm.rows.filter((r) => !r.recordOnly).map((r) => (r.cells[6]?.kind === "num" ? r.cells[6].value : null));
+    const sameWalk = JSON.stringify(ledgerRunsOf(vmPartial)) === JSON.stringify(ledgerRunsOf(vmPrepaid));
+
+    return (
+      carried &&
+      sameWalk &&
+      vmPartial.headline.value === vmPrepaid.headline.value &&
+      vmPartial.headline.value === LEDGER_BALANCE &&
+      runAt(vmPartial, vmPartial.rows.length - 1) === LEDGER_BALANCE
+    );
+  })(),
+  `headline ${vmPartial.headline.value}, expected ${LEDGER_BALANCE}; runs ${JSON.stringify(
+    vmPartial.rows.map((r) => [r.key, r.cells[6]?.kind === "num" ? r.cells[6].value : null]),
+  )}`,
+);
+check(
+  "14c. a LEGACY paid invoice still prints its whole-invoice row, and a modern one prints once",
+  (() => {
+    // basePostpaid carries the legacy fixture; on the PREPAID arm the same
+    // input must produce exactly one settlement row for it — from `payments`,
+    // because amount_payable_sar is null.
+    const withLegacy = buildStatementVm({ ...basePartial, payments });
+    const legacyRows = withLegacy.rows.filter((r) => r.key === "payment-inv-1");
+    // Flip the SAME invoice to the ledger era: it is then settled through
+    // invoice_payments, so its whole-invoice row must disappear rather than
+    // print alongside them.
+    const modern = buildStatementVm({
+      ...basePartial,
+      payments: payments.map((p) => ({ ...p, amount_payable_sar: p.grand_total_sar })),
+    });
+    return (
+      legacyRows.length === 1 &&
+      withLegacy.rows.filter((r) => r.key.startsWith("invoice-payment-")).length === 2 &&
+      modern.rows.filter((r) => r.key === "payment-inv-1").length === 0 &&
+      modern.rows.filter((r) => r.key.startsWith("invoice-payment-")).length === 2
+    );
+  })(),
+  "amount_payable_sar is invoiceEra()'s test, not a status test — it is what stops one invoice printing twice",
+);
+// 14b's comparator is a string equality between two walks. Green would read
+// identically if it compared a vm with itself, or if both sides collapsed to
+// []. So plant the defect 14b exists to catch — a payment folded INTO the walk
+// — and require the comparator to report it. Same reason case 2 exists for
+// case 1.
+check(
+  "14b-ii. the control: the walk comparator reports a planted double-count",
+  (() => {
+    const ledgerRunsOf = (vm: StatementVm) =>
+      vm.rows.filter((r) => !r.recordOnly).map((r) => (r.cells[6]?.kind === "num" ? r.cells[6].value : null));
+    const honest = ledgerRunsOf(vmPartial);
+    if (honest.length === 0) return false;
+    // What a double-counted payment looks like: every run figure from the
+    // first payment onward short by its amount.
+    const doubled = honest.map((n) => (n === null ? null : round2(n - PARTIAL_1)));
+    return JSON.stringify(doubled) !== JSON.stringify(honest);
+  })(),
+  "if the comparator cannot see a shifted walk, 14b is decoration",
+);
+// POSTPAID WAS UNDERSTATED FOR THE SAME REASON AND IS FIXED THE SAME WAY.
+// 0204 is not a prepaid rule — confirm freezes the payable and moves no money
+// in BOTH modes — so a postpaid account received instalments that the
+// statement never showed either. The difference is what the row MEANS: with no
+// held balance there is nothing to hold flat, so a postpaid payment is a real
+// credit against what is owed and carries the "plus" its whole-invoice
+// sibling has always carried.
+check(
+  "14e. postpaid carries the instalments too, as credits",
+  (() => {
+    const vm = buildStatementVm({ ...basePostpaid, invoicePayments: partialPayments });
+    const rows = vm.rows.filter((r) => r.key.startsWith("invoice-payment-"));
+    if (rows.length !== 2) return false;
+    const last = (r: (typeof rows)[number]) => r.cells[r.cells.length - 1];
+    return (
+      rows.every((r) => r.kind === "payment" && !r.recordOnly) &&
+      rows.every((r) => last(r).kind === "num" && (last(r) as { sign: string }).sign === "plus") &&
+      (last(rows[0]) as { value: number }).value === PARTIAL_1 &&
+      (last(rows[1]) as { value: number }).value === PARTIAL_2 &&
+      documentText(buildStatementHtml(vm)).includes(num2(PARTIAL_2))
+    );
+  })(),
+  "a postpaid statement that only lists FULLY paid invoices understates every account mid-settlement",
+);
+check(
+  "14d. the control: with no payments in, no settlement row comes out",
+  vmPrepaid.rows.filter((r) => r.key.startsWith("invoice-payment-")).length === 0 &&
+    !documentText(htmlPrepaid).includes("TRF-88410"),
+  "if the scan cannot go dark, 14a is decoration",
 );
 
 console.log(failures === 0 ? "\nAll statement parity checks passed." : `\n${failures} check(s) FAILED.`);

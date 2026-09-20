@@ -9520,8 +9520,19 @@ export const dict = {
       // claim without the arithmetic. `trips.statement.colRunningBalance` is a
       // DIFFERENT key for a DIFFERENT figure and stays.
       paidUpBalance: { en: "Paid-up balance", ar: "الرصيد المسدَّد" },
+      // THE SAME FOOTER ROW ON A LEDGER-ERA INVOICE, and a different figure, so
+      // a different word. This one is `v_customer_available.balance_sar` — the
+      // customer's actual ledger balance, the column the Finance tab reads —
+      // not the paid-up expression above, which counts only what PAID invoices
+      // have settled. Plain "Balance" because that is what the ledger calls it
+      // everywhere else (`trips.statement.colBalance` is the same word for the
+      // same number on the statement); qualifying it here would invent a third
+      // vocabulary for a figure that already has one.
+      ledgerBalance: { en: "Balance", ar: "الرصيد" },
       // The footer's third row: balance − this table's subtotal. Restored with
       // the layout; the row is unchanged, only what feeds the balance above it.
+      // Shared by both eras — the subtraction means the same thing whichever
+      // balance sits above it.
       remaining: { en: "Remaining", ar: "المتبقي" },
       // WHAT STANDS IN THE BALANCE'S PLACE WHEN THE BALANCE CANNOT BE READ.
       // Every prepaid surface shows one or the other and never neither: the
@@ -9627,6 +9638,44 @@ export const dict = {
       amountPayable: {
         en: "Amount Payable",
         ar: "المبلغ الواجب سداده",
+      },
+
+      // ── Settlement detail, on the DOCUMENT (0204) ────────────────────────
+      // A dated list of everything that settled this invoice, printed below
+      // the Amount Payable box on the PDF and the printout. It exists because
+      // a prepaid invoice now RESTS at Confirmed and settles afterwards, in
+      // pieces: the same customer can hold two copies of one document with
+      // different amounts behind them, and one Amount Payable line cannot tell
+      // them which of their transfers landed against it.
+      //
+      // DOCUMENT WORDS, not the popup's. The panel on screen says "Settlement"
+      // to an operator who already knows what that means; a customer needs the
+      // heading to say what the list is for. The two never share a string —
+      // same rule `sTitle` states about itself.
+      seTitle: {
+        en: "How this invoice was settled",
+        ar: "كيف سُوِّيت هذه الفاتورة",
+      },
+      // The list's own fourth column. `colDescription`, `common.date` and
+      // `common.amount` are reused for the other three — a settlement row is a
+      // dated, described amount like every other row on the document, and
+      // giving it private captions would have one document naming the same
+      // column two ways.
+      seColReference: { en: "Reference", ar: "المرجع" },
+      // {method} arrives already translated — see the fill in
+      // lib/invoiceViewModel.ts, which substitutes per language rather than
+      // through `biFill`, so the Arabic column never carries an English word.
+      sePaymentVia: { en: "Payment — {method}", ar: "سداد — {method}" },
+      // The method-less fallback. Every `invoice_payments` row carries one, so
+      // this prints only if a row somehow arrives without it: a settlement the
+      // customer can still recognise beats a blank cell or a dropped row.
+      sePayment: { en: "Payment", ar: "سداد" },
+      // The other source: a `customer_ledger` row of type `balance_applied`.
+      // "Applied from" and not "Paid from" — no money arrived for this one, it
+      // moved from a balance the customer had already funded.
+      seBalanceApplied: {
+        en: "Applied from prepaid balance",
+        ar: "مطبَّق من الرصيد المسبق",
       },
 
       // ── Hide-amount-due toggle (`no-print`) ──────────────────────────────
@@ -9763,6 +9812,12 @@ export const dict = {
       sApplied: { en: "Applied from balance", ar: "المطبَّق من الرصيد" },
       sWrittenOff: { en: "Written off", ar: "المشطوب" },
       sRemainder: { en: "Outstanding", ar: "المتبقي" },
+      // The Available balance, shown beside the payable while an invoice RESTS
+      // at Confirmed. Since 0204 confirm draws nothing, so the operator looking
+      // at a confirmed invoice needs both halves of the decision in one place:
+      // what this invoice wants, and what the customer has to give it. Same
+      // words as the apply panel's own first row — one concept, one wording.
+      sAvailable: { en: "Available balance", ar: "الرصيد المتاح" },
       // Words, never a zero. An unreadable settlement and a settled invoice
       // look identical in figures and could not be less alike in meaning.
       sUnavailable: {
@@ -9779,12 +9834,30 @@ export const dict = {
         en: "Outstanding on this invoice: {amount}. Less than that is recorded as a partial payment.",
         ar: "المتبقي على هذه الفاتورة: {amount}. وأي مبلغ أقل يُسجَّل سدادًا جزئيًا.",
       },
+      // WHAT IS STILL MISSING, said while the form is still on screen.
+      // record_invoice_payment() raises on a bank transfer with no proof, no
+      // reference or no date, and it stays the authority — but its message
+      // arrives after the submit, by which time the operator has lost the form
+      // and the attachment they had picked. This list is the same rule, stated
+      // early, in the operator's own vocabulary. It does not replace the
+      // server's refusal; it just means the usual case never reaches it.
+      payGateTitle: { en: "Before this can be recorded:", ar: "قبل تسجيل هذا:" },
+      payGateAmount: { en: "Enter the amount received", ar: "أدخل المبلغ المستلم" },
+      payGateReference: { en: "Enter the transfer reference", ar: "أدخل مرجع التحويل" },
+      payGateDate: { en: "Enter the payment date", ar: "أدخل تاريخ السداد" },
+      payGateProof: { en: "Attach a photo of the transfer", ar: "أرفق صورة التحويل" },
       // Apply-balance preview. THREE ROWS, ONE OF WHICH IS THE SERVER'S — the
       // third is min() of the first two, and the copy says so rather than
       // implying this screen chose it.
       applyAvailable: { en: "Available balance", ar: "الرصيد المتاح" },
       applyRemainder: { en: "Outstanding on this invoice", ar: "المتبقي على هذه الفاتورة" },
       applyWillApply: { en: "Will be applied", ar: "سيُطبَّق" },
+      // THE AFTER STATE. The three rows above say what is there and what moves;
+      // this says what the customer is left with, which is the figure the
+      // operator is actually deciding about and the one they would otherwise
+      // work out in their head while the button waits. Display arithmetic on
+      // two figures already on screen — the server still decides the real draw.
+      applyAfter: { en: "Balance afterwards", ar: "الرصيد بعد ذلك" },
       applyNote: {
         en: "Applies whichever is smaller. The final amount is decided on the server at the moment of writing, so a top-up or another invoice in between cannot overdraw the balance.",
         ar: "يُطبَّق الأصغر من الرقمين. ويُحسم المبلغ النهائي على الخادم لحظة الكتابة، فلا تستطيع إضافة رصيد أو فاتورة أخرى بينهما أن تسحب على المكشوف.",
@@ -10196,9 +10269,28 @@ export const dict = {
       // reuses `كشف الحساب` from titlePrepaid/titlePostpaid and `فترة`, which
       // the dictionary already carries throughout; no new terminology coined.
       periodHeading: { en: "Statement Period", ar: "فترة كشف الحساب" },
+      // REWRITTEN FOR THE MERGED STATEMENT. It used to read "Add Balance
+      // credits and delivered-trip/charge debits", which described the
+      // pre-0203 engine: a delivered trip drew the balance down the moment it
+      // landed. Under 0203/0204 it does not — the trip is work performed and
+      // the balance only moves when balance is applied to the invoice that
+      // bills it. Leaving the old sentence would have had the document
+      // contradicting its own Running Balance column on every trip row.
       subPrepaid: {
-        en: "Add Balance credits and delivered-trip/charge debits (VAT-inclusive), oldest first.",
-        ar: "أرصدة مضافة وخصوم الرحلات المسلَّمة والرسوم (شاملة الضريبة)، الأقدم أولاً.",
+        en: "Every event on this account — balance added, work delivered, invoices settled — oldest first. Amounts are VAT-inclusive.",
+        ar: "كل حركة على هذا الحساب — رصيد مضاف، وعمل مُسلَّم، وفواتير مسدَّدة — الأقدم أولاً. المبالغ شاملة الضريبة.",
+      },
+      // THE RUNNING-BALANCE FOOTNOTE, and the reason the merged statement can
+      // be read at all. The table now carries two classes of row: rows that
+      // move the money held on account, and rows that record something that
+      // happened without moving it. Without this sentence the second kind
+      // reads as an arithmetic fault — a figure in the Amount column beside a
+      // Running Balance that did not change. It sits with the VAT-basis
+      // caption above, on BOTH surfaces, because it is a note about how to
+      // read the figures rather than a figure of its own.
+      balanceNote: {
+        en: "The running balance is the money held on account. Delivered trips, special charges and payments made directly against an invoice are shown for the record and do not change it.",
+        ar: "الرصيد الجاري هو المبلغ المحتفظ به في الحساب. الرحلات المسلَّمة والرسوم الخاصة والمدفوعات المسدَّدة مباشرة على فاتورة تُعرض للسجل ولا تُغيّره.",
       },
       subPostpaid: {
         en: "Delivered trips and recorded payments, oldest first.",
@@ -10246,6 +10338,19 @@ export const dict = {
       typeReturn: { en: "Balance returned", ar: "رصيد مُعاد" },
       typeCharge: { en: "Special charge", ar: "رسوم خاصة" },
       typePayment: { en: "Payment", ar: "دفعة" },
+      // The delivered-trip row on the PREPAID statement. Postpaid names its
+      // trip rows by water type (waterTypeLabel over the enum) because its
+      // table has Truck and Capacity columns beside them and the row is
+      // unambiguously a trip; the prepaid table interleaves trips with money
+      // movements, so the Type cell has to say which kind of event this is
+      // before it says anything about the water. Wording borrowed from
+      // `notifications.trip_delivered`, not coined.
+      typeDelivery: { en: "Trip delivered", ar: "رحلة مسلَّمة" },
+      // The invoice-payment row's Type cell on the prepaid statement — money
+      // paid straight against an invoice rather than into the held balance.
+      // Distinct from `typeSettlement` above, which names the invoice DOCUMENT
+      // being recorded; this names the money arriving for it.
+      typeInvoicePayment: { en: "Invoice paid", ar: "فاتورة مدفوعة" },
       // The settlement row's Note cell — says WHAT the invoice was settled
       // against, not the balance figure itself.
       noteBalance: { en: "Balance", ar: "الرصيد" },

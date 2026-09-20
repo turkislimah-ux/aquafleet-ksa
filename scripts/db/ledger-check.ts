@@ -54,7 +54,12 @@ const TRIP_DATE = "2020-01-15";
 const ACTOR = "dbchk@harness.local";
 
 const TOPUP_SQL = `select * from public.record_topup($1::uuid, $2::numeric, $3::text, $4::text, $5::text, $6::text, $7::text)`;
-const REFUND_SQL = `select * from public.record_refund($1::uuid, $2::numeric, $3::text, $4::text, $5::text, $6::text)`;
+// Seven arguments since 0204, which gave the refund a proof photo and DROPPED
+// the six-argument version outright. The argument list here is positional, so
+// the added p_photo_path sits fifth and pushes p_actor and p_note along one
+// place each — calling this with the old six would not merely lose the photo,
+// it would fail to resolve the function at all and read like a schema fault.
+const REFUND_SQL = `select * from public.record_refund($1::uuid, $2::numeric, $3::text, $4::text, $5::text, $6::text, $7::text)`;
 
 type Row = Record<string, unknown>;
 type Outcome = { row: Row | null; err: { message: string } | null };
@@ -259,7 +264,13 @@ async function main(): Promise<void> {
     // TOP-UP — persists for every case below (each case savepoints off it).
     // =====================================================================
     console.log("\n-- record_topup");
-    const t = await rpc(TOPUP_SQL, [customer, TOPUP, "bank_transfer", "DBCHK-REF-1", null, ACTOR, "harness top-up"]);
+    // A photo path is now mandatory alongside the reference: 0204 made proof a
+    // condition of a bank transfer inside the RPC itself, so this seed stopped
+    // being acceptable the moment the migration landed. The value is only ever
+    // a storage key in a text column — the RPC does not resolve it and nothing
+    // in this harness reads it back — so a literal keeps the seed honest
+    // without inventing a bucket object.
+    const t = await rpc(TOPUP_SQL, [customer, TOPUP, "bank_transfer", "DBCHK-REF-1", `${customer}/topup-dbchk.webp`, ACTOR, "harness top-up"]);
     ok("topup accepted", t.err === null);
     if (t.err) throw new Error("topup seed failed: " + t.err.message);
     ok("topup doc is an RCT- number", /^RCT-\d{4}-\d{6}$/.test(String(t.row?.doc_number)));
@@ -271,16 +282,23 @@ async function main(): Promise<void> {
     // =====================================================================
     // REFUND CAP — one halala over refused, exactly Available accepted.
     // =====================================================================
+    // CASH, deliberately. This case exists to prove the CAP refuses, and since
+    // 0204 the bank-transfer proof guard runs ahead of the cap — a reference-
+    // less, photo-less bank transfer is now refused for missing proof and never
+    // reaches the arithmetic under test. Cash requires no proof, so the cap is
+    // the only thing left that can refuse and the assertion keeps meaning what
+    // its name says. The proof guards get their own coverage in
+    // scripts/db/invoice-settlement-check.ts.
     await refuses(
       "refund of Available + 0.01",
-      REFUND_SQL, [customer, REFUND_OVER, "bank_transfer", null, ACTOR, null],
+      REFUND_SQL, [customer, REFUND_OVER, "cash", null, null, ACTOR, null],
       "exceeds the customer",
     );
     check("refusal left Balance unmoved", await balance(customer), TOPUP);
     check("refusal left Available unmoved", await available(customer), AVAILABLE);
 
     await scenario("refund of EXACTLY Available (cap is >, not >=)", async () => {
-      const r = await rpc(REFUND_SQL, [customer, AVAILABLE, "cash", null, ACTOR, "harness refund"]);
+      const r = await rpc(REFUND_SQL, [customer, AVAILABLE, "cash", null, null, ACTOR, "harness refund"]);
       ok("refund accepted", r.err === null);
       if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
       ok("refund doc is a CN- number", /^CN-\d{4}-\d{6}$/.test(String(r.row?.doc_number)));
@@ -309,9 +327,9 @@ async function main(): Promise<void> {
     console.log("\n-- input gates and grants");
     await refuses("topup of zero", TOPUP_SQL, [customer, 0, "cash", null, null, ACTOR, null], "greater than zero");
     await refuses("topup without an actor", TOPUP_SQL, [customer, 100, "cash", null, null, "  ", null], "Actor identity");
-    await refuses("refund of zero", REFUND_SQL, [customer, 0, "cash", null, ACTOR, null], "greater than zero");
+    await refuses("refund of zero", REFUND_SQL, [customer, 0, "cash", null, null, ACTOR, null], "greater than zero");
     await refuses("anon denied record_topup", TOPUP_SQL, [customer, 100, "cash", null, null, ACTOR, null], "permission denied", "anon");
-    await refuses("anon denied record_refund", REFUND_SQL, [customer, 100, "cash", null, ACTOR, null], "permission denied", "anon");
+    await refuses("anon denied record_refund", REFUND_SQL, [customer, 100, "cash", null, null, ACTOR, null], "permission denied", "anon");
   } finally {
     await c.query("rollback");
     await c.end();

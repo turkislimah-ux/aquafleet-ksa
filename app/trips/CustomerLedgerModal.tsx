@@ -10,6 +10,11 @@
 // figure — the headline Balance is always the view's own number.
 //
 // Writes go through the SECURITY DEFINER RPCs only:
+//   Add Balance → recordTopup       → record_topup    (the SAME form the Add
+//                 Balance popup shows — ./AddBalanceForm, rendered here with
+//                 the customer fixed, because adding balance belongs beside
+//                 the other two money actions rather than only behind its own
+//                 button on the row)
 //   Refund      → recordRefund      → record_refund   (capped by Available IN
 //                                     THE DATABASE; its error shows VERBATIM)
 //   Correction  → proposeLedgerCorrection / voteLedgerCorrection — the 2-vote
@@ -22,7 +27,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Printer, Image as ImageIcon, Undo2, Scale } from "lucide-react";
+import { X, Plus, Printer, Image as ImageIcon, Undo2, Scale } from "lucide-react";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import {
@@ -32,6 +37,8 @@ import {
   getLedgerPhotoSignedUrl,
   type LedgerDocResult,
 } from "@/lib/actions/finance";
+import { prepareUploadFiles } from "@/lib/upload-image";
+import AddBalanceForm from "./AddBalanceForm";
 import { buildLedgerDocVm } from "@/lib/docvm/ledgerDoc";
 import { buildLedgerDocHtml } from "@/lib/docs/ledgerDoc";
 import { printHtml } from "@/lib/printHtml";
@@ -103,13 +110,26 @@ export default function CustomerLedgerModal({
   const { lang } = useApp();
 
   // Which inline panel is open under the action row. One at a time.
-  const [panel, setPanel] = useState<"refund" | "correction" | null>(null);
+  const [panel, setPanel] = useState<"addBalance" | "refund" | "correction" | null>(null);
+
+  // ── Add Balance panel ────────────────────────────────────────────────────
+  // The form itself is ./AddBalanceForm — the Add Balance popup's own form,
+  // rendered here with the customer fixed. Only the busy flag and the receipt
+  // it hands back live in this file.
+  const [toppingUp, setToppingUp] = useState(false);
+  const [topupReceipt, setTopupReceipt] = useState<LedgerDocResult | null>(null);
 
   // ── Refund form ──────────────────────────────────────────────────────────
   const [refAmount, setRefAmount] = useState("");
   const [refMethod, setRefMethod] = useState<"" | "cash" | "bank_transfer">("");
   const [refReference, setRefReference] = useState("");
   const [refNote, setRefNote] = useState("");
+  // The PREPARED slip (0204) — image → WebP, compressed; the raw pick never
+  // leaves the browser. refPhotoKey remounts the input after a refusal so the
+  // same file can be picked again. Exactly the Add Balance form's arrangement,
+  // because a refund now carries proof on exactly the same terms.
+  const [refPhoto, setRefPhoto] = useState<File | null>(null);
+  const [refPhotoKey, setRefPhotoKey] = useState(0);
   const [refunding, setRefunding] = useState(false);
   const [refundError, setRefundError] = useState<string | null>(null);
   // The credit note record_refund just returned — its CN number and print.
@@ -134,10 +154,14 @@ export default function CustomerLedgerModal({
   useEffect(() => {
     if (!open) return;
     setPanel(null);
+    setToppingUp(false);
+    setTopupReceipt(null);
     setRefAmount("");
     setRefMethod("");
     setRefReference("");
     setRefNote("");
+    setRefPhoto(null);
+    setRefPhotoKey((k) => k + 1);
     setRefunding(false);
     setRefundError(null);
     setCreditNote(null);
@@ -168,7 +192,7 @@ export default function CustomerLedgerModal({
     [corrections],
   );
 
-  const busy = refunding || proposing || votingId !== null;
+  const busy = toppingUp || refunding || proposing || votingId !== null;
 
   function close() {
     if (busy) return;
@@ -206,6 +230,27 @@ export default function CustomerLedgerModal({
     printHtml(buildLedgerDocHtml(vm));
   }
 
+  // Print the receipt for the top-up that JUST saved in the panel above —
+  // from record_topup's own return, same trio as every other ledger print.
+  function onPrintTopupReceipt() {
+    if (!customer || !topupReceipt) return;
+    const vm = buildLedgerDocVm({
+      lang,
+      generatedAt: new Date(),
+      kind: "topup",
+      docNumber: topupReceipt.docNumber,
+      customerName: customer.name,
+      amountSar: topupReceipt.amountSar,
+      method: topupReceipt.method,
+      reference: topupReceipt.reference,
+      note: topupReceipt.note,
+      createdAt: topupReceipt.createdAt,
+      createdBy: topupReceipt.createdBy,
+      company,
+    });
+    printHtml(buildLedgerDocHtml(vm));
+  }
+
   // Print the credit note that JUST saved — from record_refund's own return.
   function onPrintCreditNote() {
     if (!customer || !creditNote) return;
@@ -229,8 +274,11 @@ export default function CustomerLedgerModal({
   const canRefund =
     Number(refAmount) > 0 &&
     refMethod !== "" &&
-    // Same required-flip as Add Balance: ETF ref only required for bank.
-    (refMethod === "cash" || refReference.trim() !== "");
+    // Same required-flip as Add Balance, and now the same TWO fields (0204):
+    // a bank_transfer refund needs its ETF ref AND its slip, cash needs
+    // neither. record_refund raises on a bank transfer missing either, so the
+    // button stays shut rather than letting the database say it.
+    (refMethod === "cash" || (refReference.trim() !== "" && refPhoto !== null));
 
   async function onRefund(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -248,6 +296,9 @@ export default function CustomerLedgerModal({
       fd.set("method", refMethod);
       fd.set("reference", refReference);
       fd.set("note", refNote);
+      // The PREPARED file, appended by hand — this FormData is built field by
+      // field, so the picker's own entry never reaches the action.
+      if (refPhoto) fd.set("photoFile", refPhoto);
       const res = await recordRefund(fd);
       if (res.error || !res.data) {
         // VERBATIM — an over-Available refusal is the DATABASE's sentence
@@ -260,6 +311,8 @@ export default function CustomerLedgerModal({
       setRefMethod("");
       setRefReference("");
       setRefNote("");
+      setRefPhoto(null);
+      setRefPhotoKey((k) => k + 1);
       router.refresh();
     } catch {
       setRefundError(t("shared.upload.saveFailedNetwork", lang));
@@ -373,6 +426,12 @@ export default function CustomerLedgerModal({
         {/* Action row — each button opens its inline panel below. */}
         <div className="flex items-center gap-2 mb-4">
           <Btn
+            variant={panel === "addBalance" ? "primary" : "outline"}
+            onClick={() => setPanel(panel === "addBalance" ? null : "addBalance")}
+          >
+            <Plus className="h-4 w-4" /> {t("trips.finance.addBalance", lang)}
+          </Btn>
+          <Btn
             variant={panel === "refund" ? "primary" : "outline"}
             onClick={() => setPanel(panel === "refund" ? null : "refund")}
           >
@@ -385,6 +444,40 @@ export default function CustomerLedgerModal({
             <Scale className="h-4 w-4" /> {t("trips.ledger.proposeCorrection", lang)}
           </Btn>
         </div>
+
+        {panel === "addBalance" && (
+          <div className="card p-4 mb-4">
+            <p className="text-sm font-medium mb-1">{t("trips.finance.addBalance", lang)}</p>
+            <p className="text-sm muted mb-3">{t("trips.addBalance.formSubtitle", lang)}</p>
+            {/* The receipt sits ABOVE the form, not inside its button row like
+                the credit note below: the form under it has already been
+                re-keyed blank for the next top-up, and this line is the
+                previous one's number and its print. */}
+            {topupReceipt && (
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                  {fill(t("trips.addBalance.successReceipt", lang), { n: topupReceipt.docNumber })}
+                </p>
+                <Btn type="button" variant="outline" onClick={onPrintTopupReceipt}>
+                  <Printer className="h-4 w-4" /> {t("trips.addBalance.printReceipt", lang)}
+                </Btn>
+              </div>
+            )}
+            {/* Keyed by the last receipt so a saved top-up leaves a BLANK form
+                behind — the Add Balance popup gets the same effect by
+                switching view, which this panel has no equivalent of.
+                `customers` is empty because the popup already fixed the
+                customer; the picker is a read-only field here. */}
+            <AddBalanceForm
+              key={topupReceipt?.docNumber ?? "new"}
+              customers={[]}
+              fixedCustomer={customer}
+              onSuccess={(r) => setTopupReceipt(r)}
+              onCancel={() => setPanel(null)}
+              onBusyChange={setToppingUp}
+            />
+          </div>
+        )}
 
         {panel === "refund" && (
           <div className="card p-4 mb-4">
@@ -439,6 +532,46 @@ export default function CustomerLedgerModal({
                   value={refReference}
                   onChange={(e) => setRefReference(e.target.value)}
                   required={refMethod === "bank_transfer"}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                />
+              </label>
+              {/* The slip (0204). Shown for EITHER method and required for
+                  bank_transfer only — the label says which BEFORE the save, so
+                  record_refund's raise is never the first word on it. */}
+              <label className="flex flex-col gap-1.5 text-sm">
+                <span className="font-medium">
+                  {t("trips.addBalance.fPhoto", lang)}
+                  {refMethod === "bank_transfer"
+                    ? t("trips.addBalance.suffixPhotoRequired", lang)
+                    : t("trips.addBalance.suffixOptional", lang)}
+                </span>
+                <input
+                  key={refPhotoKey}
+                  type="file"
+                  required={refMethod === "bank_transfer"}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    if (!f) {
+                      setRefPhoto(null);
+                      setRefundError(null);
+                      return;
+                    }
+                    // Prepared at PICK time: image → compressed WebP
+                    // (orientation kept), PDF/other untouched; undecodable or
+                    // still-over-10MB is refused HERE, by name, not after Save.
+                    void (async () => {
+                      const r = await prepareUploadFiles([f]);
+                      if (!r.ok) {
+                        setRefPhoto(null);
+                        setRefundError(fill(t(r.errorKey, lang), { name: r.name }));
+                        setRefPhotoKey((k) => k + 1);
+                        return;
+                      }
+                      setRefundError(null);
+                      setRefPhoto(r.files[0] ?? null);
+                    })();
+                  }}
                   className={INPUT}
                   style={INPUT_STYLE}
                 />

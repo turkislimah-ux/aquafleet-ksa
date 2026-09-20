@@ -95,7 +95,17 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // bytes of a prepaid invoice show a coverage verdict per LINE that the ledger
 // model no longer computes anywhere. That is not an old layout, it is a claim
 // about the customer's money that is no longer true.
-const PDF_CACHE_VERSION = 5;
+//
+// v6: the CONFIRMED PHASE (0204). Two output changes land together. First, a
+// ledger-era prepaid invoice whose hide-amount-due toggle is ON no longer
+// prints a hero figure at all — v5 bytes present Grand Total in that slot,
+// which is precisely the disclosure the toggle exists to prevent, so those
+// bytes say the opposite of what the operator asked for. Second, a settled
+// invoice now carries a section naming each payment and each balance draw;
+// v5 bytes of the same invoice state a payable and say nothing about how it
+// was met. Fifth template change, and the first where leaving the old bytes
+// in place discloses a figure the customer was told would be withheld.
+const PDF_CACHE_VERSION = 6;
 // All four cache sites go through here — a read, a write and two invalidations.
 // They shared a hand-written `${invoiceId}.pdf` in four places, so a versioned
 // key that any one of them missed would silently stop invalidating instead of
@@ -780,6 +790,17 @@ export async function getInvoice(
       // remainder) computed inside the RPC under its lock, so this figure is a
       // preview and is never sent anywhere.
       availableSar: number | null;
+      // The same view row's `balance_sar` — the customer's ledger balance
+      // before Uninvoiced and unsettled confirmed invoices are held back from
+      // it. Feeds the Balance / Remaining pair under the ledger-era Trips
+      // subtotal, and nothing else.
+      //
+      // NOT interchangeable with `availableSar` above. Available is what may be
+      // spent right now; Balance is what is in the pool. Showing Available in a
+      // row captioned "Balance" would quietly restate a smaller number under a
+      // bigger name, which is the class of mistake the whole ledger module
+      // exists to stop.
+      ledgerBalanceSar: number | null;
       projectWaterType: WaterType | null;
       projectPaymentMode: PaymentMode;
       paidUpBalanceSar: number | null;
@@ -862,6 +883,7 @@ export async function getInvoice(
       settlement: settlementRes.error ? null : (settlementRes.data ?? null),
       payments: paymentsRes.error ? [] : (paymentsRes.data ?? []),
       availableSar: availableRes && !availableRes.error ? (availableRes.data?.available_sar ?? null) : null,
+      ledgerBalanceSar: availableRes && !availableRes.error ? (availableRes.data?.balance_sar ?? null) : null,
       projectWaterType: (project?.water_type as WaterType | null) ?? null,
       projectPaymentMode: (project?.payment_mode as PaymentMode | null) ?? "postpaid",
       paidUpBalanceSar: paidUp.ok ? paidUp.amount : null,
@@ -873,13 +895,27 @@ export async function getInvoice(
 
 // Invoice history for one customer — newest period first. Powers the
 // per-customer "Invoices" list (5c).
+//
+// ORDERED BY THE PERIOD'S END, not its start. Periods here are operator-chosen
+// and overlap freely: a long catch-up invoice covering March through June
+// starts before a short one covering May, so sorting on the start put the
+// FRESHER work below the older. What a reader means by "the latest invoice" is
+// the one covering the most recent deliveries, which is the greatest
+// `period_end`.
+//
+// `created_at` is the tiebreaker and exists to make the order TOTAL. Two
+// invoices can legitimately share an end date — a split billing run, a credit
+// re-issue — and without a second key their relative order is whatever the
+// planner happens to return, so the same list can shuffle between two loads of
+// the same unchanged data.
 export async function listInvoicesForCustomer(customerId: string): Promise<ActionResult<Invoice[]>> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("invoices")
     .select("*")
     .eq("customer_id", customerId)
-    .order("period_start", { ascending: false });
+    .order("period_end", { ascending: false })
+    .order("created_at", { ascending: false });
   if (error) return { error: error.message };
   return { error: null, data: (data ?? []) as Invoice[] };
 }
@@ -1658,6 +1694,109 @@ function toIdentity(opts: {
 //
 // So the download and the printout are handed the SAME PdfInvoiceData, and the
 // only thing either of them may decide for itself is how it looks.
+// LEDGER-ERA DOCUMENT EXTRAS — the three things a 0203-onward PREPAID document
+// carries that no other era does, loaded in one place so the draft branch and
+// the frozen branch below cannot assemble them two ways.
+//
+//   ledgerBalanceSar      the Balance row under the Trips subtotal
+//   settlementEvents      the dated "how this invoice was settled" list
+//   settlementRemainderSar  the figure that list closes on
+//
+// EVERY OTHER DOCUMENT GETS THE EMPTY SET, by one test at the top. A legacy
+// invoice foots its trips table with the paid-up balance it was issued under
+// and settles through the old flow; a postpaid one has no pool and no draw.
+// Neither has anything here to say, and handing them zeros would have them say
+// it anyway.
+type LedgerDocExtras = Pick<
+  PdfInvoiceData,
+  "ledgerBalanceSar" | "settlementEvents" | "settlementRemainderSar"
+>;
+
+const NO_LEDGER_EXTRAS: LedgerDocExtras = {
+  ledgerBalanceSar: null,
+  settlementEvents: [],
+  settlementRemainderSar: null,
+};
+
+async function loadLedgerDocExtras(
+  supabase: ReturnType<typeof createClient>,
+  inv: Invoice,
+  paymentMode: PaymentMode,
+): Promise<LedgerDocExtras> {
+  if (paymentMode !== "prepaid" || invoiceEra(inv) !== "ledger") return NO_LEDGER_EXTRAS;
+
+  // An UNISSUED invoice has settled nothing — no payment can point at a row
+  // that was never confirmed, and `payable_sar` is null on it, so the section
+  // would not print whatever came back. It still needs the balance: the Trips
+  // foot prints on a draft too, and a draft is exactly where an operator is
+  // deciding whether the pool covers the work.
+  const issued = inv.status !== "draft" && inv.status !== "review";
+  const [availableRes, settlementRes, paymentsRes, appliedRes] = await Promise.all([
+    fetchCustomerAvailable(supabase, inv.customer_id),
+    issued ? fetchInvoiceSettlement(supabase, inv.id) : Promise.resolve(null),
+    issued ? fetchInvoicePayments(supabase, inv.id) : Promise.resolve(null),
+    // THE ONE RAW LEDGER READ IN THIS FILE, and the header's rule above names
+    // the two tables it does not cover. lib/customer-ledger.ts has no
+    // per-invoice reader for balance draws — only `fetchLedgerEntries`, which
+    // returns every entry of every customer — and pulling the whole ledger to
+    // find two rows is not a reuse worth having. If a scoped reader is ever
+    // added there, this block is its first caller and should become a call.
+    issued
+      ? supabase
+          .from("customer_ledger")
+          .select("amount_sar, created_at")
+          .eq("invoice_id", inv.id)
+          .eq("entry_type", "balance_applied")
+          .order("created_at", { ascending: true })
+          .returns<{ amount_sar: number; created_at: string }[]>()
+      : Promise.resolve(null),
+  ]);
+
+  // A FAILED READ DROPS TO EMPTY, never to a zero: an invoice that lists no
+  // settlements prints no section at all, whereas one listing "0.00 paid"
+  // would be a claim about the customer's money that nothing verified.
+  const payments = (paymentsRes && !paymentsRes.error ? (paymentsRes.data ?? []) : []).map((p) => ({
+    kind: "payment" as const,
+    method: p.method,
+    // `paid_on` is the day the money moved and is what the customer will
+    // recognise on their own statement; `created_at` is when an operator got
+    // round to typing it in. The first when it exists, the second as the
+    // fallback — cash may carry no date, and a dateless row still happened.
+    date: p.paid_on ?? p.created_at,
+    reference: p.reference,
+    amount: p.amount_sar,
+  }));
+  // Ledger amounts are SIGNED — a draw is negative, because that is what it
+  // does to the balance. On this list it is a positive settlement: the column
+  // is "how much of this invoice this event settled", and a minus in it would
+  // read as a reversal of one.
+  const applied = (appliedRes && !appliedRes.error ? (appliedRes.data ?? []) : []).map((r) => ({
+    kind: "applied" as const,
+    method: null,
+    date: r.created_at,
+    reference: null,
+    amount: Math.abs(r.amount_sar),
+  }));
+
+  return {
+    ledgerBalanceSar: availableRes.error ? null : (availableRes.data?.balance_sar ?? null),
+    // MERGED AND SORTED ON THE DAY, not the timestamp. The two sources stamp
+    // differently — a payment carries a date, a ledger row a full instant — so
+    // comparing them raw would order a whole day's payments after a draw that
+    // happened at 00:00. Within one day the sort is stable, which leaves
+    // payments before draws; that is an arbitrary order for two events the
+    // document dates identically, and any other tie-break would be too.
+    settlementEvents: [...payments, ...applied].sort((a, b) =>
+      (a.date ?? "").slice(0, 10).localeCompare((b.date ?? "").slice(0, 10)),
+    ),
+    // THE VIEW'S OWN REMAINDER. Not a subtraction over the rows above it: a
+    // write-off never appears in this list and would leave a hand-summed
+    // closing figure short by exactly the amount nobody is being asked for.
+    settlementRemainderSar:
+      settlementRes && !settlementRes.error ? (settlementRes.data?.remainder_sar ?? null) : null,
+  };
+}
+
 async function toPdfInvoiceData(
   supabase: ReturnType<typeof createClient>,
   invoiceId: string,
@@ -1696,6 +1835,7 @@ async function toPdfInvoiceData(
     // is the operator who sees the message, not the customer.
     const paidUp = await loadPaidUpBalance(supabase, inv, assembly.paymentMode);
     if (!paidUp.ok) return { error: paidUp.error };
+    const ledgerExtras = await loadLedgerDocExtras(supabase, inv, assembly.paymentMode);
     const seller = assembly.sellerSnapshot as SellerSnap;
     const buyer = assembly.buyerSnapshot as BuyerSnap;
     pdfData = {
@@ -1750,6 +1890,10 @@ async function toPdfInvoiceData(
       // and found empty, which is a different and false claim.
       prepaidAppliedSar: null,
       amountPayableSar: null,
+      // Balance only, on a draft: the two settlement fields come back empty
+      // from the same helper because nothing can have settled an invoice that
+      // was never confirmed. See loadLedgerDocExtras.
+      ...ledgerExtras,
       hideAmountDue: inv.hide_amount_due,
       paymentMethod: null,
       paidAt: null,
@@ -1770,6 +1914,7 @@ async function toPdfInvoiceData(
     // Same refusal as the draft/review branch above, for the same reason.
     const paidUp = await loadPaidUpBalance(supabase, inv, paymentMode);
     if (!paidUp.ok) return { error: paidUp.error };
+    const ledgerExtras = await loadLedgerDocExtras(supabase, inv, paymentMode);
     pdfData = {
       // THE FROZEN ROW DECIDES ITS OWN ERA, off whether a payable was frozen
       // onto it. An invoice issued before 0203 keeps printing the covered/
@@ -1865,6 +2010,17 @@ async function toPdfInvoiceData(
       // with the one in the drawer the moment they paid a riyal.
       prepaidAppliedSar: inv.prepaid_applied_sar,
       amountPayableSar: inv.amount_payable_sar,
+      // THE LIVE HALF OF THE DOCUMENT, and the only part of it that is. The two
+      // frozen figures above state what was billed and what the balance covered
+      // AT ISSUE; these state what has happened since — every payment, every
+      // draw, and what is left. They are not in tension: the frozen pair is the
+      // invoice's claim, this list is its history, and a customer holding two
+      // copies printed a month apart should see the same claim and a longer
+      // history.
+      //
+      // It is also why a CONFIRMED invoice's PDF is not cached (see `cacheable`
+      // below): its bytes change every time money arrives.
+      ...ledgerExtras,
       hideAmountDue: inv.hide_amount_due,
       paymentMethod: inv.payment_method,
       paidAt: inv.paid_at,
@@ -1896,10 +2052,26 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
   // Download, and nothing would ever invalidate them — the invoice never
   // changes status on its way to being wrong.
   //
-  // Paid and void are genuinely frozen: their balance is an as-of figure that
-  // can never move again, so caching them is caching a constant. The cost of
-  // dropping confirmed is one provider call per download of an unpaid invoice.
-  const cacheable = inv.status === "paid" || inv.status === "void";
+  // Paid and void are genuinely frozen FOR A LEGACY DOCUMENT: its balance is an
+  // as-of figure that can never move again, so caching one is caching a
+  // constant. The cost of dropping confirmed is one provider call per download
+  // of an unpaid invoice.
+  //
+  // A LEDGER-ERA PREPAID DOCUMENT IS NEVER CACHEABLE, in any status, and for
+  // the same reason `confirmed` came out. Its Balance row is
+  // `v_customer_available.balance_sar` read LIVE — there is no as-of ledger
+  // balance to freeze the way lib/prepaid.ts freezes the paid-up figure at
+  // paid_at — so it keeps moving after this invoice is paid, every time the
+  // customer tops up or another invoice settles. Bytes stored once would pin
+  // that figure at whatever it was on the first download and serve it forever,
+  // while the popup two centimetres away showed the real one. Its settlement
+  // list has the same property on a partially-settled row.
+  //
+  // The test is the DOCUMENT'S OWN shape, not a date: `invoiceEra` reads the
+  // frozen payable column, and `payment_mode` is the snapshot 0037 writes at
+  // confirm, so nothing here has to be re-keyed when the era boundary moves.
+  const carriesLiveLedgerFigures = invoiceEra(inv) === "ledger" && inv.payment_mode === "prepaid";
+  const cacheable = (inv.status === "paid" || inv.status === "void") && !carriesLiveLedgerFigures;
   const storagePath = pdfCachePath(invoiceId);
 
   // Cache hit: reuse the previously-generated bytes, skip the provider call.

@@ -25,8 +25,8 @@
 //
 // SECTION ORDER IS THE DOWNLOAD'S ORDER, restated deliberately rather than
 // shared: masthead, parties + QR, notice, sections, settlement (notes + due
-// panel), transfer details, footer. Order is part of what a reader compares
-// when they hold the printout beside the PDF.
+// panel), the settlement detail list, transfer details, footer. Order is part
+// of what a reader compares when they hold the printout beside the PDF.
 //
 // WHAT THIS FILE DOES NOT DO: layout primitives. Those live in
 // lib/plainDocStyles.ts, because the customer statement is next and it inherits
@@ -163,10 +163,13 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
   // the figure begins. `grand` carries the closing hairline and the weight.
   //
   // Three rows for prepaid, one for postpaid — the original footer, restored.
-  // The middle row's POSITION is the original; its VALUE is the paid-up balance
-  // the view-model decided, not the chained per-invoice running balance the row
-  // once walked, and its label moved with the value. Same shape as the PDF,
-  // because the two documents are one design. See VmTableFoot.
+  // The middle row's POSITION is the original; its VALUE is whichever balance
+  // the view-model decided this era prints (paid-up on a legacy document, the
+  // ledger balance on a 0203-onward one), never the chained per-invoice running
+  // balance the row once walked. Its CAPTION rides in on the foot for the same
+  // reason the value does — two eras, two figures, two words, and a renderer
+  // that picks neither. Same shape as the PDF, because the two documents are
+  // one design. See VmTableFoot.
   const foot =
     s.foot.style === "ledger"
       ? `
@@ -175,7 +178,7 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
           <td class="num" colspan="2">${num2(s.foot.subtotal)}</td>
         </tr>
         <tr>
-          <td colspan="4" class="lbl">${bl(labels.paidUpBalance, "ar inline")}</td>
+          <td colspan="4" class="lbl">${bl(s.foot.balanceLabel, "ar inline")}</td>
           <td class="num" colspan="2">${
             "note" in s.foot.balance
               ? `<span class="na">${bl(s.foot.balance.note, "ar inline")}</span>`
@@ -260,6 +263,58 @@ function chargesSection(s: VmChargesSection, labels: InvoiceVm["labels"]): strin
 
 function section(s: VmSection, labels: InvoiceVm["labels"]): string {
   return s.kind === "trips" ? tripSection(s, labels) : chargesSection(s, labels);
+}
+
+// HOW THIS INVOICE WAS SETTLED — payments and balance draws, closing on what is
+// still outstanding. Printed BELOW the panel, because it explains how the
+// figure in the panel got where it is and an explanation cannot precede the
+// thing it explains.
+//
+// A `sec` table like every other section on this document, deliberately: these
+// are dated, described amounts and the reader already knows how to read one
+// here. Inventing a bespoke block for them would say they are a different kind
+// of fact. Four columns instead of six — a settlement has no water type and no
+// unit price — and the closing row is `first grand`, the same single heavy-plus-
+// hairline foot the charges table uses, because it is also a one-row foot.
+//
+// `vm.settlementDetail` is null on every document with nothing to say,
+// including one whose hero is hidden, so this prints by testing one value. See
+// VmSettlementDetail.
+function settlementDetailSection(vm: InvoiceVm): string {
+  const d = vm.settlementDetail;
+  if (!d) return "";
+  const body = d.rows
+    .map(
+      (r) => `
+      <tr>
+        <td class="dt">${r.date ? esc(r.date) : `<span class="muted">${DASH}</span>`}</td>
+        <td>${bl(r.description, "ar inline")}</td>
+        <td dir="ltr">${r.reference ? esc(r.reference) : `<span class="muted">${DASH}</span>`}</td>
+        <td class="num">${num2(r.amount)}</td>
+      </tr>`,
+    )
+    .join("");
+  return `
+  <div class="sec">
+    <h2><span>${esc(d.title.en)}</span><span class="ar" dir="rtl">${esc(d.title.ar)}</span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:26mm">${bl(d.colDate)}</th>
+          <th>${bl(d.colDescription)}</th>
+          <th style="width:40mm">${bl(d.colReference)}</th>
+          <th class="num" style="width:26mm">${bl(d.colAmount)} <span class="cur-tag">(${esc(vm.labels.currency.en)})</span></th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+      <tfoot>
+        <tr class="first grand">
+          <td colspan="3" class="lbl">${bl(d.remainderLabel, "ar inline")}</td>
+          <td class="num">${num2(d.remainder)}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,11 +466,24 @@ export async function buildInvoicePrintHtml(data: PdfInvoiceData): Promise<strin
               .map((r) => `<div class="r0"><span>${bl(r.label, "ar inline")}</span><b>${num2(r.amount)}</b></div>`)
               .join("")}</div>`
       }
-      <div class="sep"></div>
+      ${
+        // NO HERO, NO RULE. `vm.hero` is null on exactly one document — a
+        // ledger-era prepaid invoice the operator has hidden the amount on —
+        // and the separator, the caption and the figure go together as one
+        // unit. Emitting the rule alone would close the panel on a hairline
+        // under nothing, which reads as a figure that failed to print. The
+        // panel still ends on its Grand Total row: `heroIsGrandTotal` is false
+        // whenever the hero is absent, so that row above is already there.
+        vm.hero == null
+          ? ""
+          : `<div class="sep"></div>
       <div class="lab">${esc(vm.hero.label.en)}<span class="ar" dir="rtl">${esc(vm.hero.label.ar)}</span></div>
-      <div class="amt" dir="ltr">${num2(vm.hero.amount)}<span class="cur">${esc(L.currency.en)}</span></div>
+      <div class="amt" dir="ltr">${num2(vm.hero.amount)}<span class="cur">${esc(L.currency.en)}</span></div>`
+      }
     </div>
   </div>
+
+  ${settlementDetailSection(vm)}
 
   ${bankBlock(vm)}
 

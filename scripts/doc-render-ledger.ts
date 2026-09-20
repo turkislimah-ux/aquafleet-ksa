@@ -206,6 +206,11 @@ const baseStatement: Omit<StatementVmInput, "ledger" | "balance"> = {
   // Postpaid-arm inputs, empty: the prepaid arm never reads them.
   trips: [],
   payments: [],
+  // This corpus proves the LEDGER sheets — every row on it is a ledger entry
+  // by construction, so there is no settlement to show. Empty is the truthful
+  // value, not a stub; the partial-payment case is proved in
+  // doc-render-statements.ts, where the statement corpus lives.
+  invoicePayments: [],
   tripMetaById: new Map(),
   projectWaterType: "potable",
   dateFrom: "",

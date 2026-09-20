@@ -17,13 +17,55 @@
 // --------------------------
 // It does not compute money.
 //
-//   PREPAID (rebuilt on 0203's customer_ledger): every row is a ledger row
-//   passed in verbatim, the headline Balance is v_customer_ledger_balance's
-//   figure passed in, and the footer amount is v_customer_uninvoiced's. The
-//   ONE cumulative walk below (running balance down the rows) is presentation
-//   of the rows' own amounts in sequence — the directive's sanctioned display
-//   device — and is never used as a source figure: the headline is the view's,
-//   not the walk's. Nothing reads lib/prepaid.ts's derived balance any more.
+//   PREPAID: a statement of the WHOLE ACCOUNT, not of the money pot alone.
+//   Five sources are merged into one date-ordered list — customer_ledger rows
+//   (0203), delivered trips, special charges, `invoice_payments` rows, and
+//   LEGACY paid invoices — and every figure on every one of them is passed in,
+//   never derived. The headline Balance is v_customer_ledger_balance's, the
+//   footer amount is v_customer_uninvoiced's, a trip's cost is
+//   consumingItems()'s.
+//
+//   THE PAYMENT SOURCE IS THE PAYMENT TABLE, NOT THE INVOICE. It used to be
+//   the invoice: one row per PAID invoice, printing that invoice's grand
+//   total. Under 0204 that understates the account, and understates it in the
+//   normal case. Confirm no longer moves money, so an invoice rests at
+//   confirmed while money arrives against it in instalments — each one an
+//   `invoice_payments` row with its own date, method, reference and amount.
+//   Reading whole paid invoices meant a partial payment appeared NOWHERE until
+//   the invoice happened to reach zero, and then appeared once, at the wrong
+//   amount, on the wrong date. So `invoicePayments` is now the source, and
+//   `payments` survives for LEGACY invoices only — the pre-0203 documents that
+//   carry their settlement on the invoice row itself (payment_method /
+//   payment_date / payment_reference) and have no payment rows to read. The
+//   test is invoiceEra()'s, not a status test: `amount_payable_sar == null`.
+//   Rendering both unconditionally would print a modern invoice twice.
+//
+//   A PAYMENT DOES NOT MOVE THE HELD BALANCE, and the running-balance column
+//   must not pretend otherwise. `record_invoice_payment` writes
+//   `invoice_payments` and nothing else; `apply_balance_to_invoice` writes a
+//   `customer_ledger` row (`balance_applied`) and nothing else. The two doors
+//   are disjoint by construction in 0204, so a balance draw reaches this file
+//   exactly once — through `ledger`, where it advances the walk — and a cash
+//   or transfer payment reaches it exactly once, through `invoicePayments`,
+//   where it does not. No de-duplication is needed and none is performed.
+//
+//   TWO CLASSES OF ROW, and the distinction is the whole design. Rows that
+//   MOVE the money held on account are the ledger rows, and only they advance
+//   the running balance. Rows that RECORD something without moving it — a trip
+//   delivered, a special charge raised, a payment made straight against an
+//   invoice — print their own amount and carry the running balance forward
+//   UNCHANGED. A delivered trip is work performed that creates a liability;
+//   the balance only falls later, when balance is applied to the invoice that
+//   bills it. A direct invoice payment settles that invoice with new money and
+//   never touches the held balance. Those rows are flagged `recordOnly` so a
+//   renderer can mark them without re-deriving the rule, and the document
+//   carries `balanceNote` saying it in words — without that sentence the
+//   second class reads as an arithmetic fault.
+//
+//   The ONE cumulative walk below is presentation of the ledger rows' own
+//   amounts in sequence — the directive's sanctioned display device — and is
+//   never used as a source figure: the headline is the view's, not the walk's.
+//   Nothing reads lib/prepaid.ts's derived balance any more.
 //
 //   POSTPAID (unchanged): lib/prepaid.ts's consumingItems() remains the only
 //   expression of what a postpaid trip costs, called with exactly the
@@ -55,9 +97,13 @@ import { paymentMethodLabel, paymentModeLabel, waterTypeLabel } from "./enum-lab
 // substitution. The VAT-split template is carried UNFILLED to the renderers on
 // purpose (see `vatSplitTemplate`), so nothing here interpolates any more.
 import { t, type TKey } from "./i18n";
-// POSTPAID-ONLY imports. The prepaid arm no longer touches lib/prepaid.ts —
-// its rows arrive as ledger rows and its figures as view columns (0203).
-import { consumingItems, round2, type ConsumedItem, type ConsumingTrip } from "./prepaid";
+// consumingItems() is now read by BOTH arms. It was postpaid-only while the
+// prepaid statement printed ledger rows alone; the merged statement prints
+// delivered trips and special charges too, and this is the ONE expression of
+// what one of those costs (VAT-inclusive `consumedAmount`, the same basis
+// v_customer_uninvoiced totals). The prepaid arm still derives no BALANCE from
+// it — its figures are view columns passed in, exactly as before.
+import { consumingItems, round2, type ConsumedItem, type ConsumingCharge, type ConsumingTrip } from "./prepaid";
 // The ref column's wording lives here for BOTH surfaces. lib/trip-ref.ts's own
 // header requires it: "ALL trip-ref rendering (Kanban cards, invoice tables,
 // statements) must go through this file". A document that printed a bare blank
@@ -88,8 +134,45 @@ export type StatementTripMeta = {
   invoiceLocked: boolean;
 };
 
-// One paid invoice. Postpaid renders it as a Payment (a real credit against
-// what is owed); prepaid renders it as a record-only "Invoice payable" row.
+// One `invoice_payments` row — money arriving against an invoice, which since
+// 0204 is normally one of several. THE PRIMARY PAYMENT SOURCE on both arms.
+// Postpaid renders it as a Payment (a real credit against what is owed);
+// prepaid renders it as a record-only "Invoice paid" row — money that arrived
+// FOR an invoice, which is why it never moves the held balance and never
+// advances the running-balance column.
+//
+// `invoice_number` is the JOINED invoices.invoice_number, carried rather than
+// looked up: this file holds no invoice list and resolving a number from an id
+// would make it depend on one. Same reason StatementLedgerEntry carries it.
+//
+// `paid_on` is the operator-entered date and `created_at` the server stamp;
+// the row is dated by the first and falls back to the second — the same
+// "recorded vs actual" convention paymentDateOf() applies to a legacy invoice
+// and StatementChargeInput applies to a charge. A payment row therefore always
+// has a date and, unlike a legacy invoice, can never be dropped for lacking
+// one.
+export type StatementInvoicePaymentInput = {
+  id: string;
+  invoice_id: string;
+  invoice_number: string;
+  amount_sar: number;
+  method: InvoicePaymentMethod | null;
+  reference: string | null;
+  paid_on: string | null;
+  note: string | null;
+  created_at: string;
+};
+
+// One paid invoice — LEGACY ONLY, see the header. A pre-0203 invoice carries
+// its settlement on its own row and has no `invoice_payments` history, so this
+// is the only record of it; a ledger-era invoice is rendered from its payment
+// rows and its balance draws, and must NOT also appear here.
+//
+// `amount_payable_sar` is carried for exactly that filter and nothing else. It
+// is invoiceEra()'s discriminator (lib/invoice-era.ts) — null means "confirmed
+// before 0203", which is the one thing it can mean on a paid invoice. The
+// column is read rather than the STATUS because status cannot answer the
+// question: 'paid' is reachable in both eras.
 export type StatementPaymentInput = {
   id: string;
   invoice_number: string;
@@ -98,6 +181,7 @@ export type StatementPaymentInput = {
   payment_date: string | null;
   paid_at: string | null;
   grand_total_sar: number;
+  amount_payable_sar: number | null;
 };
 
 // One prepaid ledger row, exactly as customer_ledger stores it plus the joined
@@ -129,6 +213,21 @@ export type StatementLedgerEntry = {
   created_at: string;
 };
 
+// One special charge, as invoice_special_charges stores it. `charge_date` is
+// NULLABLE at the database level (migration 0032 added the column, so rows
+// older than it carry none) and this is the one place that decides the
+// fallback: the row's own created_at date. lib/prepaid.ts's ConsumingCharge
+// demands a resolved date and refuses to guess, so the resolution happens here
+// on the way in, exactly the caller-resolves convention that type documents.
+export type StatementChargeInput = {
+  id: string;
+  label: string | null;
+  /** Pre-VAT, as stored. consumingItems() adds the VAT, nothing here does. */
+  amount_sar: number;
+  charge_date: string | null;
+  created_at: string;
+};
+
 export type StatementVmInput = {
   customerName: string;
   projectName: string | null;
@@ -143,9 +242,31 @@ export type StatementVmInput = {
    *  query) and v_customer_uninvoiced.uninvoiced_sar, for the footer line. */
   uninvoicedCount: number;
   uninvoicedSar: number;
-  // ---- Postpaid inputs (unchanged path) ----------------------------------
+  // ---- Shared inputs -----------------------------------------------------
+  // These three were the POSTPAID arm's alone while the prepaid statement
+  // printed ledger rows only. The merged statement reads them too, so a
+  // delivered trip and a paid invoice appear on both documents — as an
+  // itemised bill line on postpaid, as a record-only row on prepaid.
   trips: ConsumingTrip[];
+  /** PAID invoices — rendered for the LEGACY era only (see the type). The
+   *  field keeps its name because every caller already passes the whole paid
+   *  set and the filter is this file's business, not theirs. */
   payments: StatementPaymentInput[];
+  /** `invoice_payments` rows — THE payment source since 0204. Required, not
+   *  optional: `charges` may default to [] because a customer with none is the
+   *  ordinary case and absence reads the same as emptiness, but a caller that
+   *  forgot THIS renders a statement which silently omits every settlement
+   *  made since the ledger model landed. A compile error is the cheaper
+   *  failure. */
+  invoicePayments: StatementInvoicePaymentInput[];
+  /** Special charges, PREPAID ONLY and OPTIONAL. Optional because the caller
+   *  chain that feeds this view-model does not thread them yet (FinanceTab
+   *  already groups them per customer but does not pass the group down), and a
+   *  required field would have every existing call site fail to compile while
+   *  handing over an empty array. Absent reads as "no charges", which is the
+   *  truthful rendering of a customer who has none. The postpaid arm ignores
+   *  it: its charges are invoice lines, not statement rows. */
+  charges?: StatementChargeInput[];
   tripMetaById: Map<string, StatementTripMeta>;
   projectWaterType: WaterType | null;
   // `projectInitials` REMOVED with the sample-ref line it existed solely to
@@ -219,6 +340,16 @@ export type StatementRow = {
   // The row's own nature, so a renderer can style it without re-deriving.
   // Mirrors StatementItemEntry's kinds plus postpaid's "payment".
   kind: "topup" | "trip" | "charge" | "settlement" | "return" | "payment";
+  // TRUE when this row RECORDS an event without moving the money held on
+  // account — a delivered trip, a special charge, a payment made straight
+  // against an invoice. The running-balance column holds flat across it.
+  //
+  // Decided here, once, rather than inferred from `kind` by each renderer:
+  // "charge" means a balance DRAW on a ledger row and a record-only special
+  // charge on a merged row, so kind alone cannot answer the question. Always
+  // false on postpaid, which has no held balance for a row to move or not
+  // move.
+  recordOnly: boolean;
   cells: StatementCell[];
 };
 
@@ -231,6 +362,14 @@ export type StatementVm = {
   projectName: string | null;
   modeLabel: BiLabel;
   subtitle: BiLabel;
+  // THE RUNNING-BALANCE FOOTNOTE, prepaid only (null on postpaid, which has no
+  // such column). It says in words what `recordOnly` says in a flag: the
+  // running balance is the money held on account, and delivered work and
+  // direct invoice payments do not change it. Without it, every record-only
+  // row reads as an arithmetic fault — an amount printed beside a balance that
+  // did not move. It belongs with the VAT-basis caption on both surfaces
+  // because it is a note about HOW TO READ the figures, not a figure.
+  balanceNote: BiLabel | null;
   // THE PERIOD, as a header FIELD. It replaced the sample-ref line (see the
   // note in lib/i18n.ts's `trips.statement` block): a statement's period is a
   // fact about the document a reader needs before any figure on it means
@@ -281,16 +420,37 @@ function paymentDateOf(p: StatementPaymentInput): string {
   return p.payment_date ?? (p.paid_at ? p.paid_at.slice(0, 10) : "");
 }
 
+// The same convention on an `invoice_payments` row: `paid_on` is the date the
+// operator says the money arrived, `created_at` the moment it was recorded.
+// Total — `created_at` is NOT NULL on the table — so unlike paymentDateOf()
+// this can never return "" and no payment row is ever dropped off the list.
+function invoicePaymentDateOf(p: StatementInvoicePaymentInput): string {
+  return p.paid_on ?? p.created_at.slice(0, 10);
+}
+
+// LEGACY ONLY — see StatementPaymentInput. invoiceEra()'s rule, restated on the
+// one column that carries it rather than imported: lib/invoice-era.ts takes a
+// `Pick<Invoice, "status" | "amount_payable_sar">` and this type has no status
+// (every row here is already paid, which is why it was fetched), so calling it
+// would mean inventing a status to satisfy the signature. The predicate itself
+// is one comparison and is stated in both places identically.
+function isLegacyPaidInvoice(p: StatementPaymentInput): boolean {
+  return p.amount_payable_sar == null;
+}
+
 const EMPTY: StatementCell = { kind: "empty" };
 
 /**
  * Build the statement view-model.
  *
  * PREPAID ORDER OF OPERATIONS:
- *   1. walk the FULL ledger oldest-first, annotating each row with the
- *      cumulative running balance
- *   2. filter to the visible period for display only
- *   3. the headline is the PASSED-IN view balance, period-independent
+ *   1. merge the four sources (ledger rows, delivered trips, special charges,
+ *      invoice payments) into ONE list, oldest first
+ *   2. walk that FULL list, advancing the running balance on ledger rows and
+ *      carrying it flat across the rest, stamping every row with the figure
+ *      that stands after it
+ *   3. filter to the visible period for display only
+ *   4. the headline is the PASSED-IN view balance, period-independent
  * Filtering before walking would make the running balance restart mid-history
  * — the single most likely way to silently produce a wrong document.
  *
@@ -302,6 +462,8 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
     ledger,
     trips,
     payments,
+    invoicePayments,
+    charges = [],
     tripMetaById,
     projectWaterType,
     dateFrom,
@@ -311,9 +473,12 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
   const hasPeriodFilter = dateFrom !== "" || dateTo !== "";
   const inPeriod = (d: string) => (dateFrom === "" || d >= dateFrom) && (dateTo === "" || d <= dateTo);
 
-  // A row with neither payment_date nor paid_at has no place on a dated
-  // ledger, so it is dropped rather than sorted to the top under "".
-  const allPayments = payments.filter((p) => paymentDateOf(p) !== "");
+  // LEGACY PAID INVOICES ONLY, and only those that can be dated. A ledger-era
+  // invoice is rendered from its `invoice_payments` rows and its
+  // `balance_applied` ledger rows, so admitting it here would print it twice;
+  // a row with neither payment_date nor paid_at has no place on a dated ledger
+  // at all, so it is dropped rather than sorted to the top under "".
+  const allPayments = payments.filter((p) => isLegacyPaidInvoice(p) && paymentDateOf(p) !== "");
 
   const title = bi(mode === "prepaid" ? "trips.statement.titlePrepaid" : "trips.statement.titlePostpaid");
   const subtitle = bi(mode === "prepaid" ? "trips.statement.subPrepaid" : "trips.statement.subPostpaid");
@@ -364,19 +529,112 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
     ];
   }
 
-  // ---- Prepaid: the bank-statement ledger (0203 rows, verbatim) -----------
+  // ---- Prepaid: one chronological record of the whole account ------------
   if (mode === "prepaid") {
+    // SPECIAL CHARGES, dated on the way in. lib/prepaid.ts's ConsumingCharge
+    // requires a resolved charge_date and holds no opinion about where it came
+    // from; invoice_special_charges.charge_date is nullable, so the row's own
+    // created_at date is the fallback. Resolved here and nowhere else.
+    const chargeInputs: ConsumingCharge[] = charges.map((c) => ({
+      id: c.id,
+      charge_date: c.charge_date ?? c.created_at.slice(0, 10),
+      amount_sar: c.amount_sar,
+      label: c.label,
+    }));
+
+    // THE ONE EXPRESSION OF WHAT WORK COSTS, for trips and charges alike —
+    // the same call the postpaid arm makes. It filters trips to delivered
+    // (delivered_at not null) and attaches the VAT-inclusive `consumedAmount`,
+    // which is the basis v_customer_uninvoiced totals in, so the rows and the
+    // footer figure speak about money the same way.
+    const items = consumingItems(trips, chargeInputs);
+
+    // ONE LIST, FIVE SOURCES. `rank` is the same-date tiebreak and it is
+    // ordered the way an account actually reads: the money movement first,
+    // then the work it paid for, then the charges, then what was settled
+    // against an invoice. `tie` is the last resort so the order is total and
+    // therefore stable run to run — a statement that reshuffles two same-day
+    // rows between renders is a statement nobody can reconcile.
+    //
+    // THE TWO SETTLEMENT RANKS ARE SEPARATE (3 then 4) even though only one of
+    // them can be populated for any given invoice. They are ordered rather
+    // than merged so that the total order does not depend on comparing a
+    // payment id against an invoice id — two id spaces whose interleaving
+    // means nothing to a reader.
+    type PrepaidEvent =
+      | { date: string; rank: 0; tie: string; src: "ledger"; entry: StatementLedgerEntry }
+      | { date: string; rank: 1 | 2; tie: string; src: "item"; item: ConsumedItem }
+      | { date: string; rank: 3; tie: string; src: "invoicePayment"; payment: StatementInvoicePaymentInput }
+      | { date: string; rank: 4; tie: string; src: "payment"; payment: StatementPaymentInput };
+
+    const events: PrepaidEvent[] = [
+      ...ledger.map(
+        (e): PrepaidEvent => ({
+          date: e.created_at.slice(0, 10),
+          rank: 0,
+          tie: e.created_at,
+          src: "ledger",
+          entry: e,
+        }),
+      ),
+      ...items.map(
+        (it): PrepaidEvent => ({
+          // A TRIP IS DATED BY ITS DELIVERY, not by its scheduled trip_date:
+          // delivery is the moment the work existed, and delivered_at is the
+          // column that says so. The fallback cannot fire — consumingItems()
+          // has already dropped every trip whose delivered_at is null — and is
+          // written only so the expression is total. A charge has no delivery,
+          // so its own resolved date stands.
+          date: it.kind === "trip" ? (it.delivered_at ?? it.trip_date).slice(0, 10) : it.trip_date,
+          rank: it.kind === "trip" ? 1 : 2,
+          tie: it.id,
+          src: "item",
+          item: it,
+        }),
+      ),
+      // EVERY payment row, including the ones on an invoice that is still
+      // confirmed. That is the whole correction: an instalment is an event on
+      // the account the day it arrives, not the day the last instalment
+      // happens to close the invoice out.
+      ...invoicePayments.map(
+        (p): PrepaidEvent => ({
+          date: invoicePaymentDateOf(p),
+          rank: 3,
+          tie: p.id,
+          src: "invoicePayment",
+          payment: p,
+        }),
+      ),
+      ...allPayments.map(
+        (p): PrepaidEvent => ({ date: paymentDateOf(p), rank: 4, tie: p.id, src: "payment", payment: p }),
+      ),
+    ].sort((a, b) =>
+      a.date !== b.date
+        ? a.date < b.date
+          ? -1
+          : 1
+        : a.rank !== b.rank
+          ? a.rank - b.rank
+          : a.tie < b.tie
+            ? -1
+            : a.tie > b.tie
+              ? 1
+              : 0,
+    );
+
     // FULL (unfiltered) walk — the running balance must reflect true
     // cumulative history even when the visible rows are period-filtered.
-    // The walk is PRESENTATION: it shows each row's own signed amount
-    // accumulating down the page. The headline is NOT taken from it — that is
-    // the view's balance, passed in.
+    // The walk is PRESENTATION: it shows the LEDGER rows' own signed amounts
+    // accumulating down the page. Every other row is stamped with the figure
+    // as it stands when that row happens, unchanged — that is what makes the
+    // column readable beside a delivered trip. The headline is NOT taken from
+    // the walk: that is the view's balance, passed in.
     let run = 0;
-    const annotated = ledger.map((e) => {
-      run += e.amount_sar;
-      return { e, running: run };
+    const walked = events.map((ev) => {
+      if (ev.src === "ledger") run += ev.entry.amount_sar;
+      return { ev, running: run };
     });
-    const entries = annotated.filter(({ e }) => inPeriod(e.created_at.slice(0, 10)));
+    const visible = walked.filter(({ ev }) => inPeriod(ev.date));
 
     const columns: StatementColumn[] = [
       { key: "date", label: bi("common.date"), align: "start" },
@@ -422,67 +680,202 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
                 ? "trips.statement.typeDrawReversal"
                 : "trips.statement.typeCorrection";
 
-    const rows: StatementRow[] = entries.map(({ e, running }) => {
-      // REF — the row's own document number (RCT-… / CN-…), or the invoice it
-      // is linked to. A correction has neither, deliberately: its paper trail
-      // is the corrections table, not a numbered document.
-      const refCell: StatementCell = e.doc_number
-        ? { kind: "text", value: e.doc_number }
-        : e.invoice_number
-          ? { kind: "text", value: e.invoice_number }
-          : EMPTY;
-
-      // METHOD — only rows where money physically changed hands carry one.
-      const methodCell: StatementCell = e.method
-        ? {
-            kind: "bi",
-            value: {
-              en: paymentMethodLabel(e.method as InvoicePaymentMethod, "en"),
-              ar: paymentMethodLabel(e.method as InvoicePaymentMethod, "ar"),
-            },
-          }
-        : EMPTY;
-
-      // NOTE — the row's note, else its bank reference, else blank.
-      const noteCell: StatementCell = e.note
-        ? { kind: "text", value: e.note }
-        : e.reference
-          ? { kind: "text", value: e.reference }
-          : EMPTY;
-
-      // AMOUNT — the ledger's own sign IS the row's meaning; the cell shows
-      // the magnitude and the sign glyph restates the direction. No VAT split
-      // anywhere: a ledger row is a money movement, not a taxable supply —
-      // the tax lives on the invoice the draw points at.
-      const amountCell: StatementCell = {
+    const rows: StatementRow[] = visible.map(({ ev, running }) => {
+      // The running-balance cell, identical on every row — a MOVING row shows
+      // the figure it produced, a record-only row shows the figure it left
+      // alone. One expression, so the two can never diverge in format.
+      const runCell: StatementCell = {
         kind: "num",
-        value: Math.abs(e.amount_sar),
-        sign: e.amount_sar > 0 ? "plus" : "minus",
+        value: running,
+        sign: "none",
         split: null,
-        negative: false,
+        negative: running < 0,
       };
 
+      if (ev.src === "ledger") {
+        const e = ev.entry;
+        // REF — the row's own document number (RCT-… / CN-…), or the invoice
+        // it is linked to. A correction has neither, deliberately: its paper
+        // trail is the corrections table, not a numbered document.
+        const refCell: StatementCell = e.doc_number
+          ? { kind: "text", value: e.doc_number }
+          : e.invoice_number
+            ? { kind: "text", value: e.invoice_number }
+            : EMPTY;
+
+        // METHOD — only rows where money physically changed hands carry one.
+        const methodCell: StatementCell = e.method
+          ? {
+              kind: "bi",
+              value: {
+                en: paymentMethodLabel(e.method as InvoicePaymentMethod, "en"),
+                ar: paymentMethodLabel(e.method as InvoicePaymentMethod, "ar"),
+              },
+            }
+          : EMPTY;
+
+        // NOTE — the row's note, else its bank reference, else blank.
+        const noteCell: StatementCell = e.note
+          ? { kind: "text", value: e.note }
+          : e.reference
+            ? { kind: "text", value: e.reference }
+            : EMPTY;
+
+        // AMOUNT — the ledger's own sign IS the row's meaning; the cell shows
+        // the magnitude and the sign glyph restates the direction. No VAT
+        // split anywhere: a ledger row is a money movement, not a taxable
+        // supply — the tax lives on the invoice the draw points at.
+        const amountCell: StatementCell = {
+          kind: "num",
+          value: Math.abs(e.amount_sar),
+          sign: e.amount_sar > 0 ? "plus" : "minus",
+          split: null,
+          negative: false,
+        };
+
+        return {
+          key: `ledger-${e.id}`,
+          kind: kindOf(e),
+          recordOnly: false,
+          cells: [
+            { kind: "date", value: ev.date },
+            { kind: "bi", value: bi(typeKeyOf(e)) },
+            refCell,
+            methodCell,
+            noteCell,
+            amountCell,
+            runCell,
+          ],
+        };
+      }
+
+      // DELIVERED TRIP or SPECIAL CHARGE — work performed, priced by
+      // consumingItems(), recorded without moving the balance.
+      //
+      // THE SIGN IS "none", AND THAT IS THE POINT. A "−" beside a figure on
+      // this table means money left the account, and it did not: the balance
+      // beside this row is the same one above it. Signing a delivered trip as
+      // a debit is precisely the pre-0203 reading the rebuild removed.
+      if (ev.src === "item") {
+        const it = ev.item;
+        const isTrip = it.kind === "trip";
+        return {
+          key: `${it.kind}-${it.id}`,
+          kind: isTrip ? ("trip" as const) : ("charge" as const),
+          recordOnly: true,
+          cells: [
+            { kind: "date", value: ev.date },
+            {
+              kind: "bi",
+              value: bi(isTrip ? "trips.statement.typeDelivery" : "trips.statement.typeCharge"),
+            },
+            // Ref is the trip's own reference, through formatTripRef so the
+            // "No ref" wording matches every other surface. A charge has none.
+            isTrip ? { kind: "tripRef", value: formatTripRef(it.ref), tripId: it.id } : EMPTY,
+            // No money changed hands, so no method — the same rule the ledger
+            // rows follow.
+            EMPTY,
+            // Note carries what the row IS beyond its type: the water
+            // delivered, or the charge's own label.
+            isTrip ? waterTypeCell(it.water_type) : it.label ? { kind: "text", value: it.label } : EMPTY,
+            // VAT-INCLUSIVE, and deliberately not split. The tax on this work
+            // is stated on the invoice that bills it; a statement showing a
+            // net/VAT breakdown per row would be a second, unreconciled
+            // rendering of the same tax.
+            { kind: "num", value: it.consumedAmount, sign: "none", split: null, negative: false },
+            runCell,
+          ],
+        };
+      }
+
+      // AN INVOICE PAYMENT — one `invoice_payments` row, which since 0204 is
+      // normally one instalment of several. Money arriving FOR an invoice
+      // rather than INTO the balance: recorded, never deducted, which is
+      // exactly why `recordOnly` is true and the running balance holds flat
+      // across it. `runCell` carries the figure forward unchanged, so two
+      // partial payments on one invoice can never move the closing balance
+      // away from the headline the view publishes.
+      //
+      // The AMOUNT is the payment's own, not the invoice's total — the
+      // distinction this row exists to make.
+      if (ev.src === "invoicePayment") {
+        const ip = ev.payment;
+        return {
+          key: `invoice-payment-${ip.id}`,
+          kind: "settlement" as const,
+          recordOnly: true,
+          cells: [
+            { kind: "date", value: ev.date },
+            { kind: "bi", value: bi("trips.statement.typeInvoicePayment") },
+            // REF is the invoice this money settled — the document the
+            // customer is reconciling against. Its own payment id is
+            // machinery and appears nowhere.
+            { kind: "text", value: ip.invoice_number },
+            ip.method
+              ? {
+                  kind: "bi",
+                  value: {
+                    en: paymentMethodLabel(ip.method, "en"),
+                    ar: paymentMethodLabel(ip.method, "ar"),
+                  },
+                }
+              : EMPTY,
+            // NOTE — the payment's note, else its bank reference, else blank.
+            // Same precedence as a ledger row's, so the two kinds of money
+            // movement read identically down the column.
+            ip.note
+              ? { kind: "text", value: ip.note }
+              : ip.reference
+                ? { kind: "text", value: ip.reference }
+                : EMPTY,
+            { kind: "num", value: ip.amount_sar, sign: "none", split: null, negative: false },
+            runCell,
+          ],
+        };
+      }
+
+      // A LEGACY PAID INVOICE — pre-0203, settled on the invoice row itself
+      // with no payment history to itemise, so the whole document is the
+      // event and its grand total is the amount. Record-only for the same
+      // reason as above.
+      const p = ev.payment;
       return {
-        key: `ledger-${e.id}`,
-        kind: kindOf(e),
+        key: `payment-${p.id}`,
+        kind: "settlement" as const,
+        recordOnly: true,
         cells: [
-          { kind: "date", value: e.created_at.slice(0, 10) },
-          { kind: "bi", value: bi(typeKeyOf(e)) },
-          refCell,
-          methodCell,
-          noteCell,
-          amountCell,
-          { kind: "num", value: running, sign: "none", split: null, negative: running < 0 },
+          { kind: "date", value: ev.date },
+          { kind: "bi", value: bi("trips.statement.typeInvoicePayment") },
+          { kind: "text", value: p.invoice_number },
+          p.payment_method
+            ? {
+                kind: "bi",
+                value: {
+                  en: paymentMethodLabel(p.payment_method, "en"),
+                  ar: paymentMethodLabel(p.payment_method, "ar"),
+                },
+              }
+            : EMPTY,
+          p.payment_reference ? { kind: "text", value: p.payment_reference } : EMPTY,
+          { kind: "num", value: p.grand_total_sar, sign: "none", split: null, negative: false },
+          runCell,
         ],
       };
     });
 
     return {
       ...common,
+      // Always present on prepaid, including on an empty statement: it
+      // explains the Running Balance COLUMN, which is there whether or not a
+      // row is. Suppressing it on the empty case would mean the reader who
+      // most needs the convention explained — someone opening an unfamiliar
+      // account — is the one reader who does not get it.
+      balanceNote: bi("trips.statement.balanceNote"),
       headline: {
         // THE VIEW'S FIGURE, passed through — v_customer_ledger_balance. The
-        // walk above agrees with it by construction (same rows, same signs),
-        // but the view is the authority.
+        // walk above agrees with it by construction (the same ledger rows in
+        // the same order with the same signs; the merged record-only rows add
+        // nothing to it), but the view is the authority.
         label: bi("trips.statement.footBalance"),
         value: input.balance,
         negative: input.balance < 0,
@@ -518,14 +911,29 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
   );
 
   const paymentRows = allPayments.filter((p) => inPeriod(paymentDateOf(p)));
+  // 0204 applies to BOTH modes — confirm freezes a payable and moves no money
+  // on a postpaid invoice either, so a postpaid customer pays in instalments
+  // exactly as a prepaid one does. Reading whole paid invoices here understated
+  // a postpaid account for the same reason and by the same amount.
+  const invoicePaymentRows = invoicePayments.filter((p) => inPeriod(invoicePaymentDateOf(p)));
 
   // Merge trip + payment rows chronologically — payments render like any other
-  // statement row, oldest first.
+  // statement row, oldest first. Equal dates keep INSERTION order (the
+  // comparator returns 0 and Array.prototype.sort is stable), which is why the
+  // three groups are concatenated in the order they are: a same-day trip still
+  // precedes the money that settled it, and the legacy whole-invoice row still
+  // sits where it always sat, after the itemised payments.
   const merged: (
     | { kind: "trip"; date: string; row: ConsumedItem }
+    | { kind: "invoicePayment"; date: string; row: StatementInvoicePaymentInput }
     | { kind: "payment"; date: string; row: StatementPaymentInput }
   )[] = [
     ...postpaidTrips.map((tr) => ({ kind: "trip" as const, date: tr.trip_date, row: tr })),
+    ...invoicePaymentRows.map((p) => ({
+      kind: "invoicePayment" as const,
+      date: invoicePaymentDateOf(p),
+      row: p,
+    })),
     ...paymentRows.map((p) => ({ kind: "payment" as const, date: paymentDateOf(p), row: p })),
   ].sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1));
 
@@ -547,6 +955,9 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
       return {
         key: `trip-${tr.id}`,
         kind: "trip" as const,
+        // Postpaid has no held balance and no running-balance column, so no
+        // row on it can move or fail to move one. False throughout.
+        recordOnly: false,
         cells: [
           { kind: "date", value: tr.trip_date },
           { kind: "tripRef", value: formatTripRef(tr.ref), tripId: tr.id },
@@ -561,25 +972,51 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
         ],
       };
     }
-    const p = r.row;
     // The REFERENCE column. bank_transfer is the only method that carries one
-    // (0039 requires it), so it shows the reference; every other method names
-    // itself from the shared label map instead. Reading the branch the other
-    // way round is what made 0134's 'balance' render as a bare em dash.
-    const refCell: StatementCell =
-      p.payment_method === "bank_transfer"
-        ? p.payment_reference
-          ? { kind: "text", value: p.payment_reference }
+    // (0039 requires it, and 0204 made it a condition inside the RPC), so it
+    // shows the reference; every other method names itself from the shared
+    // label map instead. Reading the branch the other way round is what made
+    // 0134's 'balance' render as a bare em dash. One expression, applied to
+    // both payment shapes — they differ only in which columns hold the pair.
+    const paymentRefCell = (method: InvoicePaymentMethod | null, reference: string | null): StatementCell =>
+      method === "bank_transfer"
+        ? reference
+          ? { kind: "text", value: reference }
           : EMPTY
-        : p.payment_method
+        : method
           ? {
               kind: "bi",
-              value: { en: paymentMethodLabel(p.payment_method, "en"), ar: paymentMethodLabel(p.payment_method, "ar") },
+              value: { en: paymentMethodLabel(method, "en"), ar: paymentMethodLabel(method, "ar") },
             }
           : EMPTY;
+
+    if (r.kind === "invoicePayment") {
+      const ip = r.row;
+      return {
+        key: `invoice-payment-${ip.id}`,
+        kind: "payment" as const,
+        recordOnly: false,
+        cells: [
+          { kind: "date", value: r.date },
+          paymentRefCell(ip.method, ip.reference),
+          { kind: "bi", value: bi("trips.statement.typePayment") },
+          EMPTY,
+          EMPTY,
+          EMPTY,
+          EMPTY,
+          // THE PAYMENT'S OWN AMOUNT, not the invoice's total. A credit, so
+          // it keeps the "plus" the postpaid arm has always given a payment.
+          { kind: "num", value: ip.amount_sar, sign: "plus", split: null, negative: false },
+        ],
+      };
+    }
+
+    const p = r.row;
+    const refCell = paymentRefCell(p.payment_method, p.payment_reference);
     return {
       key: `payment-${p.id}`,
       kind: "payment" as const,
+      recordOnly: false,
       cells: [
         paymentDateOf(p) ? { kind: "date", value: paymentDateOf(p) } : EMPTY,
         refCell,
@@ -595,6 +1032,8 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
 
   return {
     ...common,
+    // No held balance, no running-balance column, nothing to explain.
+    balanceNote: null,
     headline: {
       label: bi("trips.statement.footTotalPayable"),
       value: totalPayable,

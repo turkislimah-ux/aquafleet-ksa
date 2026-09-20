@@ -166,6 +166,20 @@ const STATEMENT_CSS = `
   .stmt-sub { margin-top: 3mm; font-size: 8.8px; color: var(--ink-soft); }
   .stmt-sub .ar { display: block; font-size: 11px; font-weight: 500;
                   line-height: 1.6; color: var(--ink-soft); }
+  /* THE RUNNING-BALANCE FOOTNOTE, sharing the caption's voice and its slot.
+     Turki's direction: it goes where the document already puts its VAT-basis
+     note, because both are the same kind of statement — how to READ the
+     figures below, said before the reader reaches them.
+     .bal-note, NOT .note. The kit owns a bare .note and it is a BORDERED,
+     flex:1 BOX built for the invoice's settlement band; inheriting it would
+     put this sentence in a frame and hand it a flex basis inside a block
+     parent. Exactly the trap the .pk rename above documents, so it takes the
+     same answer: a statement-only element gets a statement-only name.
+     A hairline above it rather than extra space alone — two consecutive
+     grey paragraphs at the same size read as one wrapped paragraph, and these
+     two say different things. */
+  .stmt-sub .bal-note { margin-top: 2mm; padding-top: 2mm;
+                        border-top: 1px solid var(--rule-faint); }
 
   /* ---------- the divider ----------
      ONE line (Turki). The kit's masthead rule is .accent (3px) followed by
@@ -207,11 +221,29 @@ const STATEMENT_CSS = `
                        color: var(--ink-faint); margin-top: 1px;
                        font-variant-numeric: tabular-nums; unicode-bidi: isolate; }
   .stmt-table td.amt { font-weight: 700; }
-  /* A settlement RECORDS rather than moves money. On screen that is carried by
-     a green tint; this document is monochrome, so it is carried by a rule and
-     italic ink instead — visible without colour, and it changes no figure. */
-  .stmt-table tr.settlement td { font-style: italic; color: var(--ink-soft); }
-  .stmt-table tr.settlement td.dt { font-style: normal; }
+  /* ---------- record-only rows ----------
+     A delivered trip, a special charge, and a payment made straight against an
+     invoice all RECORD an event without moving the money held on account. The
+     view-model flags them (StatementRow.recordOnly) and this is where the
+     distinction becomes visible on paper.
+
+     This rule used to italicise a whole tr.settlement row, which was legible
+     while a settlement was the only record-only kind the table could hold. The merged statement puts every delivered trip in that class,
+     so a busy account would have run italic for pages — an emphasis covering
+     most of the page has stopped emphasising anything, and italic Arabic is a
+     synthetic slant rather than a designed face.
+
+     WEIGHT AND INK CARRY IT INSTEAD, which is what a printed ledger uses: a
+     figure the row PRODUCED is bold, a figure it merely CARRIES recedes. The
+     amount drops to regular weight beside the bold amounts of the rows that
+     did move money, and the carried running balance drops to faint ink so the
+     last column reads as a series of steps rather than a wall of figures. No
+     colour, no tint, no slant, and not one figure changes. The screen keeps
+     its own green tint on the settlement row — each surface says record-only
+     in its own medium's vocabulary, which is a LOOK difference and therefore
+     allowed. */
+  .stmt-table tr.record-only td.amt { font-weight: 400; }
+  .stmt-table tr.record-only td.run { color: var(--ink-faint); }
 
   /* ---------- the uninvoiced footnote (prepaid, 0203) ----------
      One line under the table, hairlined off it: delivered work not yet drawn
@@ -278,11 +310,18 @@ function rowHtml(row: StatementRow, columns: StatementColumn[], splitTpl: BiLabe
       if (col.key === "date") classes.push("dt");
       if (col.key === "type") classes.push("type");
       if (col.key === "amount") classes.push("amt");
+      // The running-balance cell needs its own hook so a record-only row can
+      // fade the figure it is merely carrying forward.
+      if (col.key === "runningBalance") classes.push("run");
       const cls = classes.length > 0 ? ` class="${classes.join(" ")}"` : "";
       return `<td${cls}>${cellHtml(cell, splitTpl)}</td>`;
     })
     .join("");
-  return `<tr class="${esc(row.kind)}">${tds}</tr>`;
+  // The row carries its KIND and, separately, whether it moved the balance.
+  // Separately because the two are not the same question: a ledger draw and a
+  // special charge are both kind "charge", and only one of them moves money.
+  const rowCls = row.recordOnly ? `${esc(row.kind)} record-only` : esc(row.kind);
+  return `<tr class="${rowCls}">${tds}</tr>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +380,15 @@ export function buildStatementHtml(vm: StatementVm): string {
         `<span class="arrow">→</span>${seg(vm.toLabel, vm.periodTo)}</div>`
       : `<div class="val">${bl(vm.allTimeLabel)}</div>`;
 
+  // THE RUNNING-BALANCE FOOTNOTE — prepaid only, and only when the VM emitted
+  // it (postpaid has no such column and gets null). Rendered with "ar block"
+  // like the caption above it: this is a full sentence a reader reads THROUGH
+  // rather than glances at, and a paragraph-length RTL run appended inline to
+  // an LTR one is unreadable however well the bidi isolates behave.
+  const balanceNote = vm.balanceNote
+    ? `<div class="bal-note">${bl(vm.balanceNote, "ar block")}</div>`
+    : "";
+
   const metaBits = [
     vm.projectName ? esc(vm.projectName) : null,
     bl(vm.modeLabel),
@@ -385,7 +433,7 @@ export function buildStatementHtml(vm: StatementVm): string {
   </div>
 </div>
 
-<div class="stmt-sub">${bl(vm.subtitle, "ar block")}</div>
+<div class="stmt-sub">${bl(vm.subtitle, "ar block")}${balanceNote}</div>
 
 <div class="stmt-table">
   <table>

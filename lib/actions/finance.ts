@@ -12,10 +12,18 @@
 // actor is the RPC's problem — it raises 'Actor identity is required.' and we
 // surface that verbatim, like every other RPC error in this file.
 //
-// Photo rules (top-up only — record_refund has NO photo column, deliberate):
+// Photo rules (0204 — now BOTH money doors, top-up and refund):
 // bank_transfer requires an ETF ref. number AND a photo; cash keeps both
 // optional-but-recorded. Storage key is app-generated (topup-proofs bucket,
 // 0040) — never the raw filename.
+//
+// These checks are a COURTESY COPY of the rule, not the rule. 0204 enforces
+// the same thing inside record_topup / record_refund / record_invoice_payment,
+// so a bypassed or stale client still cannot write an unproven bank transfer.
+// The copy exists only so the operator is told what is missing while she is
+// still looking at the form, instead of meeting a raw Postgres error after
+// submit. If the two ever disagree, the RPC wins and its message is what the
+// user sees — every error below is surfaced verbatim.
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -50,6 +58,32 @@ const PHOTO_BUCKET = "topup-proofs";
 // holds when the client is bypassed or stale.
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
+// ONE upload path for every ledger proof. Top-up and refund put their images
+// in the SAME bucket under the same `${customerId}/${kind}-${ts}.${ext}` shape,
+// which is why getLedgerPhotoSignedUrl needed no change to serve refund proofs:
+// it signs customer_ledger.photo_path out of this one bucket regardless of
+// which door wrote the row.
+//
+// Not exported. A "use server" module may export only async functions, and a
+// helper that is not an action has no business being a server hop.
+async function uploadLedgerProof(
+  supabase: ReturnType<typeof createClient>,
+  customerId: string,
+  kind: "topup" | "refund",
+  file: FormDataEntryValue | null,
+): Promise<{ error: string; path?: undefined } | { error: null; path: string | null }> {
+  if (!(file instanceof File) || file.size === 0) return { error: null, path: null };
+  if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
+  const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
+  const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
+  const path = `${customerId}/${kind}-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
+    contentType: file.type || "application/octet-stream",
+  });
+  if (error) return { error: `Photo upload failed: ${error.message}` };
+  return { error: null, path };
+}
+
 export async function recordTopup(formData: FormData): Promise<ActionResult<LedgerDocResult>> {
   const supabase = createClient();
 
@@ -77,17 +111,9 @@ export async function recordTopup(formData: FormData): Promise<ActionResult<Ledg
   // cash: reference/photo both optional — carried through as-entered below,
   // not required, not nulled. Same fields, just not mandatory.
 
-  let photoPath: string | null = null;
-  if (file instanceof File && file.size > 0) {
-    if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
-    const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
-    const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
-    photoPath = `${customerId}/topup-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from(PHOTO_BUCKET).upload(photoPath, file, {
-      contentType: file.type || "application/octet-stream",
-    });
-    if (uploadErr) return { error: `Photo upload failed: ${uploadErr.message}` };
-  }
+  const up = await uploadLedgerProof(supabase, customerId, "topup", file);
+  if (up.error) return { error: up.error };
+  const photoPath = up.path;
 
   const { data: auth } = await supabase.auth.getUser();
 
@@ -126,7 +152,12 @@ export async function recordTopup(formData: FormData): Promise<ActionResult<Ledg
 // row lock); the app does NOT pre-check it — the RPC's error message is the
 // single source of refusal and is shown verbatim. amount_sar is stored
 // negative by the RPC; the form takes the positive figure being paid back.
-// No photo: customer_ledger refund rows have no proof column (0203).
+//
+// PHOTO (0204): a refund is money leaving the company, so it now carries proof
+// on exactly the same terms as a top-up — required for bank_transfer, offered
+// and stored but not required for cash. The 6-argument record_refund was
+// DROPPED in 0204, so p_photo_path is not optional here: omit it and PostgREST
+// cannot resolve the function at all and every refund fails.
 // ---------------------------------------------------------------------------
 
 export async function recordRefund(formData: FormData): Promise<ActionResult<LedgerDocResult>> {
@@ -137,6 +168,7 @@ export async function recordRefund(formData: FormData): Promise<ActionResult<Led
   const method = String(formData.get("method") ?? "");
   const note = String(formData.get("note") ?? "").trim() || null;
   const reference = String(formData.get("reference") ?? "").trim() || null;
+  const file = formData.get("photoFile");
 
   if (!customerId) return { error: "Missing customer." };
   if (!Number.isFinite(amountSar) || amountSar <= 0) {
@@ -145,9 +177,18 @@ export async function recordRefund(formData: FormData): Promise<ActionResult<Led
   if (method !== "cash" && method !== "bank_transfer") {
     return { error: "Method must be cash or bank transfer." };
   }
-  if (method === "bank_transfer" && !reference) {
-    return { error: "Bank transfer requires an ETF Ref. number." };
+  if (method === "bank_transfer") {
+    if (!reference) return { error: "Bank transfer requires an ETF Ref. number." };
+    if (!(file instanceof File) || file.size === 0) {
+      return { error: "Bank transfer requires a photo of the transfer." };
+    }
   }
+
+  // Upload BEFORE the RPC. If the RPC then refuses (over Available, say), the
+  // image is an orphan in the bucket rather than a ledger row with no proof —
+  // the safe side of the trade, and the same order record_topup already used.
+  const up = await uploadLedgerProof(supabase, customerId, "refund", file);
+  if (up.error) return { error: up.error };
 
   const { data: auth } = await supabase.auth.getUser();
 
@@ -156,6 +197,7 @@ export async function recordRefund(formData: FormData): Promise<ActionResult<Led
     p_amount: amountSar,
     p_method: method,
     p_reference: reference,
+    p_photo_path: up.path,
     p_actor: auth?.user?.email ?? null,
     p_note: note,
   });

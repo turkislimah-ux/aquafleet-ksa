@@ -7,7 +7,8 @@
   },
   "scripts": {
     "dev": "next dev -p 3002",
-    "build": "next build",
+    "build": "./scripts/safe-build.sh",
+    "build:verify": "./scripts/safe-build.sh --dist-dir .next-verify",
     "start": "next start -p 3002",
     "lint": "next lint",
     "preview": "python3 -m http.server 3002 --directory preview",

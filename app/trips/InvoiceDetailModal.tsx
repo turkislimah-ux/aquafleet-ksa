@@ -261,6 +261,14 @@ export default function InvoiceDetailModal({
         // post-confirm apply-balance would draw against, so it must not be
         // confused with prepaid_applied_sar, which froze at confirm.
         availableSar: number | null;
+        // The customer's ledger BALANCE right now (prepaid only, null for
+        // postpaid or a failed read). Distinct from availableSar above:
+        // balance is everything on the ledger, available is that balance less
+        // what is already spoken for (uninvoiced work plus the unsettled
+        // remainder of confirmed invoices). The trips foot shows the balance
+        // because that is the figure the customer recognises; the apply panel
+        // shows available because that is what can actually move.
+        ledgerBalanceSar: number | null;
       })
     | null
   >(null);
@@ -311,6 +319,23 @@ export default function InvoiceDetailModal({
   // beside it) because the field is pre-filled with the outstanding remainder
   // and the "pay it all" case must be one click, not a re-typing exercise.
   const [payAmount, setPayAmount] = useState("");
+  // Reference, date and proof are CONTROLLED TOO (0204, item 10). They used to
+  // be read from FormData at submit and gated by nothing but the `required`
+  // attribute, which is enough to stop a submission and useless for saying
+  // WHAT is missing before one is attempted — the operator filled the form,
+  // pressed the button, and met either a browser bubble on one field at a time
+  // or record_invoice_payment's own raise after the round trip. Holding the
+  // three values in state lets the gate below name every gap at once, while
+  // the form is still on screen and still fixable.
+  //
+  // The RPC enforces the identical rule and remains the authority; this is the
+  // courtesy layer in front of it, not a substitute for it.
+  const [payReference, setPayReference] = useState("");
+  const [payDate, setPayDate] = useState("");
+  const [payProof, setPayProof] = useState<File | null>(null);
+  // Forces the (still uncontrolled, as file inputs must be) proof picker to
+  // remount and clear — same technique as chargeImageInputKey above.
+  const [payProofInputKey, setPayProofInputKey] = useState(0);
   // Apply-balance confirmation. Not a form — apply_balance_to_invoice takes no
   // amount at all (it draws min(Available, remainder) under its own row lock).
   // This flag only opens the panel that STATES those two figures before the
@@ -777,13 +802,26 @@ export default function InvoiceDetailModal({
         return;
       }
       setPayingOpen(false);
-      setPayAmount("");
+      resetPayForm();
       await refresh();
     } catch {
       setActionError(t("shared.upload.saveFailedNetwork", lang));
     } finally {
       setBusy(false);
     }
+  }
+
+  // Clears every field of the ledger payment form. One function because the
+  // four pieces of state are one form, and a stale reference or slip surviving
+  // into the NEXT payment on the same invoice is the kind of error nobody
+  // catches: the figures would be right and the evidence would belong to a
+  // different transfer.
+  function resetPayForm() {
+    setPayAmount("");
+    setPayReference("");
+    setPayDate("");
+    setPayProof(null);
+    setPayProofInputKey((k) => k + 1);
   }
 
   // LEGACY SETTLEMENT — the pre-0203 full-amount path, unchanged in behaviour
@@ -975,6 +1013,50 @@ export default function InvoiceDetailModal({
   // already decided. null when the balance is unreadable: there is nothing to
   // subtract from, and a lone "0" here would read as a real remainder.
   const remainingAfter = (subtotal: number) => (paidUpUnreadable ? null : round2((paidUp as number) - subtotal));
+
+  // --- LEDGER-ERA BALANCE ROW (0204, item 6) -------------------------------
+  // The same pair of rows, fed by the OTHER era's balance. A ledger-era prepaid
+  // invoice has no paid-up figure — lib/prepaid's expression answers a question
+  // 0203 stopped asking — so it reads v_customer_available.balance_sar instead,
+  // carried on the payload as ledgerBalanceSar.
+  //
+  // THE TWO BALANCES ARE DIFFERENT NUMBERS ON THE SAME CUSTOMER and must never
+  // share a caption, which is why the ledger call site passes its own label.
+  // Paid-up is frozen at paid_at/voided_at; this one is live.
+  //
+  // Not chained, for the same reason the legacy pair is not: Remaining is this
+  // table's own subtotal taken off the balance, and nothing downstream reads it.
+  const ledgerBalance = raw?.ledgerBalanceSar ?? null;
+  const ledgerBalanceRow: { amount: number } | { note: string } =
+    ledgerBalance == null
+      ? { note: t("trips.invoiceSheet.paidUpUnavailable", lang) }
+      : { amount: ledgerBalance };
+  const ledgerRemainingAfter = (subtotal: number) =>
+    ledgerBalance == null ? null : round2(ledgerBalance - subtotal);
+
+  // --- WHAT THE PAYMENT FORM IS STILL MISSING (0204, item 10) --------------
+  // A bank transfer is a real transaction somewhere else, and the only thing
+  // making it auditable here is the trio that points at it: a reference, the
+  // date the money moved, and a picture of the slip. record_invoice_payment()
+  // RAISES when any of the three is absent, which is correct and arrives far
+  // too late — after the round trip, on a form the operator has usually
+  // already stopped looking at.
+  //
+  // This is that same rule, stated forward instead of backward: every gap at
+  // once, while the fields are on screen. Cash asks for none of it (the money
+  // changed hands here, and the receipt is this row), so the list is empty and
+  // the button is live as soon as there is an amount.
+  //
+  // THE RPC REMAINS THE AUTHORITY. This list is not consulted by anything that
+  // writes; it only decides whether the submit button is offered, and its
+  // refusal message is never shown in place of the server's.
+  const payMissing: string[] = [];
+  if (!(Number(payAmount) > 0)) payMissing.push(t("trips.invoiceSheet.payGateAmount", lang));
+  if (payMethod === "bank_transfer") {
+    if (payReference.trim() === "") payMissing.push(t("trips.invoiceSheet.payGateReference", lang));
+    if (payDate === "") payMissing.push(t("trips.invoiceSheet.payGateDate", lang));
+    if (payProof == null) payMissing.push(t("trips.invoiceSheet.payGateProof", lang));
+  }
 
   // --- POSTPAID (unchanged v2 shape — do not touch) ------------------------
   // Special-charges-only subtotal (item 3) — computed for DISPLAY only, same
@@ -1291,8 +1373,21 @@ export default function InvoiceDetailModal({
                   lines={ledgerTripLines}
                   subtotal={ledgerTripsTotal}
                   fallbackWaterType={view.projectWaterType}
-                  // No `balance` / `remaining`: see the prop's note. The
-                  // settlement is stated once, in the closing chain below.
+                  // Balance and Remaining are BACK on this table (0204, item
+                  // 6), fed by the ledger reader rather than lib/prepaid's
+                  // paid-up expression. The earlier note here said these props
+                  // were deliberately omitted because the settlement is stated
+                  // once at the bottom; that reasoning conflated two different
+                  // questions. The closing chain answers "what is owed on THIS
+                  // invoice"; these two rows answer "what does the customer
+                  // have, and what is left of it after this table" — the
+                  // figure a reader wants beside the trips, not under them.
+                  //
+                  // The caption is passed explicitly because the ledger
+                  // balance is NOT the paid-up balance the default names.
+                  balanceLabel={t("trips.invoiceSheet.ledgerBalance", lang)}
+                  balance={ledgerBalanceRow}
+                  remaining={ledgerRemainingAfter(ledgerTripsTotal)}
                   //
                   // The hide-from-customer toggle stays HERE, on the one trips
                   // table, because it is still the same control governing the
@@ -1718,6 +1813,30 @@ export default function InvoiceDetailModal({
                       {formatSar(remainderSar as number)}
                     </span>
                   </div>
+                  {/* THE CONFIRMED PHASE (0204, item 3). A prepaid invoice now
+                      RESTS here: confirm froze a payable and moved no money, so
+                      "confirmed" is a standing position rather than a moment in
+                      passing. The operator looking at that position needs both
+                      halves of it — what this invoice still wants, above, and
+                      what the customer actually has to meet it with.
+
+                      SEPARATED BY A RULE because it is not part of the
+                      subtraction above it. Every row above comes from
+                      v_invoice_settlement and is about THIS invoice; this one
+                      comes from v_customer_available and is about the CUSTOMER,
+                      across all their work. Running them together would read as
+                      a sixth term in a five-term sum.
+
+                      Withheld when the read failed, never shown as 0 — the same
+                      rule the apply panel follows for the same figure. Hidden
+                      once the remainder is nil because there is then nothing
+                      this balance could be for. */}
+                  {isPrepaid && availableSar != null && (remainderSar as number) > 0 && (
+                    <div className="flex items-center justify-between pt-1.5 mt-0.5 border-t border-app">
+                      <span className="muted">{t("trips.invoiceSheet.sAvailable", lang)}</span>
+                      <span className="tabular-nums">{formatSar(availableSar)}</span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 /* WORDS, NEVER A ZERO — a failed read and a settled invoice are
@@ -1969,8 +2088,14 @@ export default function InvoiceDetailModal({
                   {/* Reference + date required for bank_transfer (a real bank
                       transaction exists to point to), optional for cash — the
                       same rule 0203's RPC enforces, and it raises its own
-                      message if this markup is ever bypassed. Uncontrolled:
-                      read via FormData at submit, like proofFile. */}
+                      message if this markup is ever bypassed.
+
+                      CONTROLLED since 0204's item 10. They still travel in the
+                      FormData by `name` exactly as before; the state exists so
+                      the gate above this form's button can say what is missing
+                      rather than leaving the operator to discover it one
+                      browser bubble at a time. `required` stays as the second
+                      line of the same defence. */}
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="font-medium">
                       {t("trips.invoiceSheet.fPaymentReference", lang)}
@@ -1980,6 +2105,8 @@ export default function InvoiceDetailModal({
                       type="text"
                       name="paymentReference"
                       required={payMethod === "bank_transfer"}
+                      value={payReference}
+                      onChange={(e) => setPayReference(e.target.value)}
                       className={INPUT}
                       style={INPUT_STYLE}
                     />
@@ -1993,6 +2120,8 @@ export default function InvoiceDetailModal({
                       type="date"
                       name="paymentDate"
                       required={payMethod === "bank_transfer"}
+                      value={payDate}
+                      onChange={(e) => setPayDate(e.target.value)}
                       className={INPUT}
                       style={INPUT_STYLE}
                     />
@@ -2001,17 +2130,62 @@ export default function InvoiceDetailModal({
                     <span className="font-medium">{t("trips.invoiceSheet.fPayNote", lang)}</span>
                     <textarea name="paymentNote" rows={2} className={INPUT} style={INPUT_STYLE} />
                   </label>
-                  {payMethod === "bank_transfer" && (
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="font-medium">{t("trips.invoiceSheet.fProof", lang)}</span>
-                      <input type="file" name="proofFile" required className={INPUT} style={INPUT_STYLE} />
-                    </label>
+                  {/* THE SLIP IS NOW OFFERED ON BOTH METHODS. It used to render
+                      only for bank_transfer, so a cash payment had nowhere to
+                      put a signed receipt even when one existed — the evidence
+                      was refused by the form rather than by any rule. It is
+                      required on a transfer and merely available on cash, which
+                      is exactly what the suffix says and exactly what the RPC
+                      enforces.
+
+                      The input stays UNCONTROLLED, because a file input must
+                      be; onChange mirrors the selection into state purely so
+                      the gate can see it, and the key remounts it on reset. */}
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium">
+                      {t("trips.invoiceSheet.fProof", lang)}
+                      {t(payMethod === "bank_transfer" ? "trips.invoiceSheet.sufRequired" : "trips.invoiceSheet.sufOptional", lang)}
+                    </span>
+                    <input
+                      key={payProofInputKey}
+                      type="file"
+                      name="proofFile"
+                      required={payMethod === "bank_transfer"}
+                      onChange={(e) => setPayProof(e.target.files?.[0] ?? null)}
+                      className={INPUT}
+                      style={INPUT_STYLE}
+                    />
+                  </label>
+                  {/* WHAT IS STILL MISSING, STATED BEFORE THE ATTEMPT. Only
+                      rendered when something is: a complete form says nothing
+                      and simply offers its button. Amber rather than red — the
+                      form is unfinished, not wrong. */}
+                  {payMissing.length > 0 && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-300">
+                      <div className="font-medium">{t("trips.invoiceSheet.payGateTitle", lang)}</div>
+                      <ul className="mt-1 space-y-0.5 list-disc ps-5">
+                        {payMissing.map((m) => (
+                          <li key={m}>{m}</li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                   <div className="flex items-center gap-2">
-                    <Btn type="button" variant="ghost" onClick={() => setPayingOpen(false)}>
+                    <Btn
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        setPayingOpen(false);
+                        resetPayForm();
+                      }}
+                    >
                       {t("common.cancel", lang)}
                     </Btn>
-                    <Btn type="submit" variant="primary" className={busy ? "opacity-50 pointer-events-none" : ""}>
+                    <Btn
+                      type="submit"
+                      variant="primary"
+                      className={busy || payMissing.length > 0 ? "opacity-50 pointer-events-none" : ""}
+                    >
                       {t(busy ? "common.recording" : "trips.invoiceSheet.confirmPayment", lang)}
                     </Btn>
                   </div>
@@ -2050,6 +2224,26 @@ export default function InvoiceDetailModal({
                       <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
                         <span>{t("trips.invoiceSheet.applyWillApply", lang)}</span>
                         <span className="tabular-nums">{formatSar(applicableSar as number)}</span>
+                      </div>
+                      {/* WHAT THE BALANCE WILL BE AFTERWARDS (0204, item 3).
+                          The row above says how much leaves; this one says
+                          what is left, which is the question the operator
+                          actually has to answer for the customer standing in
+                          front of them. Quiet, and below the rule, because it
+                          is a consequence of the conclusion rather than
+                          another term in it.
+
+                          Arithmetic on two figures this panel has already
+                          stated, both of which came whole from the server. It
+                          is NOT a fourth opinion about the balance: the RPC
+                          re-reads under the row lock and its answer is the one
+                          that lands, so if anything moved in between, this
+                          line was a forecast and the ledger is the record. */}
+                      <div className="flex justify-between text-xs muted">
+                        <span>{t("trips.invoiceSheet.applyAfter", lang)}</span>
+                        <span className="tabular-nums">
+                          {formatSar(round2(availableSar - (applicableSar as number)))}
+                        </span>
                       </div>
                     </div>
                   )}
@@ -2478,6 +2672,7 @@ function PrepaidTripTable({
   lines,
   subtotal,
   balance,
+  balanceLabel,
   remaining,
   fallbackWaterType,
   headerRight,
@@ -2491,13 +2686,27 @@ function PrepaidTripTable({
   // A union, not a nullable number — "unreadable" and "zero" are different
   // content and the choice between them is not this component's to make.
   //
-  // OMITTED ENTIRELY on a ledger-era invoice, which is why it is optional and
-  // why it governs BOTH rows rather than one. The 0203 document states its
-  // settlement ONCE, in the closing chain under Grand Total; a balance repeated
-  // inside every trips table is the duplication that batch removed, and a
-  // paid-up balance is a lib/prepaid figure this era does not use at all.
-  // One prop, because the pair is one block.
+  // OPTIONAL, and it governs BOTH rows rather than one — the pair is one
+  // block, so a caller either has a balance to state or has none. Postpaid
+  // callers omit it. Every prepaid caller passes it, in both eras.
+  //
+  // It was omitted on the ledger-era call site for a while, on the reasoning
+  // that a 0203 document states its settlement once in the closing chain. That
+  // reasoning is gone (0204, item 6): the chain answers what is owed on this
+  // invoice, these rows answer what the customer holds, and the two are not
+  // the same question. What each era passes here IS different, though — see
+  // balanceLabel.
   balance?: { amount: number } | { note: string };
+  // The caption for that row, because the two eras put DIFFERENT NUMBERS in
+  // it. Legacy passes lib/prepaid's paid-up balance, frozen at paid_at or
+  // voided_at; the ledger era passes v_customer_available.balance_sar, read
+  // live. Same customer, same table, two figures that can legitimately
+  // disagree — so naming both "Paid-up balance" would be a false statement on
+  // one of them.
+  //
+  // Defaulted rather than required so the legacy call sites stay byte-for-byte
+  // what they were.
+  balanceLabel?: string;
   // Balance minus this table's subtotal; null when the balance is unreadable.
   // Ignored when `balance` is omitted — neither row renders.
   remaining?: number | null;
@@ -2583,7 +2792,7 @@ function PrepaidTripTable({
           {balance && (
             <>
               <div className="flex items-center justify-between">
-                <span className="muted">{t("trips.invoiceSheet.paidUpBalance", lang)}</span>
+                <span className="muted">{balanceLabel ?? t("trips.invoiceSheet.paidUpBalance", lang)}</span>
                 {/* The unreadable arm is set as WORDS — no tabular numerals — so
                     it cannot be skimmed as an amount. A dash stood here for the
                     legacy pre-0036 case the chained balance had; the paid-up

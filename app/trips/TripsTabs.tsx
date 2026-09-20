@@ -22,7 +22,7 @@ import CustomersTab from "./CustomersTab";
 import FinanceTab from "./FinanceTab";
 import NewProjectModal from "./NewProjectModal";
 import WaterStationsModal from "./WaterStationsModal";
-import type { TopupRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { TopupRow, SpecialChargeRow, PaidInvoiceRow, InvoicePaymentStatementRow } from "./page";
 import type { CompanySettings } from "@/lib/db-types";
 import type {
   CustomerLedgerBalanceRow,
@@ -74,6 +74,7 @@ export default function TripsTabs({
   ledgerCorrections,
   ledgerCorrectionVotes,
   uninvoicedTripCounts,
+  invoicePayments,
   company,
   currentUserEmail,
   ...boardProps
@@ -96,6 +97,9 @@ export default function TripsTabs({
   ledgerCorrectionVotes: LedgerCorrectionVoteRow[];
   // Plain Record, not a Map — Maps cannot cross the RSC boundary.
   uninvoicedTripCounts: Record<string, number>;
+  // Settlement rows for the statement — every customer, flattened and
+  // void-excluded in page.tsx. Pass-through, same as the ledger props above.
+  invoicePayments: InvoicePaymentStatementRow[];
   company: CompanySettings | null;
   currentUserEmail: string | null;
 }) {
@@ -227,6 +231,7 @@ export default function TripsTabs({
           ledgerCorrections={ledgerCorrections}
           ledgerCorrectionVotes={ledgerCorrectionVotes}
           uninvoicedTripCounts={uninvoicedTripCounts}
+          invoicePayments={invoicePayments}
           company={company}
           currentUserEmail={currentUserEmail}
         />

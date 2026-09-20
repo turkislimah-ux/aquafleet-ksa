@@ -47,6 +47,15 @@ import type { ActionResult } from "./invoiceActions";
 // it: a plain array is serialised the same way by every transport, so the
 // action does not depend on the framework's handling of a Map. Rebuilt into
 // the Map the view-model expects on arrival, immediately below.
+//
+// THE MERGED STATEMENT ADDED NO FIELD HERE, and that is the point of deriving
+// this type rather than restating it. The prepaid statement now renders
+// delivered trips, special charges and invoice payments alongside the ledger,
+// which means `trips`, `payments` and the new `charges` all have to reach the
+// server — and all three already do, because `Omit<StatementVmInput, …>`
+// carries whatever that type carries. Every one of them is a plain array of
+// scalars, so the wire shape needs no help. A hand-written mirror of the input
+// type would have silently downloaded a PDF missing the new rows.
 export type StatementPdfInput = Omit<StatementVmInput, "tripMetaById"> & {
   tripMeta: (StatementTripMeta & { tripId: string })[];
 };

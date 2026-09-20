@@ -17,8 +17,21 @@
 #
 # So this EXITS. Non-zero, before touching .next.
 #
+# AND `npm run build` IS ROUTED HERE, which it was not for the first two
+# incidents or the third. This script existed for both of the earlier ones and
+# stopped neither, because the command everyone actually types — `npm run
+# build` — went straight to `next build` and never came near it. A guard that
+# has to be remembered by name is a guard that documents the hazard and then
+# lets it happen, which is the exact failure the paragraph above was written
+# about. The third incident cost a session to a "TypeError:
+# __webpack_modules__[moduleId] is not a function" on /trips that read like an
+# application bug. Now the obvious command IS the guarded one; the unguarded
+# build is reachable only by typing `npx next build` on purpose.
+#
 # Usage:
-#   ./scripts/safe-build.sh              # refuse if dev is up
+#   npm run build                        # refuse if dev is up
+#   npm run build:verify                 # build into .next-verify, dev untouched
+#   ./scripts/safe-build.sh              # same as npm run build
 #   ./scripts/safe-build.sh --dist-dir X # build elsewhere, safe while dev runs
 set -euo pipefail
 

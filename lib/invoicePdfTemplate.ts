@@ -237,10 +237,12 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
 
   // Three stacked rows for a prepaid table, one for postpaid — the original
   // footer, restored. What changed is the SOURCE of the middle row, not its
-  // position: it carries the paid-up balance the view-model decided, never the
-  // chained per-invoice running balance the row used to walk. The label moved
-  // with the value (`paidUpBalance`, not `runningBalance`) because a document
-  // may not put an old name on a new number. See VmTableFoot.
+  // position: it carries whichever balance the view-model decided this era
+  // prints — the paid-up figure on a legacy document, the ledger balance on a
+  // 0203-onward one — never the chained per-invoice running balance the row
+  // used to walk. The label travels WITH the value on the foot itself, because
+  // a document may not put an old name on a new number and two eras putting two
+  // figures in one slot cannot share one caption. See VmTableFoot.
   const foot =
     s.foot.style === "ledger"
       ? `
@@ -249,7 +251,7 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
           <td class="num" colspan="2">${num2(s.foot.subtotal)}</td>
         </tr>
         <tr>
-          <td colspan="4" class="lbl">${bl(labels.paidUpBalance, "ar inline")}</td>
+          <td colspan="4" class="lbl">${bl(s.foot.balanceLabel, "ar inline")}</td>
           <td class="num" colspan="2">${
             // The unreadable arm is set as WORDS, never as a figure — no
             // tabular numerals, no LTR box — so it cannot be skimmed as an
@@ -341,6 +343,56 @@ function chargesSection(s: VmChargesSection, labels: InvoiceVm["labels"]): strin
 
 function section(s: VmSection, labels: InvoiceVm["labels"]): string {
   return s.kind === "trips" ? tripSection(s, labels) : chargesSection(s, labels);
+}
+
+// HOW THIS INVOICE WAS SETTLED — every payment received and every draw against
+// the customer's prepaid balance, dated, closing on what is still outstanding.
+// Printed BELOW the due card, because it accounts for the figure in that card
+// and an account of something cannot come before it.
+//
+// Another `card glass`, the same shell the line tables use, on purpose: these
+// are dated described amounts and the reader has already learned how to read
+// one on this page. Four columns — a settlement has no water type and no unit
+// price — and a one-row `grand` foot, the same foot the charges table closes
+// on.
+//
+// One null test, no mode test: `vm.settlementDetail` is null on every document
+// with nothing to list, a hidden hero included. See VmSettlementDetail.
+function settlementDetailSection(vm: InvoiceVm): string {
+  const d = vm.settlementDetail;
+  if (!d) return "";
+  const body = d.rows
+    .map(
+      (r) => `
+      <tr>
+        <td class="dt">${r.date ? esc(r.date) : `<span class="muted">${DASH}</span>`}</td>
+        <td>${bl(r.description, "ar inline")}</td>
+        <td dir="ltr">${r.reference ? esc(r.reference) : `<span class="muted">${DASH}</span>`}</td>
+        <td class="num">${num2(r.amount)}</td>
+      </tr>`,
+    )
+    .join("");
+  return `
+  <div class="card glass">
+    <h2><span>${esc(d.title.en)}</span><span class="ar" dir="rtl">${esc(d.title.ar)}</span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:26mm">${bl(d.colDate)}</th>
+          <th>${bl(d.colDescription)}</th>
+          <th style="width:40mm">${bl(d.colReference)}</th>
+          <th class="num" style="width:26mm">${bl(d.colAmount)} <span class="cur-tag">(${esc(vm.labels.currency.en)})</span></th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+      <tfoot>
+        <tr class="grand">
+          <td colspan="3" class="lbl">${bl(d.remainderLabel, "ar inline")}</td>
+          <td class="num">${num2(d.remainder)}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -808,11 +860,24 @@ export async function buildInvoicePdfHtml(data: PdfInvoiceData): Promise<string>
               )
               .join("")}</div>`
       }
-      <div class="sep"></div>
+      ${
+        // NO HERO, NO RULE. `vm.hero` is null on exactly one document — a
+        // ledger-era prepaid invoice with the amount hidden from the customer —
+        // and the rule, the caption and the figure leave together. A `sep` on
+        // its own would close the card with a hairline under empty space, which
+        // reads as a number that failed to render. The card still ends on its
+        // Grand Total row: `heroIsGrandTotal` is false whenever the hero is
+        // absent, so that row is already printed above.
+        vm.hero == null
+          ? ""
+          : `<div class="sep"></div>
       <div class="lab">${esc(vm.hero.label.en)}<span class="ar" dir="rtl">${esc(vm.hero.label.ar)}</span></div>
-      <div class="amt" dir="ltr">${num2(vm.hero.amount)}<span class="cur">${esc(L.currency.en)}</span></div>
+      <div class="amt" dir="ltr">${num2(vm.hero.amount)}<span class="cur">${esc(L.currency.en)}</span></div>`
+      }
     </div>
   </div>
+
+  ${settlementDetailSection(vm)}
 
   ${bankBlock(vm)}
 

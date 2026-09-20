@@ -1,34 +1,33 @@
 # SESSION HANDOFF
 
 ## State
-- **Batch 1 COMMITTED (48a2f1b).** DB at 0203.
-- **PREPAID BATCH 2 BUILT — UNCOMMITTED, awaiting Turki's in-browser pass.**
-  Ledger invoice flow: doc + print carry Prepaid Applied / Amount Payable
-  (invoiceViewModel settlementRows + hero, both renderers, i18n) · invoice.ts
-  prepaid arm drops the FIFO split (covered 0/0/0, due==grand) · invoiceActions
-  pass p_actor + recordInvoicePayment + applyBalanceToInvoice ·
-  InvoiceDetailModal settlement panel: partial pay, apply balance,
-  void-from-paid, unpay gate, history · CreateTripForm warns, never blocks,
-  when prepaid Available < price.
-- **Era:** invoiceEra() in **lib/invoice-era.ts** — draft/review = ledger, else
-  amount_payable_sar != null. NOT a status test. Was in invoiceActions, BROKE
-  THE BUILD ("use server" exports only async fns). Never async a pure helper to
-  silence it — move it out.
-- **Tests added:** db/invoice-settlement-check (test:db) · invoice-flow-check
-  (test:money) · server-action-export-check.mjs (test:guards, catches the
-  above) · invoice-page-proof (REPORT only, no page baseline exists).
-  npm test + test:db + build GREEN; ledger docs 1pp, download == print.
-- **Batch 3 (NOT touched, deliberate):** Dashboard/Reports receivables and
-  archive returnCustomerBalance still legacy. Then 0204 drops old views/tables
-  + projects.payment_mode (EDIT surface only).
-- **CLOSED:** IBAN (bf3dedd) · 0202 bank export (lib/bank-transfer.ts IS
-  contract) · personName* locale-aware. **Vehicles:** lib/vehicle-groups/
-  -types/capacity/fleet-tabs — never re-derive.
+- **Batch 1 = 48a2f1b, Batch 2 = 6500512. DB at 0204** (applied by Turki to
+  prod + test; the file is still UNTRACKED — stage it with the commit).
+- **PREPAID BATCH 3 BUILT — UNCOMMITTED, awaiting Turki's in-browser pass.**
+  Ten items: merged statement timeline · confirmed-phase panel shows payable
+  vs Available · Add Balance in the ledger popup (AddBalanceForm.tsx, new) ·
+  refund photo · Balance/Remaining under the Trips subtotal ·
+  hide-from-customer · invoices by period_end desc · settlement on print+PDF ·
+  bank_transfer proof everywhere.
+- **Item 1 REDONE.** invoice_payments is a 5th statement source (ranks
+  0/1|2/3/4), recordOnly — only ledger rows advance the run. Safe because
+  0204's money doors are DISJOINT: apply_balance_to_invoice writes only
+  customer_ledger, record_invoice_payment only invoice_payments. No de-dup
+  exists; do not add one. `payments` is LEGACY-ONLY now (amount_payable_sar
+  == null) or a modern invoice prints twice.
+- **0204 law:** confirm moves NO money — freezes amount_payable = grand_total.
+  record_refund is SEVEN args (p_photo_path 5th); the 6-arg one is DROPPED.
+  Its proof guard runs BEFORE the Available cap — a cap test must use cash.
+- **Era:** invoiceEra() in **lib/invoice-era.ts** — NOT a status test.
+- **Gap:** balance returns render as the 0203 refund ledger row.
 - **PARKED:** snapshot-drop STEP 2 (Turki, SQL Editor); leaked-password
-  protection OFF in Auth. **CARRIED:** skills web-design-guidelines +
+  protection OFF. **CARRIED:** skills web-design-guidelines +
   vercel-composition-patterns absent.
 
 ## Rules
+- **NEVER build into .next while dev is up** — it overwrites the running
+  server's cache. Third incident cost a session. `npm run build` now routes
+  through scripts/safe-build.sh and REFUSES; use `npm run build:verify`.
 - CLAUDE.md = rules; aquafleet-domain/SKILL.md = domain rules. NEVER append.
 - Money/migration gate: draft, STOP, architect reviews.
 - Session cap: 15 turns. First compaction = wrap up.

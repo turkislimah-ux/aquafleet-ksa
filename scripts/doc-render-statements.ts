@@ -1,5 +1,6 @@
 // FIXTURE CORPUS for the migrated statements — batch 3's four, batch 4's
-// Cost and Operations, batch 5's P&L, and the payslip sheet (0202). It
+// Cost and Operations, batch 5's P&L, the payslip sheet (0202), and (at the
+// very bottom, outside the language loop) the rebuilt CUSTOMER STATEMENT. It
 // renders every sheet in BOTH
 // languages to a directory, and the tools that judge them read that directory:
 //
@@ -127,6 +128,17 @@ import {
 } from "../lib/reports";
 import type { DriverViolationView, ViolationType } from "../lib/violations";
 import { buildReport, GROUPING_TKEY, type BuilderSelection } from "../lib/report-builder";
+import { round2, type ConsumingTrip } from "../lib/prepaid";
+import { buildStatementHtml } from "../lib/statementPdfTemplate";
+import {
+  buildStatementVm,
+  type StatementChargeInput,
+  type StatementLedgerEntry,
+  type StatementInvoicePaymentInput,
+  type StatementPaymentInput,
+  type StatementTripMeta,
+  type StatementVmInput,
+} from "../lib/statementViewModel";
 import { formatDayKeyLang } from "../lib/utils";
 
 const OUT = process.env.DOC_SHEETS ?? "/tmp/atlas-sheets";
@@ -1662,6 +1674,322 @@ for (const lang of ["en", "ar"] as const) {
   ];
   for (const [name, input] of payslip) write(name, lang, buildPayslipHtml(buildPayslipVm(input)));
 }
+
+// ---------------------------------------------------------------------------
+// CUSTOMER STATEMENT — the merged prepaid sheet
+// ---------------------------------------------------------------------------
+// OUTSIDE THE LANGUAGE LOOP, and that is not an oversight. Every other sheet
+// above is a SINGLE-LANGUAGE document that takes a Lang and renders in it, so
+// it needs one fixture per language. The customer statement is BILINGUAL BY
+// CONSTRUCTION — lib/statementPdfTemplate.ts renders BiLabels, both halves on
+// one sheet — so each fixture here is ONE file. It is named `.ar.html`, which
+// is load-bearing: it carries Arabic text, and scripts/doc-bidi-check.mjs
+// selects the sheets it reads by exactly that suffix. An `.en.html` twin would
+// be byte-identical. Same convention scripts/doc-render-ledger.ts already uses
+// for its two statement fixtures.
+//
+// WHY THE STATEMENT NEEDED ITS OWN FIXTURES AT ALL. The two in
+// doc-render-ledger.ts pin the sheet as it was: ledger rows only. The rebuilt
+// statement merges four sources into one chronological list and prints two
+// CLASSES of row — rows that move the money held on account, and rows that
+// record an event without moving it (a delivered trip, a special charge, a
+// payment made straight against an invoice). Nothing in the corpus rendered a
+// record-only row, its faded carried balance, or the bilingual footnote that
+// tells a reader why the running balance holds flat across it. A pagination or
+// bidi regression on any of those would have shipped unseen.
+//
+// EVERYTHING GOES THROUGH buildStatementVm/buildStatementHtml — exactly what
+// StatementModal prints and downloads. The fixtures hold DATABASE COLUMNS, not
+// sentences.
+
+const STMT_RATE = 1234.5;
+/** VAT-inclusive, the basis consumingItems() prices a delivered trip in and
+ *  the basis v_customer_uninvoiced totals in. 1419.68 — the halala that has to
+ *  survive the round trip to A4. */
+const STMT_RATE_INC = round2(STMT_RATE * 1.15);
+
+const stmtBase: Omit<
+  StatementVmInput,
+  | "ledger"
+  | "balance"
+  | "trips"
+  | "charges"
+  | "payments"
+  | "invoicePayments"
+  | "dateFrom"
+  | "dateTo"
+> = {
+  customerName: "شركة سدر لإدارة المرافق",
+  projectName: "Riyadh North Compound",
+  mode: "prepaid",
+  uninvoicedCount: 2,
+  uninvoicedSar: round2(STMT_RATE_INC * 2),
+  // Prepaid reads no truck metadata — its table has no Truck or Capacity
+  // column. Empty rather than populated so the fixture does not imply it does.
+  tripMetaById: new Map<string, StatementTripMeta>(),
+  projectWaterType: "potable",
+};
+
+/** The view's arithmetic, restated so the FIXTURE is self-consistent the way
+ *  production is: v_customer_ledger_balance owns this sum in production and
+ *  the app never computes it. Only LEDGER rows are summed — a delivered trip
+ *  and an invoice payment are on the sheet and not in this total, which is the
+ *  whole point the footnote explains. */
+const stmtBalance = (rows: StatementLedgerEntry[]) =>
+  round2(rows.reduce((s, e) => s + e.amount_sar, 0));
+
+// --- The busy account: every event kind the statement can print -------------
+// Six ledger types, three delivered trips, two special charges (one of them
+// with a NULL charge_date, exercising the created_at fallback the view-model
+// owns), two invoice payments (one bank transfer with a reference, one cash
+// with neither reference nor payment_date, falling back to paid_at). Dates are
+// interleaved on purpose so the merge has to sort rather than concatenate.
+
+const BUSY_LEDGER: StatementLedgerEntry[] = [
+  { id: "sl-1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000001", invoice_number: null, method: "bank_transfer", reference: "TRF-88120", note: null, created_at: "2026-01-05T09:00:00Z" },
+  { id: "sl-2", entry_type: "invoice_draw", amount_sar: -STMT_RATE_INC, doc_number: null, invoice_number: "026-000004", method: null, reference: null, note: null, created_at: "2026-01-12T08:00:00Z" },
+  { id: "sl-3", entry_type: "balance_applied", amount_sar: -800, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-20T10:00:00Z" },
+  { id: "sl-4", entry_type: "draw_reversal", amount_sar: STMT_RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: "Invoice cancelled", created_at: "2026-02-25T09:30:00Z" },
+  { id: "sl-5", entry_type: "refund", amount_sar: -1500, doc_number: "CN-2026-000001", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-03-20T13:00:00Z" },
+  { id: "sl-6", entry_type: "correction", amount_sar: 250.25, doc_number: null, invoice_number: null, method: null, reference: null, note: "Bank fee reversed", created_at: "2026-03-25T15:00:00Z" },
+];
+
+const BUSY_TRIPS: ConsumingTrip[] = [
+  { id: "st-1", trip_date: "2026-01-11", delivered_at: "2026-01-11T08:20:00Z", rate_sar: STMT_RATE, ref: "K1-026-0001", water_type: "potable" },
+  { id: "st-2", trip_date: "2026-02-14", delivered_at: "2026-02-14T06:05:00Z", rate_sar: STMT_RATE, ref: "K1-026-0002", water_type: "non_potable" },
+  // NO REF — lib/trip-ref.ts renders the words "No ref" on every surface, and
+  // this is the sheet that proves the document prints them too.
+  { id: "st-3", trip_date: "2026-03-09", delivered_at: "2026-03-09T11:40:00Z", rate_sar: STMT_RATE, ref: null, water_type: "potable" },
+];
+
+const BUSY_CHARGES: StatementChargeInput[] = [
+  { id: "sc-1", label: "Tanker cleaning — Riyadh North", amount_sar: 450, charge_date: "2026-02-02", created_at: "2026-02-02T07:00:00Z" },
+  // NULL charge_date: pre-0032 rows carry none, and the view-model falls back
+  // to created_at rather than dropping the row off a dated list.
+  { id: "sc-2", label: "بدل انتظار الصهريج", amount_sar: 275.5, charge_date: null, created_at: "2026-03-18T12:30:00Z" },
+];
+
+const BUSY_PAYMENTS: StatementPaymentInput[] = [
+  // amount_payable_sar NULL on both = the LEGACY era (invoiceEra()'s test, not
+  // a status test). These are pre-0203 invoices, settled on the invoice row
+  // with no payment history to itemise, so the whole document IS the event and
+  // the corpus keeps proving that row renders. The 0204 shape — an invoice
+  // settled in instalments — is a SEPARATE sheet below; putting both on one
+  // fixture would leave neither legible.
+  { id: "sp-1", invoice_number: "026-000004", payment_method: "bank_transfer", payment_reference: "PAY-55012", payment_date: "2026-01-28", paid_at: "2026-01-28T09:00:00Z", grand_total_sar: 4259.03, amount_payable_sar: null },
+  // Cash: Batch 2's pay_invoice() makes reference and date optional, so this
+  // row is dated by paid_at and prints an em dash where a reference would go.
+  { id: "sp-2", invoice_number: "026-000005", payment_method: "cash", payment_reference: null, payment_date: null, paid_at: "2026-03-02T11:15:00Z", grand_total_sar: 1840, amount_payable_sar: null },
+];
+
+write(
+  "statement-merged-busy",
+  "ar",
+  buildStatementHtml(
+    buildStatementVm({
+      ...stmtBase,
+      ledger: BUSY_LEDGER,
+      balance: stmtBalance(BUSY_LEDGER),
+      trips: BUSY_TRIPS,
+      charges: BUSY_CHARGES,
+      invoicePayments: [],
+      payments: BUSY_PAYMENTS,
+      dateFrom: "",
+      dateTo: "",
+    }),
+  ),
+);
+
+// --- A period with nothing in it --------------------------------------------
+// SAME account, SAME four sources — only the window moves. May 2026 holds no
+// event of any kind, so the table falls to its empty state while the header
+// keeps the period field and the headline Balance, which is period-INDEPENDENT
+// by design (a bank statement's current balance does not move because you
+// scrolled to an empty month). The footnote and the uninvoiced line stay: both
+// are notes about the account, not about the window.
+write(
+  "statement-merged-empty-period",
+  "ar",
+  buildStatementHtml(
+    buildStatementVm({
+      ...stmtBase,
+      ledger: BUSY_LEDGER,
+      balance: stmtBalance(BUSY_LEDGER),
+      trips: BUSY_TRIPS,
+      charges: BUSY_CHARGES,
+      invoicePayments: [],
+      payments: BUSY_PAYMENTS,
+      dateFrom: "2026-05-01",
+      dateTo: "2026-05-31",
+    }),
+  ),
+);
+
+// --- LONG-synth: the multi-page case, which is the NORMAL case ---------------
+// Ten months of a real prepaid rhythm — a top-up, then a run of deliveries,
+// then the invoice that bills them and the payment that settles it. Roughly
+// 200 rows, most of them record-only, which is exactly the shape a one-page
+// fixture cannot prove anything about: the carried-balance treatment has to
+// stay readable down nine pages, and the column heads have to repeat on each.
+// Deterministic — no randomness anywhere — so the page count is stable run to
+// run, which is what scripts/doc-page-counts.json pins.
+const LONG_LEDGER: StatementLedgerEntry[] = [];
+const LONG_TRIPS: ConsumingTrip[] = [];
+const LONG_PAYMENTS: StatementPaymentInput[] = [];
+for (let m = 0; m < 10; m++) {
+  const mm = String(m + 1).padStart(2, "0");
+  LONG_LEDGER.push({
+    id: `sll-t${m}`,
+    entry_type: "topup",
+    amount_sar: 30000,
+    doc_number: `RCT-2026-${String(100 + m).padStart(6, "0")}`,
+    invoice_number: null,
+    method: m % 2 === 0 ? "bank_transfer" : "cash",
+    reference: m % 2 === 0 ? `TRF-2026-${9000 + m}` : null,
+    note: null,
+    created_at: `2026-${mm}-01T08:00:00Z`,
+  });
+  for (let d = 0; d < 14; d++) {
+    const day = String(2 + d).padStart(2, "0");
+    LONG_TRIPS.push({
+      id: `sll-tr${m}-${d}`,
+      trip_date: `2026-${mm}-${day}`,
+      delivered_at: `2026-${mm}-${day}T07:30:00Z`,
+      rate_sar: STMT_RATE,
+      ref: `K1-026-${String(m * 14 + d + 1).padStart(4, "0")}`,
+      water_type: d % 3 === 0 ? "non_potable" : "potable",
+    });
+  }
+  // The month closes: balance is applied to the invoice that bills the run,
+  // and the invoice is paid. One moving row and one record-only row, so the
+  // running balance steps once per month against fourteen flat rows.
+  LONG_LEDGER.push({
+    id: `sll-a${m}`,
+    entry_type: "balance_applied",
+    amount_sar: -round2(STMT_RATE_INC * 14),
+    doc_number: null,
+    invoice_number: `026-${String(200 + m).padStart(6, "0")}`,
+    method: null,
+    reference: null,
+    note: null,
+    created_at: `2026-${mm}-27T16:00:00Z`,
+  });
+  LONG_PAYMENTS.push({
+    id: `sll-p${m}`,
+    invoice_number: `026-${String(200 + m).padStart(6, "0")}`,
+    payment_method: m % 2 === 0 ? "bank_transfer" : "cash",
+    payment_reference: m % 2 === 0 ? `PAY-2026-${5500 + m}` : null,
+    payment_date: `2026-${mm}-28`,
+    paid_at: `2026-${mm}-28T10:00:00Z`,
+    grand_total_sar: round2(STMT_RATE_INC * 14),
+    // Legacy, like BUSY_PAYMENTS: this sheet proves PAGINATION down ten
+    // months, and the whole-invoice row is the denser of the two settlement
+    // shapes to break across a page boundary.
+    amount_payable_sar: null,
+  });
+}
+
+write(
+  "statement-merged-LONG-synthetic",
+  "ar",
+  buildStatementHtml(
+    buildStatementVm({
+      ...stmtBase,
+      ledger: LONG_LEDGER,
+      balance: stmtBalance(LONG_LEDGER),
+      trips: LONG_TRIPS,
+      charges: [],
+      invoicePayments: [],
+      payments: LONG_PAYMENTS,
+      dateFrom: "",
+      dateTo: "",
+    }),
+  ),
+);
+
+// --- PARTIAL: one invoice settled in two instalments (the 0204 normal case) --
+// THE SHEET THIS CORPUS WAS MISSING. Under 0204 confirming an invoice moves no
+// money — it freezes the payable and stops — so an invoice is normally settled
+// in instalments, and the statement has to carry each one as its own dated
+// row. Before this sheet the corpus only ever rendered WHOLE paid invoices, so
+// nothing here would have caught a partial-payment row that paginated wrong,
+// lost its Arabic, or (the expensive one) moved the running balance.
+//
+// WHAT IT PROVES ON PAPER, which the parity check cannot:
+//   - two rows against ONE invoice number, on their two different dates, not
+//     one row on the day the last riyal landed;
+//   - each with its own amount, method and reference — a bank transfer with a
+//     reference, then a cash payment with a note, which is the precedence the
+//     Note column applies;
+//   - the Running Balance column FLAT across both of them, with the top-up
+//     between them stepping it, so a reader can see that a payment settles an
+//     invoice and a top-up feeds the balance;
+//   - the closing figure still equal to the headline, in Arabic, on A4.
+//
+// The invoice here is deliberately NOT in BUSY_PAYMENTS: mixing a legacy
+// whole-invoice row and a modern instalment row for the same document is the
+// one thing that must never happen (invoiceEra picks one), and a fixture that
+// did it would print the defect as if it were the spec.
+const PARTIAL_LEDGER: StatementLedgerEntry[] = [
+  { id: "sp-l1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000031", invoice_number: null, method: "bank_transfer", reference: "TRF-2026-4410", note: null, created_at: "2026-04-01T08:00:00Z" },
+  { id: "sp-l2", entry_type: "balance_applied", amount_sar: -5000, doc_number: null, invoice_number: "026-000031", method: null, reference: null, note: null, created_at: "2026-04-05T16:00:00Z" },
+  // The top-up that lands BETWEEN the two instalments. It is here to make the
+  // flat-across-a-payment property visible: the balance moves on this row and
+  // on nothing else in the gap.
+  { id: "sp-l3", entry_type: "topup", amount_sar: 7500, doc_number: "RCT-2026-000032", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-04-16T09:30:00Z" },
+];
+
+const PARTIAL_INVOICE_PAYMENTS: StatementInvoicePaymentInput[] = [
+  {
+    id: "sp-ip1",
+    invoice_id: "sp-inv-31",
+    invoice_number: "026-000031",
+    amount_sar: 3200,
+    method: "bank_transfer",
+    reference: "TRF-88410",
+    paid_on: "2026-04-11",
+    note: null,
+    created_at: "2026-04-11T10:00:00Z",
+  },
+  {
+    id: "sp-ip2",
+    invoice_id: "sp-inv-31",
+    invoice_number: "026-000031",
+    // Arabic note, on purpose: the Note column is the one place a settlement
+    // row carries free text, and RTL text in an otherwise-LTR numeric row is
+    // where bidi breaks if it is going to.
+    amount_sar: 1836.4,
+    method: "cash",
+    reference: null,
+    paid_on: "2026-04-21",
+    note: "سداد الرصيد في الموقع",
+    created_at: "2026-04-21T14:30:00Z",
+  },
+];
+
+const PARTIAL_TRIPS: ConsumingTrip[] = [
+  { id: "sp-tr1", trip_date: "2026-04-03", delivered_at: "2026-04-03T07:30:00Z", rate_sar: STMT_RATE, ref: "K1-026-0301", water_type: "potable" },
+  { id: "sp-tr2", trip_date: "2026-04-18", delivered_at: "2026-04-18T08:10:00Z", rate_sar: STMT_RATE, ref: null, water_type: "non_potable" },
+];
+
+write(
+  "statement-merged-partial-payments",
+  "ar",
+  buildStatementHtml(
+    buildStatementVm({
+      ...stmtBase,
+      ledger: PARTIAL_LEDGER,
+      balance: stmtBalance(PARTIAL_LEDGER),
+      trips: PARTIAL_TRIPS,
+      charges: [],
+      // No legacy whole-invoice rows on this sheet — see the note above.
+      payments: [],
+      invoicePayments: PARTIAL_INVOICE_PAYMENTS,
+      dateFrom: "",
+      dateTo: "",
+    }),
+  ),
+);
 
 for (const f of written) console.log(f);
 console.log(`\n${written.length} sheets written to ${OUT}`);

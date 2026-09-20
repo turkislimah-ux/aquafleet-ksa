@@ -128,5 +128,9 @@
   "revenue-jun-empty.ar": 1,
   "revenue-jun-empty.en": 1,
   "revenue-sep-live.ar": 1,
-  "revenue-sep-live.en": 1
+  "revenue-sep-live.en": 1,
+  "statement-merged-LONG-synthetic.ar": 8,
+  "statement-merged-busy.ar": 1,
+  "statement-merged-empty-period.ar": 1,
+  "statement-merged-partial-payments.ar": 1
 }

@@ -15,6 +15,7 @@ import {
   fetchLedgerCorrections,
   fetchLedgerCorrectionVotes,
   fetchUninvoicedTripCounts,
+  fetchInvoicePaymentsForStatements,
 } from "@/lib/customer-ledger";
 import TripsTabs from "./TripsTabs";
 
@@ -121,6 +122,31 @@ export type PaidInvoiceRow = {
   payment_date: string | null;
   paid_at: string | null;
   grand_total_sar: number;
+  // ERA DISCRIMINATOR, not a figure. lib/statementViewModel.ts renders a whole
+  // paid invoice as a statement row for LEGACY documents only — a ledger-era
+  // invoice is rendered from its own `invoice_payments` rows and its
+  // `balance_applied` ledger rows, and printing both would show it twice. null
+  // means "confirmed before 0203", which is exactly invoiceEra()'s test.
+  amount_payable_sar: number | null;
+};
+
+// Statement rebuild (Batch 4) — EVERY invoice payment, customer-tagged through
+// its parent invoice. THE statement's payment source since 0204: confirm no
+// longer moves money, so an invoice sits at confirmed while instalments arrive
+// against it, and reading whole PAID invoices made every one of those
+// instalments invisible until the last one closed the document out. Void
+// invoices are excluded by the reader.
+export type InvoicePaymentStatementRow = {
+  id: string;
+  invoice_id: string;
+  customer_id: string;
+  invoice_number: string;
+  amount_sar: number;
+  method: InvoicePaymentMethod | null;
+  reference: string | null;
+  paid_on: string | null;
+  note: string | null;
+  created_at: string;
 };
 
 export default async function TripsPage() {
@@ -132,7 +158,8 @@ export default async function TripsPage() {
     assignmentsRes, stationsRes, allStationsRes, leavePeriodsRes,
     terminatedDriversRes, topupsRes, paidInvoicesRes, specialChargesRes,
     ledgerBalancesRes, ledgerUninvoicedRes, ledgerAvailableRes, ledgerEntriesRes,
-    ledgerCorrectionsRes, ledgerVotesRes, uninvoicedCountsRes, companyRes, authRes,
+    ledgerCorrectionsRes, ledgerVotesRes, uninvoicedCountsRes, invoicePaymentsRes,
+    companyRes, authRes,
   ] =
     await Promise.all([
       supabase
@@ -248,7 +275,7 @@ export default async function TripsPage() {
       supabase
         .from("invoices")
         .select(
-          "id, customer_id, invoice_number, payment_method, payment_reference, payment_date, paid_at, grand_total_sar",
+          "id, customer_id, invoice_number, payment_method, payment_reference, payment_date, paid_at, grand_total_sar, amount_payable_sar",
         )
         .eq("status", "paid"),
       // v3 Finance ledger source (2 of 2, with customer_topups above) — every
@@ -270,6 +297,13 @@ export default async function TripsPage() {
       // COUNT of uninvoiced deliveries per customer (the statement footer's
       // "{n} deliveries"); the AMOUNT beside it is always the view's.
       fetchUninvoicedTripCounts(supabase),
+      // EVERY customer's invoice payments — the statement's settlement rows.
+      // Since 0204 confirm moves no money, so a partly-settled invoice is the
+      // NORMAL case and the whole-paid-invoice row alone understates the
+      // account. These render as their own dated rows; they settle an invoice
+      // and never move the held balance, so they do not advance the running
+      // balance column (lib/statementViewModel.ts).
+      fetchInvoicePaymentsForStatements(supabase),
       // Letterhead for the printable RCT/CN sheets — same fetch shape as the
       // invoice sheet's (invoiceActions.ts). maybeSingle: a missing row prints
       // a sheet with no letterhead rather than refusing (lib/docvm/ledgerDoc.ts).
@@ -414,6 +448,28 @@ export default async function TripsPage() {
       paid: c.invoice!.status === "paid",
     }));
 
+  // Same flatten-and-filter shape as the charges above, and for the same two
+  // reasons: the join arrives as an object-or-array depending on how the
+  // planner resolved it, and a payment against a VOID invoice is not an event
+  // on the account the customer can reconcile. customer_id and invoice_number
+  // live on the parent invoice, not on the payment row, so both are lifted
+  // here rather than re-joined at the statement.
+  const invoicePayments: InvoicePaymentStatementRow[] = (invoicePaymentsRes.data ?? [])
+    .map((p) => ({ ...p, invoice: Array.isArray(p.invoice) ? p.invoice[0] ?? null : p.invoice }))
+    .filter((p) => p.invoice != null && p.invoice.status !== "void")
+    .map((p) => ({
+      id: p.id,
+      invoice_id: p.invoice_id,
+      customer_id: p.invoice!.customer_id,
+      invoice_number: p.invoice!.invoice_number,
+      amount_sar: p.amount_sar,
+      method: p.method,
+      reference: p.reference,
+      paid_on: p.paid_on,
+      note: p.note,
+      created_at: p.created_at,
+    }));
+
   // Map project_id -> [driver_id, …] for the Manage-drivers modal + driver count.
   const assignmentsByProject: Record<string, string[]> = {};
   for (const a of (assignmentsRes.data ?? []) as Pick<ProjectDriver, "project_id" | "driver_id">[]) {
@@ -472,7 +528,8 @@ export default async function TripsPage() {
     ledgerEntriesRes.error ||
     ledgerCorrectionsRes.error ||
     ledgerVotesRes.error ||
-    uninvoicedCountsRes.error;
+    uninvoicedCountsRes.error ||
+    invoicePaymentsRes.error;
 
   return (
     <TripsTabs
@@ -500,6 +557,7 @@ export default async function TripsPage() {
       ledgerCorrections={ledgerCorrections}
       ledgerCorrectionVotes={ledgerCorrectionVotes}
       uninvoicedTripCounts={uninvoicedTripCounts}
+      invoicePayments={invoicePayments}
       company={company}
       currentUserEmail={currentUserEmail}
     />

@@ -32,10 +32,17 @@
 // structure it rules out is the pre-fix one, where the charge sat OUTSIDE the
 // services total; a mockup still shows that layout, so this is worth pinning.
 //
-// Case 5 pins the hero figure across the three states that change it, because
+// Case 5 pins the hero figure across the states that change it, because
 // `vm.amountDue === null` is the single predicate standing in for "postpaid OR
 // the hide toggle is on" and a renderer testing status or mode itself would be
-// a fourth place for the rule to live.
+// a fourth place for the rule to live. Since 0204 one of those states is NO
+// HERO AT ALL, which is an absence and therefore pinned from three sides at
+// once — see the "none" arm there for why a bare absence would prove nothing.
+//
+// Case 13 covers the settlement detail 0204 added: what a settled invoice says
+// about HOW it was settled, and the fact that the hide toggle takes that with
+// it. Its fixture's amounts are deliberately odd figures, because the round
+// ones collide with totals elsewhere on the same page.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -281,6 +288,34 @@ const ledgerDraft: PdfInvoiceData = {
   amountPayableSar: null,
 };
 
+// LEDGER-ERA, SETTLED — the 0204 document. confirm_invoice() moved no money,
+// so this invoice rested at `confirmed` while a balance draw and then a bank
+// transfer closed it out. The two events are the new section's whole content:
+// what arrived, by what method, on what date, against what reference, and what
+// is left. Sum of the events is the frozen payable, remainder 0.
+//
+// The settlement events are the ONLY new thing on the page, so this case is
+// what makes §1's token equality say anything about them at all — without it
+// the new section would be rendered by two templates that no test compares.
+const ledgerPrepaidSettled: PdfInvoiceData = {
+  ...ledgerPrepaid,
+  status: "paid",
+  invoiceNumber: "026-000104",
+  paidAt: "2026-07-09",
+  ledgerBalanceSar: 9000,
+  // The three amounts sum to the frozen payable (5,825.00) and are chosen to
+  // be UNLIKE every other figure on the page. Round numbers collide: 2,000.00
+  // is also this fixture's special-charges subtotal, so a "the toggle removed
+  // this amount" assertion written against it would have been failing on a
+  // figure that was never the settlement's to hide.
+  settlementEvents: [
+    { kind: "applied", method: null, date: "2026-07-03", reference: null, amount: 1111.11 },
+    { kind: "payment", method: "bank_transfer", date: "2026-07-07", reference: "TRX-88421", amount: 2222.22 },
+    { kind: "payment", method: "cash", date: "2026-07-09", reference: null, amount: 2491.67 },
+  ],
+  settlementRemainderSar: 0,
+};
+
 const CASES: ReadonlyArray<readonly [string, PdfInvoiceData]> = [
   ["prepaid / confirmed", prepaid],
   ["prepaid / hide amount due", { ...prepaid, hideAmountDue: true }],
@@ -290,6 +325,8 @@ const CASES: ReadonlyArray<readonly [string, PdfInvoiceData]> = [
   ["LEDGER prepaid / confirmed, shortfall", ledgerPrepaid],
   ["LEDGER prepaid / fully covered, paid", ledgerPrepaidCovered],
   ["LEDGER prepaid / hide amount due", { ...ledgerPrepaid, hideAmountDue: true }],
+  ["LEDGER prepaid / settled, two methods", ledgerPrepaidSettled],
+  ["LEDGER prepaid / settled, hide amount due", { ...ledgerPrepaidSettled, hideAmountDue: true }],
   ["LEDGER postpaid / paid", ledgerPostpaid],
   ["LEDGER prepaid / draft", ledgerDraft],
 ];
@@ -408,7 +445,7 @@ async function main() {
   // by each renderer writing its own `vm.amountDue ? … : …`, which is how the
   // sheet and the PDF drifted; it is `vm.hero` now, and this pins what that
   // resolves to from the OUTSIDE — reading the rendered document, not the VM.
-  const heroCases: ReadonlyArray<readonly [string, PdfInvoiceData, "due" | "total" | "payable"]> = [
+  const heroCases: ReadonlyArray<readonly [string, PdfInvoiceData, "due" | "total" | "payable" | "none"]> = [
     ["legacy prepaid, toggle off", prepaid, "due"],
     ["legacy prepaid, toggle ON", { ...prepaid, hideAmountDue: true }, "total"],
     ["legacy postpaid", postpaid, "total"],
@@ -416,22 +453,67 @@ async function main() {
     // is a frozen column — not amountDue, which now equals grand exactly.
     ["LEDGER prepaid, shortfall", ledgerPrepaid, "payable"],
     ["LEDGER prepaid, fully covered", ledgerPrepaidCovered, "payable"],
-    // Toggle ON suppresses the whole balance disclosure, so the hero falls back
-    // to TOTAL — the customer's copy says what the work cost and nothing about
-    // their pool.
-    ["LEDGER prepaid, toggle ON", { ...ledgerPrepaid, hideAmountDue: true }, "total"],
+    // Toggle ON suppresses the whole balance disclosure AND the hero with it.
+    //
+    // THIS LINE PINNED "total" UNTIL 0204, AND THAT WAS THE BUG IT WAS MEANT
+    // TO PREVENT. Since confirm_invoice() freezes amount_payable_sar AT the
+    // grand total, "Amount Payable" and "grand total" are the SAME NUMBER on
+    // this fixture — 15,500.00 either way. So the old assertion watched the
+    // hero move from one caption to another over an unchanged figure and
+    // called that hiding. The customer's copy still named what was owed.
+    //
+    // A hidden document now presents no figure as owed at all. The assertion
+    // is therefore an absence — see the "none" arm below, which pins it from
+    // three sides so it stays as hard to satisfy accidentally as an equality.
+    ["LEDGER prepaid, toggle ON", { ...ledgerPrepaid, hideAmountDue: true }, "none"],
     // Postpaid freezes a payable too (= grand). It must NOT become the hero
     // label: that would rename TOTAL on every postpaid invoice we issue.
     ["LEDGER postpaid", ledgerPostpaid, "total"],
     // Draft: nothing frozen, so nothing to hero but the total.
     ["LEDGER prepaid draft", ledgerDraft, "total"],
   ];
+  const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   for (const [name, data, want] of heroCases) {
     const html = await buildInvoicePrintHtml(data);
+    const pdfHtml = await buildInvoicePdfHtml(data);
     const hero = heroOf(html);
+
+    if (want === "none") {
+      // AN ABSENCE, PINNED FROM THREE SIDES. "No hero" on its own is the
+      // assertion a broken renderer satisfies for free — an exception
+      // swallowed upstream, an empty document, a template that stopped
+      // emitting anything would all pass it. So each side says what must
+      // still be true alongside the absence:
+      //
+      //   1. the hero slot is empty on BOTH renderers, not merely on the one
+      //      that happened to be checked;
+      //   2. the document is still a tax invoice — the Grand Total stack
+      //      prints its figure, because a VAT document's total is not
+      //      something a customer-facing toggle may withhold;
+      //   3. the line tables still print — the trips are itemised, so what
+      //      was hidden is the DEMAND, not the work.
+      check(`${name} — no hero figure on the sheet: ${hero}`, hero === "NO HERO");
+      check(`${name} — no hero figure on the PDF either: ${heroOf(pdfHtml)}`, heroOf(pdfHtml) === "NO HERO");
+      check(
+        `${name} — the Grand Total stack still prints ${money(data.grand.total)}`,
+        html.includes(money(data.grand.total)) && pdfHtml.includes(money(data.grand.total)),
+      );
+      check(
+        `${name} — the trips are still itemised`,
+        html.includes("TR-2026-0101") && pdfHtml.includes("TR-2026-0101"),
+      );
+      // And the caption is gone with the figure: no empty box carrying a word
+      // where a number used to be.
+      check(
+        `${name} — "Amount Payable" appears nowhere on either document`,
+        !/Amount Payable/i.test(html) && !/Amount Payable/i.test(pdfHtml),
+      );
+      continue;
+    }
+
     const wantAmt =
       want === "due" ? data.amountDue.total : want === "payable" ? (data.amountPayableSar ?? -1) : data.grand.total;
-    const shows = hero.includes(wantAmt.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    const shows = hero.includes(money(wantAmt));
     const wantLabel = want === "due" ? "Amount Due" : want === "payable" ? "Amount Payable" : "grand total";
     check(`${name} — hero is the ${wantLabel}: ${hero}`, shows);
     // THE LABEL, not just the figure. On the fully-covered case the payable is
@@ -853,6 +935,68 @@ async function main() {
     check(
       "…and the legacy document still shows them (the scan works)",
       legacyToks.some((s) => /^(Covered|Unpaid)$/i.test(s)),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  console.log("\n=== 13. SETTLEMENT DETAIL — how the invoice was actually met ===");
+  // The 0204 section. The pair in §12 states what the balance covered AT
+  // CONFIRM; this states what happened AFTER — each payment with its method,
+  // date and reference, each balance draw, and what is left.
+  //
+  // IT IS CUSTOMER-FACING, so the hide-amount-due toggle governs it exactly as
+  // it governs the hero. A document that names no amount owed and then lists
+  // three receipts totalling the amount owed would have hidden nothing, which
+  // is the same failure §5's "none" case exists to catch, one section lower.
+  {
+    for (const [name, build] of [
+      ["sheet", buildInvoicePrintHtml],
+      ["PDF", buildInvoicePdfHtml],
+    ] as const) {
+      const shown = await build(ledgerPrepaidSettled);
+      const hidden = await build({ ...ledgerPrepaidSettled, hideAmountDue: true });
+
+      check(`${name} — the section prints`, /How this invoice was settled/.test(shown));
+      check(`${name} — the Arabic half prints`, /كيف سُوِّيت هذه الفاتورة/.test(shown));
+      check(`${name} — the bank reference prints`, shown.includes("TRX-88421"));
+      check(`${name} — the method is named on the payment`, /Payment — Bank transfer/.test(shown));
+      check(`${name} — the cash payment prints its own method`, /Payment — Cash/.test(shown));
+      check(`${name} — the balance draw is named as such`, /Applied from prepaid balance/.test(shown));
+      check(`${name} — every event's date prints`, ["2026-07-03", "2026-07-07", "2026-07-09"].every((d) => shown.includes(d)));
+      check(`${name} — every event's amount prints`, ["1,111.11", "2,222.22", "2,491.67"].every((a) => shown.includes(a)));
+
+      // HIDDEN: the section is gone, and so is every figure it carried — the
+      // three amounts sum to the payable, so leaking any one of them leaks
+      // part of the demand the toggle was set to withhold.
+      check(`${name} — hidden: the section is gone`, !/How this invoice was settled/.test(hidden));
+      check(`${name} — hidden: the reference went with it`, !hidden.includes("TRX-88421"));
+      // Anchored on the left, because a bare `includes("825.00")` also matches
+      // the -8,825.00 in the trips Remaining row — a DIFFERENT figure that has
+      // every right to be there. The lookbehind makes each amount stand alone
+      // rather than merely appear inside a longer number.
+      check(
+        `${name} — hidden: no event amount survives`,
+        !["1,111\\.11", "2,222\\.22", "2,491\\.67"].some((a) => new RegExp(`(?<![\\d,])${a}`).test(hidden)),
+      );
+      // …while the document is still an invoice.
+      check(`${name} — hidden: the Grand Total stack still prints`, hidden.includes("17,825.00"));
+      check(`${name} — hidden: the trips are still itemised`, hidden.includes("TR-2026-0101"));
+    }
+
+    // INVERTED — an invoice with NO settlement activity prints no section at
+    // all, so the checks above are reading a section that is genuinely
+    // conditional rather than one that is always there.
+    const noEvents = await buildInvoicePrintHtml(ledgerPrepaid);
+    check("an invoice with no settlement activity prints no section", !/How this invoice was settled/.test(noEvents));
+    // …and a LEGACY invoice never gets one, whatever it carries.
+    const legacyWithEvents = await buildInvoicePrintHtml({
+      ...prepaid,
+      settlementEvents: ledgerPrepaidSettled.settlementEvents,
+      settlementRemainderSar: 0,
+    });
+    check(
+      "a legacy invoice prints no settlement section even when handed events",
+      !/How this invoice was settled/.test(legacyWithEvents),
     );
   }
 

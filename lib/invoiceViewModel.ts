@@ -89,6 +89,28 @@ export type PdfTotals = { subtotal: number; vat: number; total: number };
  */
 export type PdfTripTotals = { covered: number; unpaid: number };
 
+/**
+ * ONE THING THAT SETTLED THIS INVOICE — a payment received, or a draw against
+ * the customer's prepaid balance. Two sources, one shape, because the customer
+ * reading the document cares in what order money arrived and by what route, not
+ * which table it landed in.
+ *
+ *   "payment" — an `invoice_payments` row. `method` is always set; `reference`
+ *               and `date` are mandatory for a bank transfer and optional for
+ *               cash, which is exactly why they are nullable here.
+ *   "applied" — a `customer_ledger` row with `entry_type = 'balance_applied'`.
+ *               It has no method and no reference: the route IS the balance.
+ *
+ * `amount` is POSITIVE in both arms — see `PdfInvoiceData.settlementEvents`.
+ */
+export type PdfSettlementEvent = {
+  kind: "payment" | "applied";
+  method: InvoicePaymentMethod | null;
+  date: string | null; // yyyy-mm-dd
+  reference: string | null;
+  amount: number;
+};
+
 export type PdfIdentity = {
   name: string | null; // legal_name (seller) or name (buyer)
   name_ar?: string | null; // company name (Arabic) — populated for BOTH parties
@@ -187,6 +209,48 @@ export type PdfInvoiceData = {
    */
   amountPayableSar: number | null;
   /**
+   * THE CUSTOMER'S CURRENT LEDGER BALANCE, in riyals —
+   * `v_customer_available.balance_sar`, read through
+   * `fetchCustomerAvailable`. Ledger era only; `null` on a legacy row and
+   * whenever the read failed.
+   *
+   * NOT `paidUpBalanceSar`. That is the pre-0203 expression with its own
+   * frozen-at-paid_at semantics, and the two numbers disagree on the same
+   * customer by design. They are carried side by side because each document era
+   * prints its own, and collapsing them would silently restate one era's figure
+   * under the other era's law.
+   *
+   * Feeds the Balance / Remaining pair under the ledger-era Trips subtotal and
+   * nothing else. Display arithmetic only — see `VmTableFoot`.
+   *
+   * OPTIONAL, like `tripTotals` beside it, so a caller that never reads the
+   * ledger (the flow and page-proof harnesses) stays valid. Absent is treated
+   * as null: the row prints its unreadable note, never a fabricated 0.
+   */
+  ledgerBalanceSar?: number | null;
+  /**
+   * SETTLEMENT ACTIVITY on this invoice, oldest first: every recorded payment
+   * (`invoice_payments`) and every balance draw (`customer_ledger` rows with
+   * `entry_type = 'balance_applied'`), already merged and sorted by the caller.
+   *
+   * `[]` means "no activity", which is a real and common answer on a freshly
+   * confirmed invoice; the section simply does not print. Amounts are POSITIVE
+   * here — each one is money that settled the invoice — and the ledger's own
+   * negative sign is stripped at assembly, because a list of settlements is not
+   * a list of ledger movements and printing a minus in it reads as a reversal.
+   *
+   * OPTIONAL for the same reason as `ledgerBalanceSar`; absent means `[]`.
+   */
+  settlementEvents?: PdfSettlementEvent[];
+  /**
+   * WHAT IS STILL OUTSTANDING — `v_invoice_settlement.remainder_sar`. The
+   * closing figure of the settlement section, so the reader is never left to
+   * subtract a column of their own. `null` alongside `amountPayableSar`: a
+   * draft has nothing to settle, a legacy row settles under the old flow. With
+   * no remainder to close on there is no section, even if events exist.
+   */
+  settlementRemainderSar?: number | null;
+  /**
    * RAW jsonb off the seller row — `company_settings.bank_accounts` for a
    * draft, `seller_snapshot.bank_accounts` for an issued invoice. `unknown`
    * because migration 0184's CHECK guarantees an array of at most 3 and
@@ -247,10 +311,17 @@ export type VmChargeRow = {
  * table's Remaining seeded the unpaid table's balance — computed from frozen
  * `*_ledger_balance_sar` columns. That mechanism produced a figure the
  * statement, the Finance KPI and the over-balance banner all disagreed with,
- * and it is NOT coming back. The rows are now fed by the PAID-UP BALANCE, the
- * one shared expression (lib/prepaid.ts, reached through
- * invoiceActions' `loadPaidUpBalance`), handed in as `PdfInvoiceData.
- * paidUpBalanceSar`. Same three rows on the page, one honest number behind them.
+ * and it is NOT coming back.
+ *
+ * WHICH honest figure feeds it depends on the era, which is why the caption
+ * travels with it as `balanceLabel` instead of being picked by the renderer:
+ *   legacy — the PAID-UP BALANCE (lib/prepaid.ts, via invoiceActions'
+ *            `loadPaidUpBalance`), handed in as `paidUpBalanceSar`. As issued.
+ *   ledger — the LEDGER BALANCE, `v_customer_available.balance_sar`, handed in
+ *            as `ledgerBalanceSar`. The same column the Finance tab reads.
+ * They are different numbers on the same customer, so they cannot share a
+ * caption: "Paid-up balance" over the ledger figure would be a wrong name on a
+ * legal document, the mistake `paidUpBalance`'s own dictionary note records.
  *
  * `balance` is a UNION, not a nullable number, for the same reason it is one
  * upstream: "the read failed" and "the balance is zero" are different content
@@ -259,7 +330,7 @@ export type VmChargeRow = {
  *
  * `remaining` is `balance − subtotal` for THIS table, and null exactly when the
  * balance is unreadable (nothing to subtract from). NOT chained across tables:
- * both prepaid tables carry the same balance figure.
+ * every prepaid table carries the same balance figure, never the one above it.
  */
 export type VmTableFoot =
   | {
@@ -267,6 +338,7 @@ export type VmTableFoot =
       preVat: number;
       vat: number;
       subtotal: number;
+      balanceLabel: BiLabel;
       balance: { amount: number } | { note: BiLabel };
       remaining: number | null;
     }
@@ -305,6 +377,45 @@ export type VmChargesSection = {
 export type VmSection = VmTripSection | VmChargesSection;
 
 export type VmTotalRow = { label: BiLabel; amount: number };
+
+/** One settled amount, already worded. See `VmSettlementDetail`. */
+export type VmSettlementDetailRow = {
+  key: string;
+  /** yyyy-mm-dd, or null when the payment carried no date (cash may not). */
+  date: string | null;
+  /** "Payment — Bank transfer" / "Balance applied", resolved in both columns. */
+  description: BiLabel;
+  /** The bank reference. Null on cash and on every balance draw. */
+  reference: string | null;
+  amount: number;
+};
+
+/**
+ * HOW THIS INVOICE WAS SETTLED — a dated list of payments and balance draws,
+ * closing on what is still outstanding.
+ *
+ * `null` when there is nothing to say: any era but ledger, any mode but
+ * prepaid, an invoice with no settlement activity yet, or a document whose
+ * hero is hidden. That last one is not an optimisation — this section names
+ * amounts against this invoice, so it is a balance disclosure of the same kind
+ * the hide-from-customer toggle exists to suppress, and it goes when the hero
+ * goes.
+ *
+ * The ROWS are pre-worded and the REMAINDER is the view's own
+ * `remainder_sar` — nothing here subtracts a column to reach it, so a document
+ * that lists a partial payment and a partial draw still closes on the figure
+ * the database would answer with.
+ */
+export type VmSettlementDetail = {
+  title: BiLabel;
+  rows: VmSettlementDetailRow[];
+  colDate: BiLabel;
+  colDescription: BiLabel;
+  colReference: BiLabel;
+  colAmount: BiLabel;
+  remainderLabel: BiLabel;
+  remainder: number;
+};
 
 /**
  * One printable account. `ibanDisplay` is pre-grouped (`SA03 8000 …`) because
@@ -390,8 +501,10 @@ export type InvoiceVm = {
    *
    * Empty when `hideAmountDue` is on: that toggle is how an operator keeps the
    * customer's balance off the customer's copy, and on a ledger-era invoice
-   * these two rows ARE the balance disclosure. The hero falls back to Grand
-   * Total when they go — see `heroIsGrandTotal`.
+   * these two rows ARE the balance disclosure. The hero goes with them — see
+   * `hero`, which is null in exactly that case; it does NOT fall back to Grand
+   * Total, because since 0204 Grand Total and Amount Payable are one number and
+   * falling back would have hidden nothing at all.
    */
   settlementRows: VmTotalRow[];
   /**
@@ -401,16 +514,34 @@ export type InvoiceVm = {
    *
    * Ledger-era prepaid with settlement shown → Amount Payable. Everything else
    * → Grand Total.
+   *
+   * NULL means PRINT NO BOX AT ALL — the hide-from-customer toggle on a
+   * ledger-era invoice, and nothing else. A renderer must omit the whole hero
+   * block when this is null: no empty bordered card, no separator rule left
+   * hanging above nothing. The panel above it still prints, so the document
+   * keeps its Total VAT and its Grand Total row and simply names no figure as
+   * owed. See the `hideHero` comment in the builder for why suppressing the
+   * settlement pair alone stopped being enough at 0204.
    */
-  hero: { label: BiLabel; amount: number };
+  hero: { label: BiLabel; amount: number } | null;
   /**
    * Whether `hero` IS the Grand Total. When true a renderer must NOT print a
    * separate Grand Total row above the hero — it would be the same number
    * twice, which is the bug the old `vm.amountDue ?` conditional existed to
    * avoid. When false, print the Grand Total row; the hero is a different
    * figure.
+   *
+   * FALSE whenever `hero` is null, so a hidden hero leaves the Grand Total row
+   * standing in the panel. Suppressing both would leave a document whose
+   * totals stop at the VAT line.
    */
   heroIsGrandTotal: boolean;
+  /**
+   * The payments-and-draws list, printed AFTER the hero — it explains how the
+   * figure above it got where it is, so it cannot come before it. `null` on
+   * every document that has nothing to list; see `VmSettlementDetail`.
+   */
+  settlementDetail: VmSettlementDetail | null;
   // NO top-level balance field, deliberately: the balance belongs to a table
   // foot, so it travels inside `VmTableFoot`'s "ledger" arm and nowhere else.
   /** Labels the renderer needs that are not attached to a section. */
@@ -442,14 +573,16 @@ export type InvoiceVm = {
     colStatus: BiLabel;
     subtotal: BiLabel;
     /**
-     * The prepaid footer's balance row. `runningBalance` ("Running Balance")
-     * stood here and is deliberately NOT restored with the row it labelled: the
-     * row's position is the original one, but the figure in it is the PAID-UP
-     * BALANCE, not the chained per-invoice running balance that name described.
-     * Naming it "Running Balance" would put a wrong name on a legal document —
-     * the layout is restorable, the old caption is not.
+     * The prepaid footer's THIRD row. The balance row above it has no label
+     * here any more: it moved onto the foot itself as
+     * `VmTableFoot.balanceLabel`, because the two eras put two different
+     * figures in that slot and a document-level label could only name one of
+     * them. `runningBalance` ("Running Balance") is still NOT the caption of
+     * either — the layout was restorable, the old name was not.
+     *
+     * "Remaining" stays here: it means the same thing in both eras, balance
+     * minus this table's subtotal, whichever balance it was.
      */
-    paidUpBalance: BiLabel;
     remaining: BiLabel;
     /**
      * TEMPLATES, handed over UNFILLED (`{net}` / `{vat}` placeholders intact).
@@ -633,21 +766,43 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
     // amount decided at confirm, and it is reported under the totals as
     // Prepaid Applied / Amount Payable.
     //
-    // No paid-up balance foot either. That three-row foot (Subtotal / balance /
-    // Remaining) answered "what is left of the pool after this table" — a
-    // question the ledger answers properly on the Finance tab, against the
-    // authoritative view, instead of re-stating a moving figure on a frozen
-    // document. `paidUpBalanceSar` is still carried for the legacy branch
-    // below and is deliberately unread here.
+    // The three-row foot (Subtotal / Balance / Remaining) IS printed, and it is
+    // fed by the ledger, not by the pre-0203 paid-up expression. The row that
+    // was removed at 0203 came off `paidUpBalanceSar`, a figure the statement
+    // and the Finance KPI disagreed with; `ledgerBalanceSar` is
+    // `v_customer_available.balance_sar`, the same column the Finance tab reads,
+    // so the question "what is left of the pool after this table" now has one
+    // answer everywhere it is asked. `paidUpBalanceSar` is still carried for the
+    // legacy branch below and is deliberately unread here.
+    //
+    // Remaining is `balance − this table's own VAT-inclusive subtotal` and
+    // NOTHING ELSE. It is display arithmetic on two decided figures and it does
+    // NOT chain: if a second table ever joins this branch it gets the same
+    // balance, never this table's remainder. Chaining is the deleted mechanism.
     const tripLines = data.unpaidLines;
     const tripT = netAndVat(tripLines);
+
+    // A failed read and a zero balance are different content, so the slot is a
+    // union and carries the explicit note rather than a fabricated 0.
+    const ledgerBalanceRow: { amount: number } | { note: BiLabel } =
+      data.ledgerBalanceSar != null
+        ? { amount: data.ledgerBalanceSar }
+        : { note: bi("trips.invoiceSheet.paidUpUnavailable") };
 
     sections.push({
       kind: "trips",
       title: bi("trips.invoiceSheet.tTrips"),
       emptyLabel: bi("trips.invoiceSheet.emptyTrips"),
       rows: toTripRows(groupInvoiceLines(tripLines, wt)),
-      foot: { style: "subtotal", preVat: tripT.preVat, vat: tripT.vat, total: tripT.total },
+      foot: {
+        style: "ledger",
+        preVat: tripT.preVat,
+        vat: tripT.vat,
+        subtotal: tripT.total,
+        balanceLabel: bi("trips.invoiceSheet.ledgerBalance"),
+        balance: ledgerBalanceRow,
+        remaining: data.ledgerBalanceSar == null ? null : round2(data.ledgerBalanceSar - tripT.total),
+      },
     });
 
     if (data.chargeLines.length > 0) {
@@ -737,6 +892,7 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
         preVat: coveredPreVat,
         vat: round2(coveredTripsTotal - coveredPreVat),
         subtotal: coveredTripsTotal,
+        balanceLabel: bi("trips.invoiceSheet.paidUpBalance"),
         balance: balanceRow,
         remaining: remainingAfter(coveredTripsTotal),
       },
@@ -758,6 +914,7 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
           preVat: unpaidPreVat,
           vat: round2(unpaidTripsTotal - unpaidPreVat),
           subtotal: unpaidTripsTotal,
+          balanceLabel: bi("trips.invoiceSheet.paidUpBalance"),
           balance: balanceRow,
           remaining: remainingAfter(unpaidTripsTotal),
         },
@@ -925,15 +1082,100 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
       ]
     : [];
 
+  // HIDE-FROM-CUSTOMER, LEDGER ERA: no hero at all.
+  //
+  // Dropping the settlement pair used to be the whole of this toggle's effect,
+  // and until 0204 that was enough: confirm_invoice() drew the customer's
+  // balance down at confirm, so Amount Payable was genuinely smaller than Grand
+  // Total and hiding the pair hid a real disclosure. Since 0204 confirm moves
+  // no money — it freezes `amount_payable_sar = grand_total` — so the two are
+  // THE SAME NUMBER, the hero silently fell through to Grand Total, and the
+  // toggle changed a caption while hiding nothing.
+  //
+  // So on a ledger-era prepaid invoice the toggle now removes the figure
+  // itself. The document still prints every line table and the whole Grand
+  // Total stack — the customer must still be able to read what was delivered
+  // and what it came to — but nothing on it is presented AS OWED.
+  //
+  // Legacy is deliberately excluded. There Amount Due is a different figure
+  // from Grand Total, dropping the card still removes a real disclosure, and
+  // that document renders as it was issued (freeze law 0027).
+  const hideHero = isLedger && isPrepaid && data.hideAmountDue;
+
   // ONE decision, made here, for every surface. `amountDue` survives only for
   // legacy prepaid documents, which is the one era that still has a due figure
   // distinct from its grand total.
-  const hero: { label: BiLabel; amount: number } = showSettlement
-    ? { label: bi("trips.invoiceSheet.amountPayable"), amount: data.amountPayableSar ?? 0 }
-    : amountDue
-      ? { label: bi("trips.invoiceSheet.amountDue"), amount: amountDue.totals.total }
-      : { label: bi("trips.invoiceSheet.grandTotal"), amount: data.grand.total };
-  const heroIsGrandTotal = !showSettlement && amountDue == null;
+  const hero: { label: BiLabel; amount: number } | null = hideHero
+    ? null
+    : showSettlement
+      ? { label: bi("trips.invoiceSheet.amountPayable"), amount: data.amountPayableSar ?? 0 }
+      : amountDue
+        ? { label: bi("trips.invoiceSheet.amountDue"), amount: amountDue.totals.total }
+        : { label: bi("trips.invoiceSheet.grandTotal"), amount: data.grand.total };
+  // `hero != null` first: with no hero there is no duplicate to avoid, and the
+  // Grand Total row has to stay or the panel ends on its VAT line.
+  const heroIsGrandTotal = hero != null && !showSettlement && amountDue == null;
+
+  // --- How this invoice was settled ----------------------------------------
+  // A dated list of every payment received and every draw against the
+  // customer's balance, closing on what is still outstanding. It exists
+  // because since 0204 a prepaid invoice RESTS at Confirmed and settles
+  // afterwards, in pieces: the customer can receive the same document twice
+  // with different amounts behind it, and a single Amount Payable line cannot
+  // tell them which payment of theirs landed.
+  //
+  // Same four gates as the settlement pair, plus one more: `hideHero`. This
+  // section names amounts owed and paid against this invoice, so it is the
+  // same disclosure the toggle exists to suppress and it goes when the hero
+  // goes. Without that gate the toggle would hide a figure and then print a
+  // table that adds up to it.
+  //
+  // The remainder is the VIEW's own `remainder_sar`, not a subtraction over
+  // the rows above it. Those rows are what the customer needs to recognise
+  // their own payments; the closing figure is what the database would answer.
+  const settlementEvents = data.settlementEvents ?? [];
+  const settlementDetail: VmSettlementDetail | null =
+    isLedger &&
+    isPrepaid &&
+    !hideHero &&
+    data.settlementRemainderSar != null &&
+    settlementEvents.length > 0
+      ? {
+          title: bi("trips.invoiceSheet.seTitle"),
+          rows: settlementEvents.map((e, i) => ({
+            // The index is the key: two cash payments of the same amount on the
+            // same day are two real events, and keying on their content would
+            // silently collapse them into one row.
+            key: `${e.kind}-${i}`,
+            date: e.date ? e.date.slice(0, 10) : null,
+            // Filled per language, not through `biFill`: the substituted value
+            // is itself a translated word, and `biFill` fills both columns from
+            // one set of values — which would drop "Bank transfer" into the
+            // Arabic sentence. Same shape the notice block above uses.
+            description:
+              e.kind === "applied"
+                ? bi("trips.invoiceSheet.seBalanceApplied")
+                : e.method
+                  ? {
+                      en: fill(t("trips.invoiceSheet.sePaymentVia", "en"), {
+                        method: paymentMethodLabel(e.method, "en"),
+                      }),
+                      ar: fill(t("trips.invoiceSheet.sePaymentVia", "ar"), {
+                        method: paymentMethodLabel(e.method, "ar"),
+                      }),
+                    }
+                  : bi("trips.invoiceSheet.sePayment"),
+            reference: e.reference,
+            amount: e.amount,
+          })),
+          colDate: bi("common.date"),
+          colDescription: bi("trips.invoiceSheet.colDescription"),
+          colReference: bi("trips.invoiceSheet.seColReference"),
+          colAmount: bi("common.amount"),
+          remainderLabel: bi("trips.invoiceSheet.sRemainder"),
+          remainder: data.settlementRemainderSar,
+        }
+      : null;
 
   return {
     status: data.status,
@@ -959,6 +1201,7 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
     settlementRows,
     hero,
     heroIsGrandTotal,
+    settlementDetail,
     labels: {
       // The ZATCA-mandated document title. Download-only — the sheet's own
       // headline is `Invoice #{n}`, a different string for a different surface,
@@ -989,7 +1232,6 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
       colAmount: bi("common.amount"),
       colStatus: bi("common.status"),
       subtotal: bi("trips.invoiceSheet.subtotal"),
-      paidUpBalance: bi("trips.invoiceSheet.paidUpBalance"),
       remaining: bi("trips.invoiceSheet.remaining"),
       // UNFILLED templates — see the type. `fillBi` substitutes downstream.
       vatSplit: bi("trips.invoiceSheet.vatSplit"),

@@ -2,8 +2,9 @@
 
 // Add Balance (formerly "top-up") — Batch B restructure. Reworked to match
 // the invoice pattern (InvoicesModal's list + InvoiceDetailModal's Mark-Paid
-// form), both folded into one file since neither view is reused elsewhere or
-// carries invoice-level complexity:
+// form). The LIST is still folded in here, because nothing else shows this
+// customer's top-up history; the FORM is not, because the ledger popup shows
+// the same one (see below):
 //   - Opened from a customer row: shows that customer's balance-addition
 //     HISTORY first (date/method/ref/amount, most recent first), with an
 //     "Add Balance" button in the corner that switches to the input form.
@@ -11,28 +12,25 @@
 //     to show history for yet, so this skips straight to the form (which
 //     still has the customer picker, same as before this batch).
 //
-// The form's cash/bank_transfer choice drives which fields are REQUIRED
-// (ETF ref + photo required for bank_transfer), mirroring
-// app/trips/InvoiceDetailModal.tsx's postpaid Mark-Paid form — but per the
-// Batch B follow-up, both fields are shown (and optionally fillable) for
-// cash too: cash can still be bank-deposited and carry an ETF ref + slip.
-// Calls the restructured recordTopup server action (lib/actions/finance.ts,
-// migration 0040) — same FormData-with-file convention as markInvoicePaid.
+// THE FORM BODY ITSELF NO LONGER LIVES HERE. The fields, the
+// cash/bank_transfer required-flip (ETF ref + photo required for
+// bank_transfer, both still offered for cash), the submit gate and the
+// recordTopup call moved to ./AddBalanceForm so the Customer Ledger popup can
+// offer the same top-up without a second copy of it. This file keeps the
+// shell: the three views, the history table and the receipt.
 // Photo viewing (history rows) uses getTopupProofSignedUrl, mirroring
 // InvoiceDetailModal's getProofSignedUrl.
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { X, Plus, Printer, Image as ImageIcon } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
-import { formatSar, todayKey } from "@/lib/utils";
+import { formatSar } from "@/lib/utils";
 import {
-  recordTopup,
   getTopupProofSignedUrl,
   getLedgerPhotoSignedUrl,
   type LedgerDocResult,
 } from "@/lib/actions/finance";
-import { prepareUploadFiles } from "@/lib/upload-image";
+import AddBalanceForm, { type AddBalanceCustomerOption } from "./AddBalanceForm";
 // The printable RCT sheet (0203) — view-model decides the words, docs kit the
 // look, printHtml the iframe. Same trio every other document print uses.
 import { buildLedgerDocVm } from "@/lib/docvm/ledgerDoc";
@@ -46,11 +44,10 @@ import { t, fill } from "@/lib/i18n";
 // `db-types`'s own label map is not imported and not edited.
 import { paymentMethodLabel } from "@/lib/enum-labels";
 
-const INPUT =
-  "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
-const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
-
-export type AddBalanceCustomerOption = { id: string; name: string };
+// The customer-option shape is DECLARED by the form (./AddBalanceForm, which
+// is what takes it) and re-exported here so the callers that have always
+// imported it from this module keep working.
+export type { AddBalanceCustomerOption };
 
 // One history row from EITHER era, tagged by source: "legacy" rows are
 // customer_topups (pre-0203, photos behind getTopupProofSignedUrl, no receipt
@@ -88,53 +85,30 @@ export default function AddBalanceModal({
   history: AddBalanceHistoryRow[];
   company: CompanySettings | null;
 }) {
-  const router = useRouter();
   const { lang } = useApp();
   // "done" (new, 0203): the moment record_topup returns, the receipt number
   // exists — this view says so and offers the print before anything closes.
   const [view, setView] = useState<"list" | "form" | "done">("form");
   const [receipt, setReceipt] = useState<LedgerDocResult | null>(null);
-
-  const [customerId, setCustomerId] = useState("");
-  const [method, setMethod] = useState<"" | "cash" | "bank_transfer">("");
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(todayKey());
-  const [note, setNote] = useState("");
-  const [reference, setReference] = useState("");
-  // The PREPARED file (image → WebP, compressed; PDF/other untouched), not the
-  // raw pick — the raw bytes never leave the browser. photoKey remounts the
-  // input when a pick is rejected, so the same file can be re-picked.
-  const [photo, setPhoto] = useState<File | null>(null);
-  const [photoKey, setPhotoKey] = useState(0);
+  // The name the receipt prints under. The RPC's returned row carries no
+  // customer name, and the picked customer is the form's state now, so the
+  // form hands the name over with the row.
+  const [receiptName, setReceiptName] = useState("");
+  // Owned by the form, mirrored here because THIS shell is what refuses to
+  // close mid-save.
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset on every open — fresh state each time, seeded with the fixed
-  // customer (if any), today's date, and the right starting view.
+  // Reset on every open — the right starting view and no stale receipt or
+  // photo-link error. The FIELDS reset themselves: the form below mounts
+  // fresh whenever this view changes or the fixed customer does.
   useEffect(() => {
     if (!open) return;
     setView(fixedCustomer ? "list" : "form");
-    setCustomerId(fixedCustomer?.id ?? "");
-    setMethod("");
-    setAmount("");
-    setDate(todayKey());
-    setNote("");
-    setReference("");
-    setPhoto(null);
-    setPhotoKey((k) => k + 1);
     setError(null);
     setReceipt(null);
+    setReceiptName("");
   }, [open, fixedCustomer]);
-
-  const canSubmit =
-    customerId !== "" &&
-    Number(amount) > 0 &&
-    date !== "" &&
-    method !== "" &&
-    // ETF ref + photo are only REQUIRED for bank_transfer — cash may carry
-    // them optionally (cash can still be bank-deposited) but isn't blocked
-    // without them.
-    (method === "cash" || (reference.trim() !== "" && photo !== null));
 
   function close() {
     if (saving) return;
@@ -164,13 +138,12 @@ export default function AddBalanceModal({
   // signed amount is presented via Math.abs inside the VM builder.
   function onPrintReceipt() {
     if (!receipt) return;
-    const name = fixedCustomer?.name ?? customers.find((c) => c.id === customerId)?.name ?? "";
     const vm = buildLedgerDocVm({
       lang,
       generatedAt: new Date(),
       kind: "topup",
       docNumber: receipt.docNumber,
-      customerName: name,
+      customerName: receiptName,
       amountSar: receipt.amountSar,
       method: receipt.method,
       reference: receipt.reference,
@@ -182,57 +155,12 @@ export default function AddBalanceModal({
     printHtml(buildLedgerDocHtml(vm));
   }
 
+  // Only the view (and the list's own error) is cleared here — the form's
+  // fields come back blank on their own, because leaving "list" mounts a new
+  // one.
   function openForm() {
-    setCustomerId(fixedCustomer?.id ?? "");
-    setMethod("");
-    setAmount("");
-    setDate(todayKey());
-    setNote("");
-    setReference("");
-    setPhoto(null);
-    setPhotoKey((k) => k + 1);
     setError(null);
     setView("form");
-  }
-
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!canSubmit) {
-      setError(t("trips.addBalance.errIncomplete", lang));
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    const form = new FormData(e.currentTarget);
-    form.set("customerId", customerId);
-    form.set("amountSar", amount);
-    form.set("topupDate", date);
-    // Sent as-entered for BOTH methods now — cash keeps whatever ETF ref it
-    // was given instead of being blanked (Batch B follow-up).
-    form.set("reference", reference);
-    // The PREPARED file replaces the input's own raw-bytes entry — what
-    // uploads is exactly what the state (and the gates) saw.
-    if (photo) form.set("photoFile", photo);
-    else form.delete("photoFile");
-    // try/catch: a network drop mid-await otherwise leaves the button stuck
-    // on busy with no message — the finally owns the busy flag now.
-    try {
-      const res = await recordTopup(form);
-      if (res.error || !res.data) {
-        setError(res.error ?? t("shared.upload.saveFailedNetwork", lang));
-        return;
-      }
-      // The receipt number exists the moment record_topup returns — show it
-      // and offer the print BEFORE anything closes (0203 done view). The
-      // refresh runs now so the history list is current when dismissed.
-      setReceipt(res.data);
-      setView("done");
-      router.refresh();
-    } catch {
-      setError(t("shared.upload.saveFailedNetwork", lang));
-    } finally {
-      setSaving(false);
-    }
   }
 
   if (!open) return null;
@@ -362,171 +290,20 @@ export default function AddBalanceModal({
               {t("trips.addBalance.formSubtitle", lang)}
             </p>
 
-            <form onSubmit={onSubmit} className="space-y-4">
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">{t("common.customer", lang)} *</span>
-                {fixedCustomer ? (
-                  <div className={INPUT + " bg-black/[0.03] dark:bg-white/[0.04]"} style={INPUT_STYLE}>
-                    {fixedCustomer.name}
-                  </div>
-                ) : (
-                  <select
-                    value={customerId}
-                    onChange={(e) => setCustomerId(e.target.value)}
-                    required
-                    className={INPUT}
-                    style={INPUT_STYLE}
-                  >
-                    <option value="">{t("trips.addBalance.selectCustomer", lang)}</option>
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </label>
-
-              {/* Cash / Bank Transfer choice — mirrors InvoiceDetailModal's
-                  postpaid Mark-Paid form. Drives which fields below are
-                  required, same "flip on method" rule. */}
-              <div className="flex items-center gap-4 text-sm">
-                <label className="flex items-center gap-1.5">
-                  <input
-                    type="radio"
-                    name="method"
-                    value="cash"
-                    checked={method === "cash"}
-                    onChange={() => setMethod("cash")}
-                  />
-                  {t("labels.payCash", lang)}
-                </label>
-                <label className="flex items-center gap-1.5">
-                  <input
-                    type="radio"
-                    name="method"
-                    value="bank_transfer"
-                    checked={method === "bank_transfer"}
-                    onChange={() => setMethod("bank_transfer")}
-                  />
-                  {t("labels.payBankTransfer", lang)}
-                </label>
-              </div>
-
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">{t("trips.addBalance.fAmount", lang)} *</span>
-                <input
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  type="number"
-                  min="0"
-                  step="any"
-                  required
-                  className={INPUT}
-                  style={INPUT_STYLE}
-                  placeholder={t("trips.addBalance.amountPlaceholder", lang)}
-                />
-              </label>
-
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">{t("common.date", lang)} *</span>
-                <input
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  type="date"
-                  required
-                  className={INPUT}
-                  style={INPUT_STYLE}
-                />
-              </label>
-
-              {/* Both fields shown for EITHER method — cash can still be
-                  bank-deposited and carry an ETF ref + slip. Only
-                  bank_transfer makes them required (asterisk + `required`
-                  flip on method, same rule as before, just no longer hides
-                  the fields for cash). */}
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">
-                  {t("trips.addBalance.fEtfRef", lang)}
-                  {method === "bank_transfer"
-                    ? t("trips.addBalance.suffixRequired", lang)
-                    : t("trips.addBalance.suffixOptional", lang)}
-                </span>
-                <input
-                  value={reference}
-                  onChange={(e) => setReference(e.target.value)}
-                  required={method === "bank_transfer"}
-                  className={INPUT}
-                  style={INPUT_STYLE}
-                  placeholder={t("trips.addBalance.refPlaceholder", lang)}
-                />
-              </label>
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">
-                  {t("trips.addBalance.fPhoto", lang)}
-                  {method === "bank_transfer"
-                    ? t("trips.addBalance.suffixPhotoRequired", lang)
-                    : t("trips.addBalance.suffixOptional", lang)}
-                </span>
-                <input
-                  key={photoKey}
-                  type="file"
-                  name="photoFile"
-                  required={method === "bank_transfer"}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    if (!f) {
-                      setPhoto(null);
-                      setError(null);
-                      return;
-                    }
-                    // Prepared at PICK time: image → compressed WebP
-                    // (orientation kept), PDF/other untouched; undecodable or
-                    // still-over-10MB is refused HERE, by name, not after Save.
-                    void (async () => {
-                      const r = await prepareUploadFiles([f]);
-                      if (!r.ok) {
-                        setPhoto(null);
-                        setError(fill(t(r.errorKey, lang), { name: r.name }));
-                        setPhotoKey((k) => k + 1);
-                        return;
-                      }
-                      setError(null);
-                      setPhoto(r.files[0] ?? null);
-                    })();
-                  }}
-                  className={INPUT}
-                  style={INPUT_STYLE}
-                />
-              </label>
-
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">{t("common.note", lang)}</span>
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  name="note"
-                  rows={2}
-                  className={INPUT}
-                  style={INPUT_STYLE}
-                />
-              </label>
-
-              {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-app">
-                <Btn type="button" variant="ghost" onClick={() => (fixedCustomer ? setView("list") : close())}>
-                  {t("common.cancel", lang)}
-                </Btn>
-                <Btn
-                  type="submit"
-                  variant="primary"
-                  className={!canSubmit || saving ? "opacity-50 pointer-events-none" : ""}
-                >
-                  {t(saving ? "trips.addBalance.adding" : "trips.finance.addBalance", lang)}
-                </Btn>
-              </div>
-            </form>
+            {/* Keyed by the fixed customer so a changed one re-seeds the
+                fields, which is what the reset effect used to do for them. */}
+            <AddBalanceForm
+              key={fixedCustomer?.id ?? "global"}
+              customers={customers}
+              fixedCustomer={fixedCustomer}
+              onSuccess={(r, name) => {
+                setReceipt(r);
+                setReceiptName(name);
+                setView("done");
+              }}
+              onCancel={() => (fixedCustomer ? setView("list") : close())}
+              onBusyChange={setSaving}
+            />
           </>
         )}
       </div>

@@ -1,10 +1,14 @@
 "use client";
 
 // Transaction-statement drill-in (Finance tab). Two modes:
-//   - prepaid: the customer_ledger's own rows (0203), verbatim, with a running
-//     balance walked down them — top-ups, invoice draws, refunds, corrections.
-//     The headline Balance is v_customer_ledger_balance's figure passed
-//     through, and the footer notes what is delivered but not yet invoiced.
+//   - prepaid: EVERYTHING that happened on the account, in one date-ordered
+//     list — balance added, work delivered, special charges raised, invoices
+//     paid, balance applied, refunds. The running balance walks on the rows
+//     that MOVE the money held on account and holds flat across the rows that
+//     merely record an event (a delivered trip, a direct invoice payment);
+//     vm.balanceNote says so in words, under the caption. The headline Balance
+//     is v_customer_ledger_balance's figure passed through, and the footer
+//     notes what is delivered but not yet invoiced.
 //   - postpaid: itemized delivered trips + Payment rows (paid invoices) — no
 //     balance/ledger concept (spec §8/§10: postpaid has no prepaid balance).
 //
@@ -65,8 +69,10 @@ import {
   buildStatementVm,
   type StatementCell,
   type StatementColumnKey,
+  type StatementChargeInput,
   type StatementLedgerEntry,
   type StatementPaymentInput,
+  type StatementInvoicePaymentInput,
   type StatementRow,
   type StatementTripMeta,
 } from "@/lib/statementViewModel";
@@ -129,6 +135,30 @@ export type TripMeta = StatementTripMeta;
 // the document without moving the balance. Aliased for the same reason as
 // TripMeta above.
 export type StatementPayment = StatementPaymentInput;
+
+// Special charges for this customer — the prepaid statement's record-only
+// charge rows. Aliased like the two above so FinanceTab can name the prop's
+// type without importing the view-model directly.
+//
+// OPTIONAL IN THE TYPE, WIRED IN PRACTICE. FinanceTab groups special charges
+// per customer (its `chargesByCustomer` memo) and passes that group in beside
+// `trips` and `payments`. The prop stays optional because postpaid has no use
+// for it — a postpaid customer's charges are invoice lines, not statement rows
+// — so absent must keep reading as "no charges" rather than as a missing
+// argument.
+export type StatementCharge = StatementChargeInput;
+
+// Settlement rows — one per recorded payment against one invoice. Aliased like
+// the three above.
+//
+// REQUIRED, NOT OPTIONAL, unlike `charges`. An absent `charges` reads
+// truthfully as "this customer has no special charges". An absent
+// `invoicePayments` would read as "this customer has never paid an invoice",
+// which since 0204 is wrong for nearly every account — confirm freezes the
+// payable and moves no money, so almost all settlement lives in these rows. A
+// caller that forgot the prop would silently print an understated statement;
+// a compile error is the cheaper failure.
+export type StatementInvoicePayment = StatementInvoicePaymentInput;
 
 // ---------------------------------------------------------------------------
 // Look: the two class tables
@@ -194,10 +224,12 @@ export default function StatementModal({
   uninvoicedCount,
   uninvoicedSar,
   trips,
+  charges,
   projectWaterType,
   projectName,
   tripMetaById,
   payments,
+  invoicePayments,
 }: {
   open: boolean;
   onClose: () => void;
@@ -213,6 +245,8 @@ export default function StatementModal({
   uninvoicedCount: number;
   uninvoicedSar: number;
   trips: ConsumingTrip[];
+  // Special charges — prepaid only, optional (see StatementCharge above).
+  charges?: StatementCharge[];
   // Display-only fallback (Finance polish batch C) — project's CURRENT
   // water_type, used when an entry/trip's own water_type is null (pre-
   // water_type-field data). Never mutates any stored record.
@@ -226,6 +260,8 @@ export default function StatementModal({
   tripMetaById: Map<string, TripMeta>;
   // Paid invoices for this customer (see StatementPayment above).
   payments: StatementPayment[];
+  // This customer's settlement rows (see StatementInvoicePayment above).
+  invoicePayments: StatementInvoicePayment[];
 }) {
   const { lang } = useApp();
   const [mounted, setMounted] = useState(false);
@@ -283,6 +319,8 @@ export default function StatementModal({
     uninvoicedSar,
     trips,
     payments,
+    invoicePayments,
+    charges: charges ?? [],
     tripMetaById,
     projectWaterType: projectWaterType ?? null,
     dateFrom,
@@ -334,6 +372,8 @@ export default function StatementModal({
       uninvoicedSar,
       trips,
       payments,
+      invoicePayments,
+      charges: charges ?? [],
       tripMeta: Array.from(tripMetaById, ([tripId, m]) => ({ tripId, ...m })),
       projectWaterType: projectWaterType ?? null,
       dateFrom,
@@ -390,9 +430,17 @@ export default function StatementModal({
 
         // The running balance is the only figure whose ink tracks its VALUE
         // rather than its row kind — a negative balance is the thing a manager
-        // scans a statement for.
+        // scans a statement for, so it outranks everything below.
+        //
+        // Otherwise a CARRIED balance is muted. A record-only row did not move
+        // the money held on account, so the figure beside it is a repeat of
+        // the one above rather than a result, and muting it lets the column
+        // read as a series of steps instead of a wall of identical numbers.
+        // Same intent as the document's faint ink on .record-only td.run,
+        // expressed in this surface's own vocabulary.
         if (colKey === "runningBalance") {
-          return <span className={cell.negative ? "text-rose-600 dark:text-rose-400" : ""}>{figure}</span>;
+          const ink = cell.negative ? "text-rose-600 dark:text-rose-400" : row.recordOnly ? "muted" : "";
+          return <span className={ink}>{figure}</span>;
         }
 
         // A prepaid debit stacks its VAT breakdown underneath — same treatment
@@ -478,8 +526,15 @@ export default function StatementModal({
             the same `from`/`to` labels the document's header line uses and hold
             the same two values, so the document adds a rendering of the period,
             not a second source of it. */}
-        <p className="text-sm muted mb-4">{vm.subtitle[lang]}</p>
-        {pdfError && <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{pdfError}</p>}
+        <p className={"text-sm muted " + (vm.balanceNote ? "mb-1" : "mb-4")}>{vm.subtitle[lang]}</p>
+        {/* THE RUNNING-BALANCE FOOTNOTE — the same sentence the document
+            carries, in the same slot relative to the caption, because it is
+            the same note. Without it the table reads as broken arithmetic:
+            a delivered trip shows an amount and the balance beside it does
+            not move. Prepaid only; vm.balanceNote is null on postpaid, which
+            has no running balance to explain. */}
+        {vm.balanceNote && <p className="text-xs muted mb-4">{vm.balanceNote[lang]}</p>}
+        {pdfError &&<p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{pdfError}</p>}
 
         {/* Period picker — table rows only, footer figures stay global. */}
         <div className="flex items-end gap-2 flex-wrap mb-4">

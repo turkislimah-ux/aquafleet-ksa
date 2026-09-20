@@ -216,6 +216,44 @@ export async function fetchInvoicePayments(supabase: Db, invoiceId: string) {
     .returns<InvoicePaymentRow[]>();
 }
 
+// EVERY customer's payment rows, customer-tagged through the parent invoice —
+// the statement's payment source. Oldest-first, the order money arrived and
+// the order a statement reads.
+//
+// WHY IT IS A SEPARATE READER FROM fetchInvoicePayments() ABOVE. That one
+// answers "what has been paid on THIS invoice" for the settlement panel, which
+// already knows whose invoice it is and needs no join. This one answers "what
+// has this customer paid, ever, against anything", which is a different
+// question with a different shape: the row has no customer_id of its own, so
+// the customer and the invoice NUMBER both have to come off the joined
+// invoices row. Widening the per-invoice reader to carry a join no caller of
+// it wants would make every settlement panel pay for a column it never reads.
+//
+// VOID INVOICES ARE EXCLUDED. A payment against a voided document is not an
+// event on the account the customer can reconcile — the same rule
+// app/trips/page.tsx already applies to special charges, and the same reason.
+export type StatementInvoicePaymentJoinedRow = {
+  id: string;
+  invoice_id: string;
+  amount_sar: number;
+  method: "cash" | "bank_transfer";
+  reference: string | null;
+  paid_on: string | null;
+  note: string | null;
+  created_at: string;
+  invoice: { customer_id: string; invoice_number: string; status: string } | null;
+};
+
+export async function fetchInvoicePaymentsForStatements(supabase: Db) {
+  return supabase
+    .from("invoice_payments")
+    .select(
+      "id, invoice_id, amount_sar, method, reference, paid_on, note, created_at, invoice:invoices(customer_id, invoice_number, status)",
+    )
+    .order("created_at", { ascending: true })
+    .returns<StatementInvoicePaymentJoinedRow[]>();
+}
+
 export async function fetchLedgerCorrections(supabase: Db) {
   return supabase
     .from("ledger_corrections")

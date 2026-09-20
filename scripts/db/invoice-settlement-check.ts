@@ -1,6 +1,6 @@
-// LIVE DATABASE guard for the 0203 INVOICE SETTLEMENT flow — the prepaid draw
-// at confirm, the frozen payable identity, partial payments, apply-balance, and
-// the void that gives the money back.
+// LIVE DATABASE guard for the 0204 INVOICE SETTLEMENT flow — the freeze at
+// confirm, the two ways money actually moves, the reservation Available now
+// carries, and the bank-transfer proof rules.
 // Run:  npm run test:db   (or: npx tsx scripts/db/invoice-settlement-check.ts)
 // Exits 0 if every assertion passes, 1 otherwise (CI-friendly).
 //
@@ -10,74 +10,128 @@
 // all three document-number counters.
 //
 // ---------------------------------------------------------------------------
-// WHY THIS FILE EXISTS SEPARATELY FROM ledger-check.ts
+// WHAT CHANGED, AND WHY THIS FILE WAS REWRITTEN
 //
-// ledger-check guards the ledger in ISOLATION: top-up in, refund out, the sign
-// constraint, the three reader views. It deliberately never calls
-// confirm_invoice, because a harness that proves two things proves neither when
-// it goes red.
+// Until 0204, confirm_invoice DREW min(Available, grand_total) out of the
+// prepaid balance. Confirming was therefore a payment, and a prepaid invoice
+// could land on 'paid' without anyone recording a settlement. Turki ruled that
+// out. 0204 deleted the draw:
 //
-// This file guards the other half — the moment the ledger and the invoice meet.
-// That moment is `confirm_invoice`, and NOTHING app-side computes it: the RPC
-// reads Available itself, decides the draw itself, and freezes
-// prepaid_applied_sar + amount_payable_sar itself. There is therefore no
-// offline fixture that can test it. Either it is tested here against a real
-// database or it is not tested at all.
+//   confirm_invoice moves NO money. It freezes amount_payable_sar =
+//   grand_total and prepaid_applied_sar = 0, leaves status 'confirmed', and
+//   writes NO customer_ledger row — prepaid and postpaid alike.
+//
+// The previous version of this file asserted the opposite. Those assertions
+// were not wrong code, they were an EXPIRED SPEC, so they are gone rather than
+// repaired. What replaces them is the 0204 contract:
+//
+//   money moves through apply_balance_to_invoice (the prepaid balance) and
+//   record_invoice_payment (cash / bank transfer), and ONLY those two. Each
+//   flips the invoice to 'paid' when the remainder reaches zero, and only then.
+//
+// The balance must still be reserved against debt already issued, or a
+// customer could be refunded money he owes on a confirmed invoice. 0204 moved
+// that reservation out of the ledger and into the view:
+//
+//   Available = Balance − Uninvoiced − unsettled remainder of confirmed,
+//               ledger-era invoices
+//
+// with the reservation exposed as the new sixth column,
+// confirmed_unsettled_sar.
 //
 // ---------------------------------------------------------------------------
-// WHAT IT ASSERTS
+// THE SEVEN PROOFS
 //
-//   full cover    prepaid confirm draws exactly min(Available, grand_total);
-//                 payable 0 -> status flips to 'paid' in the same call
-//   the rule      the draw is RE-DERIVED from measured rows, not just compared
-//                 to a literal: draw == min(max(balance@confirm - uninvoiced@
-//                 confirm, 0), grand_total). A literal-only check passes for a
-//                 draw that is right by coincidence
-//   identity      grand_total == prepaid_applied + amount_payable, every time
-//   conservation  a FULLY covered confirm leaves Available untouched — the work
-//                 only moves from Uninvoiced to drawn. If those two figures ever
-//                 disagree the customer was charged twice for one delivery
-//   short         Available < total -> partial draw, payable shortfall, status
-//                 stays 'confirmed'
-//   partial pay   cash payment of less than the remainder leaves it 'confirmed';
-//                 remainder + 0.01 REFUSED by the overpay gate
-//   apply balance top-up then apply_balance_to_invoice clears the remainder to
-//                 0.00 and flips to 'paid'; payable == paid + applied
-//   void(paid)    a PAID invoice voids: every draw AND every applied row is
-//                 reversed, Balance returns to the halala, trips are released,
-//                 and the invoice_payments row SURVIVES (append-only — refunding
-//                 cash actually received is a separate act)
-//   postpaid      confirm writes applied = 0, payable = grand_total, and writes
-//                 NO ledger row at all
-//   gates         legacy invoice (payable null) refuses both settle RPCs;
-//                 apply-balance refuses a postpaid customer and refuses when
-//                 there is nothing to apply; bad method / no proof / zero / no
-//                 actor all refuse for their own stated reasons
-//   anon          denied EXECUTE on all three RPCs (CLAUDE.md §6)
+//   1  confirm freezes and moves nothing: status 'confirmed', payable ==
+//      grand_total, applied == 0, NO ledger row, Balance untouched. Asserted
+//      for a prepaid customer WITH money on the books (§A) and for a postpaid
+//      one (§B) — a rich prepaid customer is the only shape in which a
+//      resurrected draw would have something to take, so a poor fixture would
+//      pass this vacuously
+//   2  a PARTIAL apply_balance reduces the remainder and leaves the invoice
+//      unpaid (§D)
+//   3  the apply that takes the remainder to zero — and, on the cash arm, the
+//      payment that does — flips the invoice to 'paid', and only then (§D, §B)
+//   4  Available RESERVES confirmed debt: confirming moves the invoice's value
+//      out of Uninvoiced and into confirmed_unsettled_sar in the same instant,
+//      Available does not jump, and the reservation shrinks as the invoice is
+//      settled and vanishes when it is paid (§C)
+//   5  apply_balance still works when the remainder EXCEEDS the balance (§E)
+//   6  a refund is capped by the NEW Available, which is strictly tighter than
+//      Balance − Uninvoiced while a confirmed invoice is unsettled (§F)
+//   7  the bank-transfer proof rules raise on all three money RPCs when the
+//      photo/proof, the reference or (for a payment) the date is missing, and
+//      cash requires none of them (§G)
+//
+// plus, kept from the previous version because 0204 did not touch them and
+// dropping live coverage is a loss: the legacy gate on null amount_payable_sar,
+// the input gates, void reversing an applied row, and the anon grants
+// (CLAUDE.md §6).
+//
+// ---------------------------------------------------------------------------
+// WHY §E IS THE LOAD-BEARING ONE
+//
+// apply_balance_to_invoice adds the invoice's OWN unsettled remainder back to
+// Available before capping the draw. Without that line the invoice being
+// settled is counted against itself: a customer with 300 on the books against
+// a 400 remainder reads as Available −100, least(−100, 400) is negative, and
+// the RPC raises "Nothing to apply" — he can never spend the balance he
+// actually has. §E is that exact shape, and it asserts the PRECONDITION
+// (Available really is negative) alongside the outcome, so it cannot pass by
+// accident on a fixture where Available happened to be positive.
+//
+// Note that this is not a corner case bolted on for the test. A partial apply
+// requires min(Available + remainder, remainder) < remainder, which is to say
+// Available < 0. EVERY partial application in this file therefore runs through
+// the self-reservation line; §D would go red with it too. §E exists because it
+// names the case in one clean fixture with nothing else moving.
 //
 // ---------------------------------------------------------------------------
 // THE SEED SHAPE IS THE REAL ONE, NOT A CONVENIENT ONE
 //
 // Trip A carries invoice_id = the review invoice, because the app reserves
-// trips at DRAFT (invoiceActions -> p_trip_ids). That reservation is what makes
-// the confirm-time read correct: v_customer_uninvoiced counts a delivered trip
-// while its invoice is draft/review and drops it the instant the status flips,
-// so confirm_invoice's flip-then-read order sees this invoice's work exactly
-// once — inside grand_total — and never also in Uninvoiced. Seed the trip with
-// a NULL invoice_id and the draw would double-count it, which is precisely the
-// bug this file has to be able to see.
+// trips at DRAFT (invoiceActions -> p_trip_ids). v_customer_uninvoiced counts a
+// delivered trip while its invoice is draft/review and drops it the instant the
+// status flips, so the value of a confirmed invoice leaves Uninvoiced and
+// enters the confirmed-remainder term in the same instant. That continuity is
+// what §C measures; seeding the trip with a NULL invoice_id would let the same
+// money sit in both terms and Available would sag by a whole invoice at
+// confirm.
 //
 // Trip B is delivered, in the same period, and on NO invoice. It exists so that
-// Uninvoiced is non-zero at the moment of the draw. Without it, Available and
-// Balance are the same number at confirm and an implementation that drew
-// min(BALANCE, total) — ignoring outstanding delivered work — would pass green.
+// Uninvoiced is non-zero throughout — without it Balance, Available and the
+// reservation arithmetic all collapse onto the same number and a view that
+// forgot a term would still read correctly.
 // ---------------------------------------------------------------------------
 
 import { Client, type QueryResult } from "pg";
 import {
-  check, connOptions, fail, failureCount, loadTestEnv, money, ok,
-  PROVISION_STATION_SQL, SEED_STATION, SEED_WATER_TYPE, TEST_REF,
+  check as rawCheck, connOptions, fail as rawFail, failureCount, loadTestEnv,
+  money, ok as rawOk, PROVISION_STATION_SQL, SEED_STATION, SEED_WATER_TYPE, TEST_REF,
 } from "./harness";
+
+// ---------------------------------------------------------------------------
+// Assertion counting. harness.ts counts FAILURES, which is the wrong half of
+// the question here: a harness that seeded nothing, asserted nothing and rolled
+// back reports zero failures and reads as a clean pass. Everything below goes
+// through these three wrappers so the summary can name how many assertions
+// actually ran, and the exit code can refuse a run that made none.
+// ---------------------------------------------------------------------------
+
+let assertions = 0;
+
+function check(label: string, actual: unknown, expected: unknown): void {
+  assertions++;
+  rawCheck(label, actual, expected);
+}
+function ok(label: string, cond: boolean): void {
+  assertions++;
+  rawOk(label, cond);
+}
+function fail(label: string, detail: string): void {
+  assertions++;
+  rawFail(label, detail);
+}
 
 // ---------------------------------------------------------------------------
 // Fixture — every figure asserted below, derived once here and re-checked
@@ -93,32 +147,48 @@ const TRIP_NET = 1234.6;
 const TRIP_VAT = 185.19;   // 1234.60 × 0.15, exact
 const TRIP_GROSS = 1419.79; // TRIP_NET + TRIP_VAT
 
-const UNINVOICED_BOTH = 2839.58;  // trips A + B, per-item gross — before confirm
+const UNINVOICED_BOTH = 2839.58;  // trips A + B, per-item gross — while A's invoice is 'review'
 const UNINVOICED_AFTER = 1419.79; // trip B only — the instant A's invoice confirms
 
-// --- fully covered path
-const TOPUP_FULL = 5000.0;
-const AVAIL_BEFORE_FULL = 2160.42;  // 5000.00 − 2839.58
-const AVAIL_AT_CONFIRM_FULL = 3580.21; // 5000.00 − 1419.79 (A has left Uninvoiced)
-const DRAW_FULL = 1419.79;          // min(3580.21, 1419.79) — capped by the TOTAL
-const BALANCE_AFTER_FULL = 3580.21;
+// --- §A / §C: a customer with plenty on the books. The confirm must leave all
+//     of it alone, and Available must not move across the confirm.
+const TOPUP_RICH = 5000.0;
+const AVAIL_RICH_BEFORE = 2160.42; // 5000.00 − 2839.58 − 0
+const AVAIL_RICH_AFTER = 2160.42;  // 5000.00 − 1419.79 − 1419.79 — continuity
+const BAL_AFTER_FULL_APPLY = 3580.21; // 5000.00 − 1419.79
 
-// --- short path
-const TOPUP_SHORT = 2000.0;
-const AVAIL_AT_CONFIRM_SHORT = 580.21; // 2000.00 − 1419.79
-const DRAW_SHORT = 580.21;             // min(580.21, 1419.79) — capped by AVAILABLE
-const PAYABLE_SHORT = 839.58;          // 1419.79 − 580.21
-const BALANCE_AFTER_SHORT = 1419.79;
-
-const PAY_CASH = 300.0;
-const REMAINDER_AFTER_CASH = 539.58;  // 839.58 − 300.00
-const OVERPAY = 539.59;               // one halala past the remainder
-
+// --- §D: partial apply, then the rest.
+const TOPUP_THIN = 2000.0;
+const AVAIL_THIN_AT_CONFIRM = -839.58; // 2000.00 − 1419.79 − 1419.79 — NEGATIVE
+const DRAW_PARTIAL = 580.21;           // min(Available + remainder, remainder) = min(580.21, 1419.79)
+const REMAINDER_AFTER_PARTIAL = 839.58; // 1419.79 − 580.21
+const BAL_AFTER_PARTIAL = 1419.79;      // 2000.00 − 580.21
 const TOPUP_TOP = 1000.0;
-const AVAIL_BEFORE_APPLY = 1000.0;    // (1419.79 + 1000.00) − 1419.79
-const APPLIED = 539.58;               // min(1000.00, 539.58) — capped by the REMAINDER
-const BALANCE_AFTER_APPLY = 1880.21;  // 2419.79 − 539.58
-const BALANCE_AFTER_VOID_SHORT = 3000.0; // both top-ups back, both draws reversed
+const AVAIL_BEFORE_REST = 160.42;       // 2419.79 − 1419.79 − 839.58
+const DRAW_REST = 839.58;               // min(160.42 + 839.58, 839.58) — capped by the REMAINDER
+const BAL_AFTER_REST = 1580.21;         // 2419.79 − 839.58
+
+// --- §B: the postpaid cash arm. Partial, then the payment that clears it.
+const PAY_CASH = 300.0;
+const REMAINDER_AFTER_CASH = 1119.79; // 1419.79 − 300.00
+const OVERPAY = 1119.8;               // one halala past the remainder
+
+// --- §E / §F: a single-trip invoice grossing a round 400.00, so the
+//     self-reservation case reads as the 300-against-400 shape from the
+//     migration comment with no arithmetic noise.
+const SMALL_NET = 347.83;
+const SMALL_VAT = 52.17;   // round(347.83 × 0.15, 2) = round(52.1745, 2)
+const SMALL_GROSS = 400.0;
+
+const PIN_TOPUP = 300.0;
+const PIN_AVAIL = -100.0;   // 300.00 − 0 − 400.00 — the invoice reserved against itself
+const PIN_DRAW = 300.0;     // the whole balance; least() still caps at the remainder
+const PIN_REMAINDER = 100.0; // 400.00 − 300.00
+
+const REF_TOPUP = 1000.0;
+const REF_AVAIL = 600.0;      // 1000.00 − 0 − 400.00
+const REF_OVER = 600.01;      // one halala past the NEW cap
+const REF_BAL_AFTER = 400.0;  // 1000.00 − 600.00
 
 const PERIOD_START = "2020-01-01";
 const PERIOD_END = "2020-01-31";
@@ -127,6 +197,8 @@ const PAID_ON = "2020-02-01";
 const ACTOR = "settlechk@harness.local";
 
 const TOPUP_SQL = `select * from public.record_topup($1::uuid, $2::numeric, $3::text, $4::text, $5::text, $6::text, $7::text)`;
+// 0204 dropped the 6-argument record_refund. p_photo_path is argument 5.
+const REFUND_SQL = `select * from public.record_refund($1::uuid, $2::numeric, $3::text, $4::text, $5::text, $6::text, $7::text)`;
 const PAY_SQL = `select * from public.record_invoice_payment($1::uuid, $2::numeric, $3::text, $4::text, $5::text, $6::date, $7::text, $8::text)`;
 const APPLY_SQL = `select * from public.apply_balance_to_invoice($1::uuid, $2::text)`;
 const VOID_SQL = `select * from public.void_invoice($1::uuid, $2::text, $3::text)`;
@@ -135,9 +207,10 @@ const VOID_SQL = `select * from public.void_invoice($1::uuid, $2::text, $3::text
 // expanded with `.*` in the target list is evaluated ONCE PER OUTPUT COLUMN, so
 // the second evaluation would find the invoice already confirmed and raise
 // "Invoice is not in review status" — a real bug wearing a green disguise.
-// $18 = p_payment_mode, $19 = p_actor (0203's addition; the six nullable ledger
-// numerics between them stay literal nulls, as the ledger model does not use
-// the FIFO split any more).
+// $18 = p_payment_mode, $19 = p_actor. The six nullable ledger numerics between
+// them stay literal nulls: they are the pre-ledger FIFO split, which this model
+// does not use. p_actor survives 0204 unused inside the function — it is the
+// audit actor for a ledger row confirm no longer writes.
 const CONFIRM_SQL = `
   select * from public.confirm_invoice(
     $1::uuid, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb,
@@ -149,23 +222,26 @@ const CONFIRM_SQL = `
     $18::text, $19::text
   )`;
 
-/** Confirm args for a one-trip invoice with NO pool-covered split. The ledger
- *  model draws at confirm instead of pre-splitting lines, so covered is 0/0/0
- *  and due == grand for prepaid and postpaid alike. That keeps 0191's Tier B
+/** Confirm args for a one-trip invoice with NO pool-covered split. Under 0204
+ *  nothing is covered at confirm for anyone, so covered is 0/0/0 and
+ *  due == grand for prepaid and postpaid alike — which keeps 0191's Tier B
  *  (covered + due == grand) satisfied by construction. */
-function confirmArgs(invoiceId: string, tripId: string, mode: string): unknown[] {
+function confirmArgs(
+  invoiceId: string, tripId: string, mode: string,
+  net: number, vat: number, gross: number,
+): unknown[] {
   return [
     invoiceId,
     JSON.stringify({ name: "SETTLECHK SELLER" }),
     JSON.stringify({ name: "SETTLECHK BUYER" }),
     JSON.stringify([]),
-    JSON.stringify([{ kind: "trip", id: tripId, label: "SETTLECHK trip", date: TRIP_DATE, amount_sar: TRIP_NET }]),
+    JSON.stringify([{ kind: "trip", id: tripId, label: "SETTLECHK trip", date: TRIP_DATE, amount_sar: net }]),
     JSON.stringify([]),
     [],
     [tripId],
     0, 0, 0,
-    TRIP_NET, TRIP_VAT, TRIP_GROSS,
-    TRIP_NET, TRIP_VAT, TRIP_GROSS,
+    net, vat, gross,
+    net, vat, gross,
     mode,
     ACTOR,
   ];
@@ -185,26 +261,51 @@ async function main(): Promise<void> {
   check("fixture — TRIP_GROSS = net + vat", TRIP_GROSS, money(TRIP_NET + TRIP_VAT));
   check("fixture — UNINVOICED_BOTH = 2 × gross", UNINVOICED_BOTH, money(2 * TRIP_GROSS));
   check("fixture — UNINVOICED_AFTER = 1 × gross", UNINVOICED_AFTER, TRIP_GROSS);
-  check("fixture — AVAIL_BEFORE_FULL = topup − both trips", AVAIL_BEFORE_FULL, money(TOPUP_FULL - UNINVOICED_BOTH));
-  check("fixture — AVAIL_AT_CONFIRM_FULL = topup − trip B", AVAIL_AT_CONFIRM_FULL, money(TOPUP_FULL - UNINVOICED_AFTER));
-  check("fixture — DRAW_FULL = min(available, total), capped by TOTAL", DRAW_FULL, Math.min(AVAIL_AT_CONFIRM_FULL, TRIP_GROSS));
-  check("fixture — BALANCE_AFTER_FULL = topup − draw", BALANCE_AFTER_FULL, money(TOPUP_FULL - DRAW_FULL));
-  check(
-    "fixture — a FULL cover leaves Available where it started (conservation)",
-    money(BALANCE_AFTER_FULL - UNINVOICED_AFTER),
-    AVAIL_BEFORE_FULL,
-  );
-  check("fixture — AVAIL_AT_CONFIRM_SHORT = topup − trip B", AVAIL_AT_CONFIRM_SHORT, money(TOPUP_SHORT - UNINVOICED_AFTER));
-  check("fixture — DRAW_SHORT = min(available, total), capped by AVAILABLE", DRAW_SHORT, Math.min(AVAIL_AT_CONFIRM_SHORT, TRIP_GROSS));
-  check("fixture — payable identity: total = applied + payable", TRIP_GROSS, money(DRAW_SHORT + PAYABLE_SHORT));
-  check("fixture — BALANCE_AFTER_SHORT = topup − draw", BALANCE_AFTER_SHORT, money(TOPUP_SHORT - DRAW_SHORT));
-  check("fixture — REMAINDER_AFTER_CASH = payable − cash", REMAINDER_AFTER_CASH, money(PAYABLE_SHORT - PAY_CASH));
+  check("fixture — AVAIL_RICH_BEFORE = topup − both trips − nothing reserved",
+    AVAIL_RICH_BEFORE, money(TOPUP_RICH - UNINVOICED_BOTH - 0));
+  check("fixture — AVAIL_RICH_AFTER = topup − trip B − the confirmed remainder",
+    AVAIL_RICH_AFTER, money(TOPUP_RICH - UNINVOICED_AFTER - TRIP_GROSS));
+  check("fixture — CONTINUITY: confirming does not move Available at all",
+    AVAIL_RICH_AFTER, AVAIL_RICH_BEFORE);
+  check("fixture — BAL_AFTER_FULL_APPLY = topup − the whole remainder",
+    BAL_AFTER_FULL_APPLY, money(TOPUP_RICH - TRIP_GROSS));
+
+  check("fixture — AVAIL_THIN_AT_CONFIRM is NEGATIVE, which is what a partial apply means",
+    AVAIL_THIN_AT_CONFIRM < 0, true);
+  check("fixture — AVAIL_THIN_AT_CONFIRM = topup − trip B − remainder",
+    AVAIL_THIN_AT_CONFIRM, money(TOPUP_THIN - UNINVOICED_AFTER - TRIP_GROSS));
+  check("fixture — DRAW_PARTIAL = min(Available + remainder, remainder) — the self-reservation",
+    DRAW_PARTIAL, money(Math.min(AVAIL_THIN_AT_CONFIRM + TRIP_GROSS, TRIP_GROSS)));
+  check("fixture — DRAW_PARTIAL is SHORT of the remainder, so the invoice stays unpaid",
+    DRAW_PARTIAL < TRIP_GROSS, true);
+  check("fixture — REMAINDER_AFTER_PARTIAL = remainder − draw",
+    REMAINDER_AFTER_PARTIAL, money(TRIP_GROSS - DRAW_PARTIAL));
+  check("fixture — BAL_AFTER_PARTIAL = topup − draw", BAL_AFTER_PARTIAL, money(TOPUP_THIN - DRAW_PARTIAL));
+  check("fixture — AVAIL_BEFORE_REST = balance + second topup − trip B − remainder",
+    AVAIL_BEFORE_REST, money(BAL_AFTER_PARTIAL + TOPUP_TOP - UNINVOICED_AFTER - REMAINDER_AFTER_PARTIAL));
+  check("fixture — DRAW_REST is capped by the REMAINDER, not by Available",
+    DRAW_REST, money(Math.min(AVAIL_BEFORE_REST + REMAINDER_AFTER_PARTIAL, REMAINDER_AFTER_PARTIAL)));
+  check("fixture — DRAW_REST takes the remainder to exactly zero",
+    money(REMAINDER_AFTER_PARTIAL - DRAW_REST), 0);
+  check("fixture — BAL_AFTER_REST", BAL_AFTER_REST, money(BAL_AFTER_PARTIAL + TOPUP_TOP - DRAW_REST));
+
+  check("fixture — REMAINDER_AFTER_CASH = grand total − cash", REMAINDER_AFTER_CASH, money(TRIP_GROSS - PAY_CASH));
   check("fixture — OVERPAY is one halala past the remainder", OVERPAY, money(REMAINDER_AFTER_CASH + 0.01));
-  check("fixture — AVAIL_BEFORE_APPLY", AVAIL_BEFORE_APPLY, money(BALANCE_AFTER_SHORT + TOPUP_TOP - UNINVOICED_AFTER));
-  check("fixture — APPLIED = min(available, remainder), capped by the REMAINDER", APPLIED, Math.min(AVAIL_BEFORE_APPLY, REMAINDER_AFTER_CASH));
-  check("fixture — payable is settled twice over: cash + applied", PAYABLE_SHORT, money(PAY_CASH + APPLIED));
-  check("fixture — BALANCE_AFTER_APPLY", BALANCE_AFTER_APPLY, money(BALANCE_AFTER_SHORT + TOPUP_TOP - APPLIED));
-  check("fixture — void of the short invoice restores BOTH top-ups", BALANCE_AFTER_VOID_SHORT, money(TOPUP_SHORT + TOPUP_TOP));
+
+  check("fixture — SMALL_VAT = round(net × 0.15, 2)", SMALL_VAT, money(SMALL_NET * 0.15));
+  check("fixture — SMALL_GROSS is a round 400.00", SMALL_GROSS, money(SMALL_NET + SMALL_VAT));
+  check("fixture — the per-trip Uninvoiced rounding agrees with the document total",
+    SMALL_GROSS, money(SMALL_NET * 1.15));
+  check("fixture — PIN_AVAIL = topup − 0 uninvoiced − the whole remainder", PIN_AVAIL, money(PIN_TOPUP - SMALL_GROSS));
+  check("fixture — PIN is the migration's own shape: balance BELOW the remainder", PIN_TOPUP < SMALL_GROSS, true);
+  check("fixture — PIN_AVAIL is NEGATIVE, which is the whole point of §E", PIN_AVAIL < 0, true);
+  check("fixture — PIN_DRAW = min(Available + remainder, remainder) = the whole balance",
+    PIN_DRAW, money(Math.min(PIN_AVAIL + SMALL_GROSS, SMALL_GROSS)));
+  check("fixture — PIN_REMAINDER = remainder − draw", PIN_REMAINDER, money(SMALL_GROSS - PIN_DRAW));
+  check("fixture — REF_AVAIL = topup − 0 uninvoiced − the confirmed remainder", REF_AVAIL, money(REF_TOPUP - SMALL_GROSS));
+  check("fixture — the NEW cap is strictly tighter than Balance − Uninvoiced", REF_AVAIL < REF_TOPUP, true);
+  check("fixture — REF_OVER is one halala past the NEW cap", REF_OVER, money(REF_AVAIL + 0.01));
+  check("fixture — REF_BAL_AFTER = topup − refund", REF_BAL_AFTER, money(REF_TOPUP - REF_AVAIL));
 
   // ---- Census. Every table this file can touch plus ALL THREE counters: a
   //      document sequence that leaked past the rollback would put a permanent
@@ -263,13 +364,20 @@ async function main(): Promise<void> {
     money((await c.query(`select balance_sar from public.v_customer_ledger_balance where customer_id = $1`, [customerId])).rows[0].balance_sar);
   const uninvoiced = async (customerId: string): Promise<number> =>
     money((await c.query(`select uninvoiced_sar from public.v_customer_uninvoiced where customer_id = $1`, [customerId])).rows[0].uninvoiced_sar);
+  /** The whole 0204 Available row, reservation column included. */
+  const availableRow = async (customerId: string): Promise<Row> =>
+    (await c.query(
+      `select balance_sar, uninvoiced_sar, available_sar, confirmed_unsettled_sar
+         from public.v_customer_available where customer_id = $1`, [customerId])).rows[0];
   const available = async (customerId: string): Promise<number> =>
-    money((await c.query(`select available_sar from public.v_customer_available where customer_id = $1`, [customerId])).rows[0].available_sar);
+    money((await availableRow(customerId)).available_sar);
+  const reserved = async (customerId: string): Promise<number> =>
+    money((await availableRow(customerId)).confirmed_unsettled_sar);
   const invoiceRow = async (invoiceId: string): Promise<Row> =>
     (await c.query(`select status, invoice_number, grand_total_sar, prepaid_applied_sar, amount_payable_sar from public.invoices where id = $1`, [invoiceId])).rows[0];
   const settlement = async (invoiceId: string): Promise<Row> =>
     (await c.query(`select payable_sar, paid_sar, applied_sar, written_off_sar, remainder_sar from public.v_invoice_settlement where invoice_id = $1`, [invoiceId])).rows[0];
-  /** Ledger rows for one invoice, by type — the audit trail the money moved on. */
+  /** Ledger rows for one invoice, by type — the audit trail money moved on. */
   const ledgerByType = async (invoiceId: string): Promise<Record<string, number>> => {
     const rows = (await c.query(
       `select entry_type, round(sum(amount_sar), 2) as s from public.customer_ledger
@@ -278,30 +386,39 @@ async function main(): Promise<void> {
     for (const r of rows) m[String(r.entry_type)] = money(r.s);
     return m;
   };
+  /** Every ledger row for a customer, invoice-linked or not. A draw written
+   *  with a null invoice_id would slip past ledgerByType; this sees it. */
+  const ledgerCount = async (customerId: string): Promise<number> =>
+    Number((await c.query(`select count(*) as n from public.customer_ledger where customer_id = $1`, [customerId])).rows[0].n);
   const tripInvoiceId = async (tripId: string): Promise<string | null> =>
     (await c.query(`select invoice_id from public.trips where id = $1`, [tripId])).rows[0].invoice_id ?? null;
 
-  /** The identity every confirmed invoice must satisfy, whatever the mode. */
-  function payableIdentity(label: string, inv: Row): void {
-    check(
-      `${label}: grand_total == prepaid_applied + amount_payable`,
-      money(inv.grand_total_sar),
-      money(money(inv.prepaid_applied_sar) + money(inv.amount_payable_sar)),
-    );
+  /** The identity every confirmed invoice must satisfy under 0204: the whole
+   *  document is payable and none of it has been settled by confirming. */
+  async function freezeHolds(label: string, invoiceId: string, gross: number): Promise<void> {
+    const inv = await invoiceRow(invoiceId);
+    check(`${label}: status is 'confirmed' — nothing was auto-paid`, inv.status, "confirmed");
+    check(`${label}: amount_payable_sar == the whole grand total`, money(inv.amount_payable_sar), gross);
+    check(`${label}: prepaid_applied_sar == 0.00 — confirm applies nothing`, money(inv.prepaid_applied_sar), 0);
+    check(`${label}: grand_total_sar is the figure that was frozen`, money(inv.grand_total_sar), gross);
+    check(`${label}: NO ledger row exists for this invoice`, await ledgerByType(invoiceId), {});
+    const s = await settlement(invoiceId);
+    check(`${label}: settlement — payable == grand total`, money(s.payable_sar), gross);
+    check(`${label}: settlement — nothing paid`, money(s.paid_sar), 0);
+    check(`${label}: settlement — nothing applied`, money(s.applied_sar), 0);
+    check(`${label}: settlement — the whole document is still owed`, money(s.remainder_sar), gross);
   }
 
-  /** RE-DERIVE the draw from measured rows rather than trusting the literal.
-   *  balance@confirm is reconstructed by adding the draw back to the balance
-   *  that survives it; uninvoiced@confirm is what the view says now, because a
-   *  draw moves no trip. A literal-only assertion cannot tell a correct draw
-   *  from one that is right by arithmetic coincidence. */
-  async function drawFollowsTheRule(label: string, customerId: string, inv: Row): Promise<void> {
-    const drew = money(inv.prepaid_applied_sar);
-    const balAtConfirm = money((await balance(customerId)) + drew);
-    const uninvAtConfirm = await uninvoiced(customerId);
-    const availAtConfirm = money(balAtConfirm - uninvAtConfirm);
-    const expected = money(Math.min(Math.max(availAtConfirm, 0), money(inv.grand_total_sar)));
-    check(`${label}: draw == min(max(Available@confirm, 0), grand_total) — re-derived`, drew, expected);
+  /** The view's own arithmetic, re-derived from the columns beside it. A
+   *  literal-only assertion cannot tell a correct Available from one that is
+   *  right by coincidence on this fixture. */
+  async function availableFollowsTheRule(label: string, customerId: string): Promise<void> {
+    const r = await availableRow(customerId);
+    check(
+      `${label}: Available == Balance − Uninvoiced − confirmed unsettled — re-derived`,
+      money(r.available_sar),
+      money(money(r.balance_sar) - money(r.uninvoiced_sar) - money(r.confirmed_unsettled_sar)),
+    );
   }
 
   // --- A case body, run inside a savepoint and rolled back whatever happens —
@@ -351,17 +468,31 @@ async function main(): Promise<void> {
     check(`precondition — ${SEED_STATION} exists and prices ${SEED_WATER_TYPE}`,
       station?.key === SEED_STATION && station?.fill_cost_potable_sar !== null, true);
 
+    // ---- SCHEMA precondition. If v_customer_available is still the 0203
+    //      five-column view, every reservation assertion below would fail with
+    //      an unhelpful "column does not exist" from deep inside a helper.
+    //      Name it here instead, once, in words.
+    const availCols = (await c.query(
+      `select column_name from information_schema.columns
+        where table_schema = 'public' and table_name = 'v_customer_available'
+        order by ordinal_position`)).rows.map((r) => String(r.column_name));
+    check(
+      "precondition — v_customer_available carries 0204's six columns in order",
+      availCols,
+      ["customer_id", "customer_name", "balance_sar", "uninvoiced_sar", "available_sar", "confirmed_unsettled_sar"],
+    );
+
     // =====================================================================
-    // SEED. Two customers, one prepaid and one postpaid, each with a project,
-    // an invoice in 'review' and a delivered trip RESERVED to that invoice.
-    // The prepaid customer gets a second delivered trip on no invoice, so
-    // Uninvoiced is non-zero at the moment of the draw (see the header).
+    // SEED. Four customers, each with its own project, an invoice in 'review'
+    // and a delivered trip RESERVED to that invoice. `initials` is a caller
+    // argument, not a constant: projects_initials_unique is a GLOBAL
+    // constraint, so four projects sharing initials die on the insert and
+    // prove nothing.
     // =====================================================================
 
-    // `initials` is a caller argument, not a constant: projects_initials_unique
-    // is a GLOBAL uniqueness constraint, so seeding two projects in one
-    // transaction with the same initials dies on the insert and proves nothing.
-    async function seedCustomer(tag: string, mode: string, initials: string): Promise<{ customer: string; project: string; invoice: string; trip: string }> {
+    async function seedCustomer(
+      tag: string, mode: string, initials: string, net: number,
+    ): Promise<{ customer: string; project: string; invoice: string; trip: string }> {
       const customer = (await c.query(
         `insert into public.customers (name, customer_type, payment_mode)
          values ($1, 'construction', $2) returning id`,
@@ -370,7 +501,7 @@ async function main(): Promise<void> {
         `insert into public.projects
            (customer_id, name, initials, default_water_station, water_type, status, payment_mode, rate_per_trip_sar)
          values ($1, $2, $3, 'manfuhah_station', 'potable', 'active', $4, $5) returning id`,
-        [customer, `SETTLECHK ${tag} PROJECT`, initials, mode, TRIP_NET])).rows[0].id as string;
+        [customer, `SETTLECHK ${tag} PROJECT`, initials, mode, net])).rows[0].id as string;
       const invoice = (await c.query(
         `insert into public.invoices (customer_id, period_start, period_end, status)
          values ($1, $2, $3, 'review') returning id`,
@@ -380,11 +511,11 @@ async function main(): Promise<void> {
         `insert into public.trips
            (project_id, customer_id, water_station, water_type, rate_sar, stage, trip_date, delivered_at, invoice_id)
          values ($1, $2, 'manfuhah_station', 'potable', $3, 'delivered', $4, now(), $5) returning id`,
-        [project, customer, TRIP_NET, TRIP_DATE, invoice])).rows[0].id as string;
+        [project, customer, net, TRIP_DATE, invoice])).rows[0].id as string;
       return { customer, project, invoice, trip };
     }
 
-    const pp = await seedCustomer("PREPAID", "prepaid", "SCP");
+    const pp = await seedCustomer("PREPAID", "prepaid", "ZZSC1", TRIP_NET);
     seeded.customer = pp.customer; seeded.project = pp.project;
     seeded.invoice = pp.invoice; seeded.tripA = pp.trip;
 
@@ -395,9 +526,20 @@ async function main(): Promise<void> {
        values ($1, $2, 'manfuhah_station', 'potable', $3, 'delivered', $4, now()) returning id`,
       [pp.project, pp.customer, TRIP_NET, TRIP_DATE])).rows[0].id;
 
-    const post = await seedCustomer("POSTPAID", "postpaid", "SCO");
+    const post = await seedCustomer("POSTPAID", "postpaid", "ZZSC2", TRIP_NET);
     seeded.customer2 = post.customer; seeded.project2 = post.project;
     seeded.invoice2 = post.invoice; seeded.tripC = post.trip;
+
+    // The self-reservation pin and the refund cap each get their own customer
+    // with a single trip and NOTHING uninvoiced, so the only term moving in
+    // Available is the confirmed remainder under test.
+    const pin = await seedCustomer("PIN", "prepaid", "ZZSC3", SMALL_NET);
+    seeded.customer3 = pin.customer; seeded.project3 = pin.project;
+    seeded.invoice3 = pin.invoice; seeded.tripD = pin.trip;
+
+    const ref = await seedCustomer("REFUND", "prepaid", "ZZSC4", SMALL_NET);
+    seeded.customer4 = ref.customer; seeded.project4 = ref.project;
+    seeded.invoice4 = ref.invoice; seeded.tripE = ref.trip;
 
     console.log("\nSeeded: " + JSON.stringify(seeded));
 
@@ -405,184 +547,398 @@ async function main(): Promise<void> {
     //      both trips count as Uninvoiced while the invoice is still 'review'.
     check("baseline — empty ledger reads 0.00", await balance(pp.customer), 0);
     check("baseline — Uninvoiced counts BOTH trips while the invoice is 'review'", await uninvoiced(pp.customer), UNINVOICED_BOTH);
-    check("baseline — Available = 0 − Uninvoiced", await available(pp.customer), money(-UNINVOICED_BOTH));
+    check("baseline — nothing is reserved yet: no invoice is confirmed", await reserved(pp.customer), 0);
+    check("baseline — Available = 0 − Uninvoiced − 0", await available(pp.customer), money(-UNINVOICED_BOTH));
 
     // =====================================================================
-    // 1. PREPAID, FULLY COVERED. Draw capped by the TOTAL; payable 0; the
-    //    status flip to 'paid' happens inside confirm_invoice, not after it.
+    // §A — PROOF 1 (prepaid). Confirm freezes and moves NOTHING.
+    //
+    // The top-up comes FIRST and is deliberately larger than the invoice. That
+    // is what gives this proof teeth: under 0203 this exact call drew 1419.79
+    // and flipped the invoice to 'paid'. If that behaviour ever returns, the
+    // balance assertion below goes red on the money and the status assertion
+    // goes red on the flip. Run the same case against a customer with an empty
+    // ledger and a resurrected draw would have nothing to take, and the whole
+    // scenario would pass while proving nothing.
     // =====================================================================
-    await scenario("prepaid confirm, balance covers the whole invoice", async () => {
-      const t = await rpc(TOPUP_SQL, [pp.customer, TOPUP_FULL, "cash", null, null, ACTOR, null]);
+    await scenario("PROOF 1 (prepaid) — confirm freezes the payable and moves no money", async () => {
+      const t = await rpc(TOPUP_SQL, [pp.customer, TOPUP_RICH, "cash", null, null, ACTOR, null]);
       ok("top-up accepted", t.err === null);
-      check("Available before confirm", await available(pp.customer), AVAIL_BEFORE_FULL);
+      check("the customer really has more than the invoice on the books", await balance(pp.customer), TOPUP_RICH);
+      const ledgerBefore = await ledgerCount(pp.customer);
 
-      const r = await rpc(CONFIRM_SQL, confirmArgs(pp.invoice, seeded.tripA, "prepaid"));
+      const r = await rpc(CONFIRM_SQL, confirmArgs(pp.invoice, seeded.tripA, "prepaid", TRIP_NET, TRIP_VAT, TRIP_GROSS));
       ok("confirm accepted", r.err === null);
       if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
 
-      const inv = await invoiceRow(pp.invoice);
-      ok("invoice number allocated", /^\d{3}-\d{6}$/.test(String(inv.invoice_number)));
-      check("Uninvoiced at confirm dropped THIS invoice's trip, kept trip B", await uninvoiced(pp.customer), UNINVOICED_AFTER);
-      check("prepaid_applied_sar == the whole grand total", money(inv.prepaid_applied_sar), DRAW_FULL);
-      check("amount_payable_sar == 0.00", money(inv.amount_payable_sar), 0);
-      check("status flipped to 'paid' inside the same call", inv.status, "paid");
-      payableIdentity("full cover", inv);
-      await drawFollowsTheRule("full cover", pp.customer, inv);
+      ok("invoice number allocated", /^\d{3}-\d{6}$/.test(String((await invoiceRow(pp.invoice)).invoice_number)));
+      await freezeHolds("prepaid confirm", pp.invoice, TRIP_GROSS);
 
-      check("ONE invoice_draw row, stored NEGATIVE", (await ledgerByType(pp.invoice)).invoice_draw, money(-DRAW_FULL));
-      check("Balance after the draw", await balance(pp.customer), BALANCE_AFTER_FULL);
-      check(
-        "CONSERVATION — a full cover leaves Available exactly where it started",
-        await available(pp.customer), AVAIL_BEFORE_FULL,
-      );
-
-      const s = await settlement(pp.invoice);
-      check("settlement — payable", money(s.payable_sar), 0);
-      check("settlement — remainder", money(s.remainder_sar), 0);
-      check("settlement — nothing was PAID in cash (the pool settled it)", money(s.paid_sar), 0);
-      check("settlement — nothing was APPLIED post-confirm either", money(s.applied_sar), 0);
-
-      // ---- void from 'paid'. The reversal must put the customer back exactly
-      //      where they were: same Balance, same Available, trip released.
-      const v = await rpc(VOID_SQL, [pp.invoice, "harness void", ACTOR]);
-      ok("void of a PAID invoice accepted", v.err === null);
-      if (v.err) { console.log(`          db said: ${v.err.message.split("\n")[0]}`); return; }
-      check("void — status", (await invoiceRow(pp.invoice)).status, "void");
-      check("void — a paired draw_reversal was written", (await ledgerByType(pp.invoice)).draw_reversal, DRAW_FULL);
-      check("void — Balance restored to the halala", await balance(pp.customer), TOPUP_FULL);
-      check("void — trip released back to no invoice", await tripInvoiceId(seeded.tripA), null);
-      check("void — Uninvoiced counts both trips again", await uninvoiced(pp.customer), UNINVOICED_BOTH);
-      check("void — Available back to the pre-confirm figure", await available(pp.customer), AVAIL_BEFORE_FULL);
+      check("THE RULING — Balance is untouched by the confirm", await balance(pp.customer), TOPUP_RICH);
+      check("no ledger row of ANY kind was written for this customer", await ledgerCount(pp.customer), ledgerBefore);
+      check("Uninvoiced dropped THIS invoice's trip and kept trip B", await uninvoiced(pp.customer), UNINVOICED_AFTER);
+      check("the trip stays reserved to the invoice — it is not released", await tripInvoiceId(seeded.tripA), pp.invoice);
     });
 
     // =====================================================================
-    // 2. PREPAID, SHORT. Draw capped by AVAILABLE; a payable remains; then
-    //    partial cash, then top-up + apply-balance to clear it.
+    // §B — PROOF 1 (postpaid) and the CASH arm of PROOF 3. The freeze is
+    // identical for a customer with no pool at all; then a partial payment
+    // leaves it 'confirmed' and the payment that clears the remainder flips it.
     // =====================================================================
-    await scenario("prepaid confirm on a SHORT balance, then partial cash, then apply balance", async () => {
-      const t = await rpc(TOPUP_SQL, [pp.customer, TOPUP_SHORT, "cash", null, null, ACTOR, null]);
-      ok("top-up accepted", t.err === null);
-
-      const r = await rpc(CONFIRM_SQL, confirmArgs(pp.invoice, seeded.tripA, "prepaid"));
+    await scenario("PROOF 1 (postpaid) + PROOF 3 (cash) — same freeze, then paid only at zero", async () => {
+      const r = await rpc(CONFIRM_SQL, confirmArgs(post.invoice, post.trip, "postpaid", TRIP_NET, TRIP_VAT, TRIP_GROSS));
       ok("confirm accepted", r.err === null);
       if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
 
-      let inv = await invoiceRow(pp.invoice);
-      check("prepaid_applied_sar == Available, not the total", money(inv.prepaid_applied_sar), DRAW_SHORT);
-      check("amount_payable_sar == the shortfall", money(inv.amount_payable_sar), PAYABLE_SHORT);
-      check("status stays 'confirmed' — money is still owed", inv.status, "confirmed");
-      payableIdentity("short cover", inv);
-      await drawFollowsTheRule("short cover", pp.customer, inv);
-      check("Balance after the partial draw", await balance(pp.customer), BALANCE_AFTER_SHORT);
-      check("Available is spent to exactly 0.00", await available(pp.customer), 0);
-      check("settlement — remainder == the payable", money((await settlement(pp.invoice)).remainder_sar), PAYABLE_SHORT);
-
-      // Available is 0.00 here, so there is genuinely nothing to apply. That is
-      // a DIFFERENT refusal from "wrong status" or "wrong mode", and matching
-      // its words is what keeps the three apart.
-      await refuses("apply_balance with Available at 0.00", APPLY_SQL, [pp.invoice, ACTOR], "Nothing to apply");
-
-      // ---- partial cash payment
-      const p = await rpc(PAY_SQL, [pp.invoice, PAY_CASH, "cash", null, null, PAID_ON, ACTOR, null]);
-      ok("partial cash payment accepted", p.err === null);
-      if (p.err) { console.log(`          db said: ${p.err.message.split("\n")[0]}`); return; }
-      inv = await invoiceRow(pp.invoice);
-      check("a PARTIAL payment does not flip the status", inv.status, "confirmed");
-      let s = await settlement(pp.invoice);
-      check("settlement — paid", money(s.paid_sar), PAY_CASH);
-      check("settlement — remainder after the cash", money(s.remainder_sar), REMAINDER_AFTER_CASH);
-      check("a cash payment writes NO ledger row (it is not pool money)", (await ledgerByType(pp.invoice)).invoice_payment ?? null, null);
-      check("Balance untouched by a cash payment", await balance(pp.customer), BALANCE_AFTER_SHORT);
-
-      await refuses(
-        "payment of remainder + 0.01", PAY_SQL,
-        [pp.invoice, OVERPAY, "cash", null, null, PAID_ON, ACTOR, null],
-        "exceeds the invoice remainder",
-      );
-      check("the refused overpay left the remainder unmoved", money((await settlement(pp.invoice)).remainder_sar), REMAINDER_AFTER_CASH);
-
-      // ---- top-up, then apply the balance to the remainder
-      const t2 = await rpc(TOPUP_SQL, [pp.customer, TOPUP_TOP, "cash", null, null, ACTOR, null]);
-      ok("second top-up accepted", t2.err === null);
-      check("Available before apply", await available(pp.customer), AVAIL_BEFORE_APPLY);
-
-      const a = await rpc(APPLY_SQL, [pp.invoice, ACTOR]);
-      ok("apply_balance accepted", a.err === null);
-      if (a.err) { console.log(`          db said: ${a.err.message.split("\n")[0]}`); return; }
-      inv = await invoiceRow(pp.invoice);
-      check("apply — status flipped to 'paid'", inv.status, "paid");
-      check("apply — the FROZEN payable is not rewritten", money(inv.amount_payable_sar), PAYABLE_SHORT);
-      check("apply — prepaid_applied_sar is not rewritten either (it is the CONFIRM draw)", money(inv.prepaid_applied_sar), DRAW_SHORT);
-      s = await settlement(pp.invoice);
-      check("apply — applied_sar is capped by the REMAINDER, not by Available", money(s.applied_sar), APPLIED);
-      check("apply — remainder is 0.00", money(s.remainder_sar), 0);
-      check("apply — payable is settled twice over: cash + applied", money(s.payable_sar), money(money(s.paid_sar) + money(s.applied_sar)));
-      check("apply — Balance after", await balance(pp.customer), BALANCE_AFTER_APPLY);
-      check("apply — trip stamped to the now-paid invoice", await tripInvoiceId(seeded.tripA), pp.invoice);
-
-      // ---- void a PAID invoice that was settled two ways. BOTH negative
-      //      ledger rows reverse; the cash row does NOT vanish.
-      const v = await rpc(VOID_SQL, [pp.invoice, "harness void", ACTOR]);
-      ok("void accepted", v.err === null);
-      if (v.err) { console.log(`          db said: ${v.err.message.split("\n")[0]}`); return; }
-      const byType = await ledgerByType(pp.invoice);
-      check("void — the draw AND the applied row are both reversed", byType.draw_reversal, money(DRAW_SHORT + APPLIED));
-      check("void — Balance restored to the sum of both top-ups", await balance(pp.customer), BALANCE_AFTER_VOID_SHORT);
-      check(
-        "void — the invoice_payments row SURVIVES (append-only; refunding real cash is a separate act)",
-        money((await settlement(pp.invoice)).paid_sar), PAY_CASH,
-      );
-      check("void — trip released", await tripInvoiceId(seeded.tripA), null);
-    });
-
-    // =====================================================================
-    // 3. POSTPAID. No pool, so no draw — and NO ledger row of any kind. The
-    //    negative is the point: a prepaid arm that fires for everyone would
-    //    still make the two frozen columns look right.
-    // =====================================================================
-    await scenario("postpaid confirm writes applied = 0 and touches no ledger", async () => {
-      const r = await rpc(CONFIRM_SQL, confirmArgs(post.invoice, post.trip, "postpaid"));
-      ok("confirm accepted", r.err === null);
-      if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
-
-      const inv = await invoiceRow(post.invoice);
-      check("prepaid_applied_sar == 0.00", money(inv.prepaid_applied_sar), 0);
-      check("amount_payable_sar == the whole grand total", money(inv.amount_payable_sar), TRIP_GROSS);
-      check("status stays 'confirmed'", inv.status, "confirmed");
-      payableIdentity("postpaid", inv);
-      check("NO ledger rows were written for this invoice", await ledgerByType(post.invoice), {});
+      await freezeHolds("postpaid confirm", post.invoice, TRIP_GROSS);
       check("the postpaid customer's Balance is still 0.00", await balance(post.customer), 0);
+      check("no ledger row exists for this customer at all", await ledgerCount(post.customer), 0);
 
       // A postpaid customer has no pool, so apply-balance must refuse on MODE —
       // not on status, and not on "nothing to apply".
       await refuses("apply_balance for a POSTPAID customer", APPLY_SQL, [post.invoice, ACTOR], "only be applied for a prepaid customer");
 
-      // Partial payments work the same on a postpaid invoice: that is the one
-      // thing postpaid gains from this rebuild.
       const p = await rpc(PAY_SQL, [post.invoice, PAY_CASH, "cash", null, null, PAID_ON, ACTOR, null]);
-      ok("postpaid partial payment accepted", p.err === null);
-      check("postpaid — status stays 'confirmed' after a partial", (await invoiceRow(post.invoice)).status, "confirmed");
-      check("postpaid — remainder", money((await settlement(post.invoice)).remainder_sar), money(TRIP_GROSS - PAY_CASH));
+      ok("partial cash payment accepted", p.err === null);
+      if (p.err) { console.log(`          db said: ${p.err.message.split("\n")[0]}`); return; }
+      check("a PARTIAL payment does not flip the status", (await invoiceRow(post.invoice)).status, "confirmed");
+      let s = await settlement(post.invoice);
+      check("settlement — paid", money(s.paid_sar), PAY_CASH);
+      check("settlement — remainder after the cash", money(s.remainder_sar), REMAINDER_AFTER_CASH);
+      check("a cash payment writes NO ledger row (it is not pool money)", await ledgerCount(post.customer), 0);
 
-      const p2 = await rpc(PAY_SQL, [post.invoice, money(TRIP_GROSS - PAY_CASH), "cash", null, null, PAID_ON, ACTOR, null]);
-      ok("postpaid final payment accepted", p2.err === null);
-      check("postpaid — the payment that clears the remainder flips to 'paid'", (await invoiceRow(post.invoice)).status, "paid");
-      check("postpaid — trip stamped", await tripInvoiceId(post.trip), post.invoice);
+      await refuses(
+        "payment of remainder + 0.01", PAY_SQL,
+        [post.invoice, OVERPAY, "cash", null, null, PAID_ON, ACTOR, null],
+        "exceeds the invoice remainder",
+      );
+      check("the refused overpay left the remainder unmoved", money((await settlement(post.invoice)).remainder_sar), REMAINDER_AFTER_CASH);
+
+      const p2 = await rpc(PAY_SQL, [post.invoice, REMAINDER_AFTER_CASH, "cash", null, null, PAID_ON, ACTOR, null]);
+      ok("the payment that clears the remainder is accepted", p2.err === null);
+      if (p2.err) { console.log(`          db said: ${p2.err.message.split("\n")[0]}`); return; }
+      check("PROOF 3 (cash) — status flips to 'paid' at exactly zero", (await invoiceRow(post.invoice)).status, "paid");
+      s = await settlement(post.invoice);
+      check("settlement — remainder is 0.00", money(s.remainder_sar), 0);
+      check("settlement — the frozen payable is settled entirely in cash", money(s.payable_sar), money(s.paid_sar));
+      check("the trip is stamped to the now-paid invoice", await tripInvoiceId(post.trip), post.invoice);
     });
 
     // =====================================================================
-    // 4. THE LEGACY GATE. 0203 does not backfill, so every pre-ledger
-    //    confirmed invoice has a NULL amount_payable_sar forever. Both settle
-    //    RPCs must refuse those by name — the app routes them to the legacy
-    //    flow, and it can only do that if the database says so out loud.
+    // §C — PROOF 4. Available RESERVES confirmed debt.
+    //
+    // Three measurements, each of which a dropped term would break:
+    //   before   nothing confirmed, so the reservation is 0
+    //   after    the invoice's value leaves Uninvoiced and arrives in
+    //            confirmed_unsettled_sar in the same instant — Available does
+    //            not jump, and it now sits a whole remainder BELOW
+    //            Balance − Uninvoiced. Drop the new term from the view and
+    //            Available reads 3580.21 instead of 2160.42.
+    //   settled  paying the invoice releases the reservation; Available lands
+    //            back where it was, because the money only moved from
+    //            RESERVED to SPENT.
     // =====================================================================
-    await scenario("legacy invoices (amount_payable_sar null) refuse both settle RPCs", async () => {
+    await scenario("PROOF 4 — Available reserves a confirmed, unsettled invoice", async () => {
+      const t = await rpc(TOPUP_SQL, [pp.customer, TOPUP_RICH, "cash", null, null, ACTOR, null]);
+      ok("top-up accepted", t.err === null);
+      check("before confirm — nothing is reserved", await reserved(pp.customer), 0);
+      check("before confirm — Available", await available(pp.customer), AVAIL_RICH_BEFORE);
+      await availableFollowsTheRule("before confirm", pp.customer);
+
+      const r = await rpc(CONFIRM_SQL, confirmArgs(pp.invoice, seeded.tripA, "prepaid", TRIP_NET, TRIP_VAT, TRIP_GROSS));
+      ok("confirm accepted", r.err === null);
+      if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
+
+      check("THE RESERVATION — confirmed_unsettled_sar == the whole grand total", await reserved(pp.customer), TRIP_GROSS);
+      check("Available is a whole remainder BELOW Balance − Uninvoiced",
+        money(money(TOPUP_RICH - UNINVOICED_AFTER) - (await available(pp.customer))), TRIP_GROSS);
+      check("CONTINUITY — confirming does not move Available at all", await available(pp.customer), AVAIL_RICH_AFTER);
+      check("...and that figure is where it was before the confirm", AVAIL_RICH_AFTER, AVAIL_RICH_BEFORE);
+      await availableFollowsTheRule("after confirm", pp.customer);
+
+      // Settle the whole thing out of the balance. Available is comfortably
+      // positive here, so this arm does NOT depend on the self-reservation
+      // line — §E owns that case.
+      const a = await rpc(APPLY_SQL, [pp.invoice, ACTOR]);
+      ok("apply_balance accepted", a.err === null);
+      if (a.err) { console.log(`          db said: ${a.err.message.split("\n")[0]}`); return; }
+      check("the draw is capped by the REMAINDER, not by Available", money((await settlement(pp.invoice)).applied_sar), TRIP_GROSS);
+      check("status flipped to 'paid'", (await invoiceRow(pp.invoice)).status, "paid");
+      check("Balance after the apply", await balance(pp.customer), BAL_AFTER_FULL_APPLY);
+      check("a PAID invoice reserves nothing — it has no remainder", await reserved(pp.customer), 0);
+      check("Available is back where it started: reserved money only became spent money",
+        await available(pp.customer), AVAIL_RICH_BEFORE);
+      await availableFollowsTheRule("after settlement", pp.customer);
+
+      // Not one of the seven, but 0204 left void_invoice alone and the previous
+      // version of this file covered it. A void reverses the applied row and
+      // gives the balance back.
+      const v = await rpc(VOID_SQL, [pp.invoice, "harness void", ACTOR]);
+      ok("void of a PAID invoice accepted", v.err === null);
+      if (v.err) { console.log(`          db said: ${v.err.message.split("\n")[0]}`); return; }
+      check("void — status", (await invoiceRow(pp.invoice)).status, "void");
+      check("void — a paired draw_reversal was written for the applied row", (await ledgerByType(pp.invoice)).draw_reversal, TRIP_GROSS);
+      check("void — Balance restored to the halala", await balance(pp.customer), TOPUP_RICH);
+      check("void — trip released back to no invoice", await tripInvoiceId(seeded.tripA), null);
+      check("void — a void invoice reserves nothing", await reserved(pp.customer), 0);
+      check("void — Available back to the pre-confirm figure", await available(pp.customer), AVAIL_RICH_BEFORE);
+    });
+
+    // =====================================================================
+    // §D — PROOFS 2 and 3 (balance arm). A partial apply, then the rest.
+    //
+    // A partial apply requires min(Available + remainder, remainder) <
+    // remainder, i.e. Available < 0. There is no fixture in which a partial
+    // application happens at a positive Available, so this scenario leans on
+    // the self-reservation line too — §E is where that is stated as the proof.
+    // =====================================================================
+    await scenario("PROOFS 2 and 3 — a partial apply leaves it unpaid; the rest flips it to paid", async () => {
+      const t = await rpc(TOPUP_SQL, [pp.customer, TOPUP_THIN, "cash", null, null, ACTOR, null]);
+      ok("top-up accepted", t.err === null);
+
+      const r = await rpc(CONFIRM_SQL, confirmArgs(pp.invoice, seeded.tripA, "prepaid", TRIP_NET, TRIP_VAT, TRIP_GROSS));
+      ok("confirm accepted", r.err === null);
+      if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
+      check("the confirm still moved nothing on the thin balance", await balance(pp.customer), TOPUP_THIN);
+      check("Available at confirm is NEGATIVE — the debt outruns the balance", await available(pp.customer), AVAIL_THIN_AT_CONFIRM);
+
+      // ---- PROOF 2. The apply draws what there is and stops.
+      const a = await rpc(APPLY_SQL, [pp.invoice, ACTOR]);
+      ok("apply_balance accepted", a.err === null);
+      if (a.err) { console.log(`          db said: ${a.err.message.split("\n")[0]}`); return; }
+      let inv = await invoiceRow(pp.invoice);
+      let s = await settlement(pp.invoice);
+      check("PROOF 2 — applied_sar == the partial draw", money(s.applied_sar), DRAW_PARTIAL);
+      check("PROOF 2 — the remainder is REDUCED, not cleared", money(s.remainder_sar), REMAINDER_AFTER_PARTIAL);
+      check("PROOF 2 — the invoice is still unpaid", inv.status, "confirmed");
+      check("PROOF 2 — the FROZEN payable is not rewritten by a settlement", money(inv.amount_payable_sar), TRIP_GROSS);
+      check("PROOF 2 — prepaid_applied_sar stays 0: it is the CONFIRM figure, not the settlement", money(inv.prepaid_applied_sar), 0);
+      check("PROOF 2 — one balance_applied row, stored NEGATIVE", (await ledgerByType(pp.invoice)).balance_applied, money(-DRAW_PARTIAL));
+      check("PROOF 2 — Balance after the partial draw", await balance(pp.customer), BAL_AFTER_PARTIAL);
+      check("PROOF 2 — the reservation shrank to the NEW remainder", await reserved(pp.customer), REMAINDER_AFTER_PARTIAL);
+      check("PROOF 2 — the trip is NOT stamped while money is owed", await tripInvoiceId(seeded.tripA), pp.invoice);
+
+      // Balance is spent to the halala, so a second apply has nothing left:
+      // Available + remainder is exactly 0. That is a DIFFERENT refusal from
+      // "wrong status" or "wrong mode", and matching its words keeps them apart.
+      await refuses("apply_balance with the balance spent out", APPLY_SQL, [pp.invoice, ACTOR], "Nothing to apply");
+      check("the refused apply left the remainder unmoved", money((await settlement(pp.invoice)).remainder_sar), REMAINDER_AFTER_PARTIAL);
+
+      // ---- PROOF 3. Top up, apply the rest, land on exactly zero.
+      const t2 = await rpc(TOPUP_SQL, [pp.customer, TOPUP_TOP, "cash", null, null, ACTOR, null]);
+      ok("second top-up accepted", t2.err === null);
+      check("Available before the second apply", await available(pp.customer), AVAIL_BEFORE_REST);
+
+      const a2 = await rpc(APPLY_SQL, [pp.invoice, ACTOR]);
+      ok("second apply accepted", a2.err === null);
+      if (a2.err) { console.log(`          db said: ${a2.err.message.split("\n")[0]}`); return; }
+      inv = await invoiceRow(pp.invoice);
+      s = await settlement(pp.invoice);
+      check("PROOF 3 — applied_sar is the sum of both draws", money(s.applied_sar), money(DRAW_PARTIAL + DRAW_REST));
+      check("PROOF 3 — the second draw is capped by the REMAINDER, not by Available",
+        money(money(s.applied_sar) - DRAW_PARTIAL), DRAW_REST);
+      check("PROOF 3 — the remainder reached exactly 0.00", money(s.remainder_sar), 0);
+      check("PROOF 3 — and ONLY then does the status flip to 'paid'", inv.status, "paid");
+      check("PROOF 3 — the frozen payable survived both settlements", money(inv.amount_payable_sar), TRIP_GROSS);
+      check("PROOF 3 — payable == paid + applied", money(s.payable_sar), money(money(s.paid_sar) + money(s.applied_sar)));
+      check("PROOF 3 — Balance after", await balance(pp.customer), BAL_AFTER_REST);
+      check("PROOF 3 — the reservation is released", await reserved(pp.customer), 0);
+      check("PROOF 3 — the trip is stamped to the now-paid invoice", await tripInvoiceId(seeded.tripA), pp.invoice);
+    });
+
+    // =====================================================================
+    // §E — PROOF 5. The self-reservation, in the migration's own shape.
+    //
+    // Balance 300.00 against a remainder of 400.00, nothing uninvoiced. The
+    // view reserves this invoice, so Available reads −100.00. apply_balance
+    // adds the invoice's OWN remainder back before capping:
+    //
+    //     v_available := -100.00 + 400.00 = 300.00
+    //     v_draw      := least(300.00, 400.00) = 300.00
+    //
+    // DELETE THAT ONE LINE and v_available stays −100.00, least(−100, 400) is
+    // −100, the `v_draw <= 0` guard fires, and the RPC raises "Nothing to
+    // apply". Three assertions below go red on that: "apply accepted", the
+    // draw figure, and the balance landing on zero. The negative-Available
+    // precondition is asserted FIRST so the case cannot quietly become
+    // vacuous if the fixture ever drifts into positive territory.
+    // =====================================================================
+    await scenario("PROOF 5 — apply_balance works when the remainder EXCEEDS the balance", async () => {
+      const t = await rpc(TOPUP_SQL, [pin.customer, PIN_TOPUP, "cash", null, null, ACTOR, null]);
+      ok("top-up accepted", t.err === null);
+
+      const r = await rpc(CONFIRM_SQL, confirmArgs(pin.invoice, pin.trip, "prepaid", SMALL_NET, SMALL_VAT, SMALL_GROSS));
+      ok("confirm accepted", r.err === null);
+      if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
+
+      check("setup — this customer has nothing uninvoiced, so only the reservation moves", await uninvoiced(pin.customer), 0);
+      check("setup — the remainder is 400.00", money((await settlement(pin.invoice)).remainder_sar), SMALL_GROSS);
+      check("setup — the balance is 300.00, BELOW the remainder", await balance(pin.customer), PIN_TOPUP);
+      const availBefore = await available(pin.customer);
+      check("PRECONDITION — Available reads NEGATIVE, because the invoice is reserved against itself", availBefore < 0, true);
+      check("PRECONDITION — and it reads exactly −100.00", availBefore, PIN_AVAIL);
+
+      const a = await rpc(APPLY_SQL, [pin.invoice, ACTOR]);
+      ok("PROOF 5 — apply_balance is ACCEPTED at a negative Available", a.err === null);
+      if (a.err) {
+        console.log(`          db said: ${a.err.message.split("\n")[0]}`);
+        console.log("          THIS IS THE SELF-RESERVATION LINE. apply_balance_to_invoice must add the");
+        console.log("          invoice's own remainder back to Available before capping the draw.");
+        return;
+      }
+      const s = await settlement(pin.invoice);
+      check("PROOF 5 — the draw is the whole balance, 300.00", money(s.applied_sar), PIN_DRAW);
+      check("PROOF 5 — the balance is spent to exactly 0.00", await balance(pin.customer), 0);
+      check("PROOF 5 — the draw did NOT overrun into a negative balance", (await balance(pin.customer)) >= 0, true);
+      check("PROOF 5 — the remainder is reduced to 100.00", money(s.remainder_sar), PIN_REMAINDER);
+      check("PROOF 5 — the invoice is still unpaid", (await invoiceRow(pin.invoice)).status, "confirmed");
+      check("PROOF 5 — the reservation shrank to what is still owed", await reserved(pin.customer), PIN_REMAINDER);
+
+      // The cap still binds at the bottom: balance 0, remainder 100, so
+      // Available + remainder is 0 and there is genuinely nothing to apply.
+      // Without this the self-reservation line could be "fixed" by ignoring
+      // Available altogether, which would draw a balance the customer has not got.
+      await refuses("a second apply with the balance spent out", APPLY_SQL, [pin.invoice, ACTOR], "Nothing to apply");
+      check("the refused apply left the balance at 0.00", await balance(pin.customer), 0);
+    });
+
+    // =====================================================================
+    // §F — PROOF 6. A refund is capped by the NEW Available.
+    //
+    // Balance 1000.00, nothing uninvoiced, one confirmed invoice owing 400.00.
+    // Under 0203's view the cap would have been 1000.00 and 600.01 would have
+    // sailed through, handing back money already invoiced. Under 0204 the cap
+    // is 600.00 and the refusal quotes the new definition by name.
+    // =====================================================================
+    await scenario("PROOF 6 — a refund is capped by Available, which now reserves confirmed debt", async () => {
+      const t = await rpc(TOPUP_SQL, [ref.customer, REF_TOPUP, "cash", null, null, ACTOR, null]);
+      ok("top-up accepted", t.err === null);
+
+      const r = await rpc(CONFIRM_SQL, confirmArgs(ref.invoice, ref.trip, "prepaid", SMALL_NET, SMALL_VAT, SMALL_GROSS));
+      ok("confirm accepted", r.err === null);
+      if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
+
+      check("setup — nothing uninvoiced, so the cap moves on the reservation alone", await uninvoiced(ref.customer), 0);
+      check("setup — the confirmed invoice reserves 400.00", await reserved(ref.customer), SMALL_GROSS);
+      check("the cap is 600.00, not the 1000.00 on the books", await available(ref.customer), REF_AVAIL);
+      check("the cap is TIGHTER than Balance − Uninvoiced by exactly the confirmed remainder",
+        money(REF_TOPUP - (await available(ref.customer))), SMALL_GROSS);
+
+      await refuses(
+        "refund of the cap + 0.01", REFUND_SQL,
+        [ref.customer, REF_OVER, "cash", null, null, ACTOR, null],
+        "exceeds the customer's Available balance",
+      );
+      check("the refused refund left the Balance unmoved", await balance(ref.customer), REF_TOPUP);
+
+      // The cap is `>`, not `>=` — refunding exactly Available is allowed.
+      const rf = await rpc(REFUND_SQL, [ref.customer, REF_AVAIL, "cash", null, null, ACTOR, null]);
+      ok("refund of EXACTLY the cap accepted", rf.err === null);
+      if (rf.err) { console.log(`          db said: ${rf.err.message.split("\n")[0]}`); return; }
+      check("the refund row is a 'refund'", rf.row?.entry_type, "refund");
+      check("the refund is stored NEGATIVE", money(rf.row?.amount_sar), money(-REF_AVAIL));
+      ok("a credit note number was allocated", /^CN-\d{4}-\d{6}$/.test(String(rf.row?.doc_number)));
+      check("Balance after the refund", await balance(ref.customer), REF_BAL_AFTER);
+      check("Available is spent to exactly 0.00", await available(ref.customer), 0);
+      check("the money still owed on the confirmed invoice is untouched by the refund",
+        await reserved(ref.customer), SMALL_GROSS);
+      check("what remains on the books is exactly the reserved debt", await balance(ref.customer), SMALL_GROSS);
+
+      await refuses(
+        "a further refund of one halala", REFUND_SQL,
+        [ref.customer, 0.01, "cash", null, null, ACTOR, null],
+        "exceeds the customer's Available balance",
+      );
+    });
+
+    // =====================================================================
+    // §G — PROOF 7. The bank-transfer proof rules, on all three money RPCs.
+    // Each case is otherwise valid, so a refusal cannot be credited to some
+    // other gate. Cash is checked too: the asymmetry is deliberate, and an
+    // assertion is the only thing that keeps it.
+    // =====================================================================
+    await scenario("PROOF 7 — a bank transfer needs its proof; cash needs none", async () => {
+      await rpc(TOPUP_SQL, [pp.customer, TOPUP_THIN, "cash", null, null, ACTOR, null]);
+      const r = await rpc(CONFIRM_SQL, confirmArgs(pp.invoice, seeded.tripA, "prepaid", TRIP_NET, TRIP_VAT, TRIP_GROSS));
+      if (r.err) { fail("PROOF 7: seed confirm failed", r.err.message.split("\n")[0]); return; }
+      const inv = pp.invoice;
+
+      // --- record_topup
+      await refuses("top-up by transfer with no photo", TOPUP_SQL,
+        [pp.customer, 100, "bank_transfer", "REF-1", null, ACTOR, null], "requires a photo of the transfer.");
+      await refuses("top-up by transfer with no reference", TOPUP_SQL,
+        [pp.customer, 100, "bank_transfer", null, "proofs/x.pdf", ACTOR, null], "requires a transfer reference.");
+      await refuses("top-up by transfer with neither", TOPUP_SQL,
+        [pp.customer, 100, "bank_transfer", null, null, ACTOR, null], "both are missing");
+      // 0204 TRIMS these inputs. Under 0203 they were tested with `is null`, so
+      // a single space satisfied the rule and the proof was optional in practice.
+      await refuses("top-up by transfer with a WHITESPACE reference", TOPUP_SQL,
+        [pp.customer, 100, "bank_transfer", "   ", "proofs/x.pdf", ACTOR, null], "requires a transfer reference.");
+
+      // --- record_refund (7 arguments since 0204; p_photo_path is the fifth)
+      await refuses("refund by transfer with no photo", REFUND_SQL,
+        [pp.customer, 1, "bank_transfer", "REF-1", null, ACTOR, null], "requires a photo of the transfer.");
+      await refuses("refund by transfer with no reference", REFUND_SQL,
+        [pp.customer, 1, "bank_transfer", null, "proofs/x.pdf", ACTOR, null], "requires a transfer reference.");
+      await refuses("refund by transfer with neither", REFUND_SQL,
+        [pp.customer, 1, "bank_transfer", null, null, ACTOR, null], "both are missing");
+      await refuses("refund by transfer with a WHITESPACE photo path", REFUND_SQL,
+        [pp.customer, 1, "bank_transfer", "REF-1", "   ", ACTOR, null], "requires a photo of the transfer.");
+
+      // --- record_invoice_payment. The DATE is required too: it is what
+      //     reconciles the row against the bank statement.
+      await refuses("payment by transfer with no proof", PAY_SQL,
+        [inv, 100, "bank_transfer", "REF-1", null, PAID_ON, ACTOR, null], "requires a proof-of-payment file");
+      await refuses("payment by transfer with no reference", PAY_SQL,
+        [inv, 100, "bank_transfer", null, "proofs/x.pdf", PAID_ON, ACTOR, null], "requires a payment reference");
+      await refuses("payment by transfer with no date", PAY_SQL,
+        [inv, 100, "bank_transfer", "REF-1", "proofs/x.pdf", null, ACTOR, null], "requires a payment date");
+      await refuses("payment by transfer with a WHITESPACE proof path", PAY_SQL,
+        [inv, 100, "bank_transfer", "REF-1", "   ", PAID_ON, ACTOR, null], "requires a proof-of-payment file");
+
+      // --- cash needs none of the three, on any of the three RPCs.
+      const cashTop = await rpc(TOPUP_SQL, [pp.customer, 100, "cash", null, null, ACTOR, null]);
+      ok("cash top-up with no reference and no photo is ACCEPTED", cashTop.err === null);
+      if (cashTop.err) console.log(`          db said: ${cashTop.err.message.split("\n")[0]}`);
+      const cashPay = await rpc(PAY_SQL, [inv, 100, "cash", null, null, null, ACTOR, null]);
+      ok("cash payment with no proof, no reference and no date is ACCEPTED", cashPay.err === null);
+      if (cashPay.err) console.log(`          db said: ${cashPay.err.message.split("\n")[0]}`);
+      // The refund customer is the one with room under the cap for a cash refund.
+      await rpc(TOPUP_SQL, [ref.customer, REF_TOPUP, "cash", null, null, ACTOR, null]);
+      const cashRef = await rpc(REFUND_SQL, [ref.customer, 1, "cash", null, null, ACTOR, null]);
+      ok("cash refund with no reference and no photo is ACCEPTED", cashRef.err === null);
+      if (cashRef.err) console.log(`          db said: ${cashRef.err.message.split("\n")[0]}`);
+
+      // --- the neighbouring gates, so a proof-rule failure cannot be confused
+      //     with one of these.
+      await refuses("method 'balance' on a payment (it is applied, not paid)", PAY_SQL,
+        [inv, 100, "balance", null, null, PAID_ON, ACTOR, null], "Invalid payment method");
+      await refuses("payment of zero", PAY_SQL,
+        [inv, 0, "cash", null, null, PAID_ON, ACTOR, null], "greater than zero");
+      await refuses("payment without an actor", PAY_SQL,
+        [inv, 100, "cash", null, null, PAID_ON, "  ", null], "Actor identity");
+      await refuses("apply_balance without an actor", APPLY_SQL, [inv, "  "], "Actor identity");
+      await refuses("refund without an actor", REFUND_SQL,
+        [pp.customer, 1, "cash", null, null, "  ", null], "Actor identity");
+    });
+
+    // =====================================================================
+    // §H — THE LEGACY GATE. 0203 did not backfill and 0204 did not either, so
+    // every pre-ledger confirmed invoice has a NULL amount_payable_sar forever.
+    // Both settle RPCs must refuse those by name — the app routes them to the
+    // legacy flow, and it can only do that if the database says so out loud.
+    // The same null is what keeps them OUT of the new reservation term, whose
+    // money is already inside the seeded opening balance.
+    // =====================================================================
+    await scenario("§H — legacy invoices (amount_payable_sar null) refuse both settle RPCs", async () => {
       const legacy = (await c.query(
         `insert into public.invoices (customer_id, period_start, period_end, status, grand_total_sar)
          values ($1, $2, $3, 'confirmed', $4) returning id`,
         [pp.customer, PERIOD_START, PERIOD_END, TRIP_GROSS])).rows[0].id as string;
       check("the legacy row really has a NULL payable", (await invoiceRow(legacy)).amount_payable_sar, null);
       check("v_invoice_settlement reports a NULL remainder for it", (await settlement(legacy)).remainder_sar, null);
+      check("a legacy invoice reserves NOTHING — its money is in the opening balance",
+        await reserved(pp.customer), 0);
       await refuses("record_invoice_payment on a legacy invoice", PAY_SQL,
         [legacy, PAY_CASH, "cash", null, null, PAID_ON, ACTOR, null], "no frozen amount payable");
       await refuses("apply_balance_to_invoice on a legacy invoice", APPLY_SQL,
@@ -590,51 +946,43 @@ async function main(): Promise<void> {
     });
 
     // =====================================================================
-    // 5. INPUT GATES + ANON (CLAUDE.md §6). Each runs against a real
-    //    confirmed prepaid invoice so the ONLY thing wrong is the argument
-    //    under test — a refusal cannot be credited to the wrong gate.
+    // §I — ANON (CLAUDE.md §6). Every money RPC this file drives must be
+    // closed to the anon role.
     // =====================================================================
-    await scenario("input gates and grants", async () => {
-      await rpc(TOPUP_SQL, [pp.customer, TOPUP_SHORT, "cash", null, null, ACTOR, null]);
-      const r = await rpc(CONFIRM_SQL, confirmArgs(pp.invoice, seeded.tripA, "prepaid"));
-      if (r.err) { fail("gates: seed confirm failed", r.err.message.split("\n")[0]); return; }
+    await scenario("§I — anon is denied EXECUTE on every money RPC", async () => {
+      await rpc(TOPUP_SQL, [pp.customer, TOPUP_THIN, "cash", null, null, ACTOR, null]);
+      const r = await rpc(CONFIRM_SQL, confirmArgs(pp.invoice, seeded.tripA, "prepaid", TRIP_NET, TRIP_VAT, TRIP_GROSS));
+      if (r.err) { fail("§I: seed confirm failed", r.err.message.split("\n")[0]); return; }
       const inv = pp.invoice;
-
-      await refuses("method 'balance' (it is applied, not paid)", PAY_SQL,
-        [inv, 100, "balance", null, null, PAID_ON, ACTOR, null], "Invalid payment method");
-      await refuses("bank_transfer with no proof", PAY_SQL,
-        [inv, 100, "bank_transfer", "REF-1", null, PAID_ON, ACTOR, null], "requires a proof-of-payment file");
-      await refuses("bank_transfer with no reference", PAY_SQL,
-        [inv, 100, "bank_transfer", null, "proofs/x.pdf", PAID_ON, ACTOR, null], "requires a payment reference");
-      await refuses("bank_transfer with no date", PAY_SQL,
-        [inv, 100, "bank_transfer", "REF-1", "proofs/x.pdf", null, ACTOR, null], "requires a payment date");
-      await refuses("payment of zero", PAY_SQL,
-        [inv, 0, "cash", null, null, PAID_ON, ACTOR, null], "greater than zero");
-      await refuses("payment without an actor", PAY_SQL,
-        [inv, 100, "cash", null, null, PAID_ON, "  ", null], "Actor identity");
-      await refuses("apply_balance without an actor", APPLY_SQL, [inv, "  "], "Actor identity");
-
-      // cash needs neither proof nor reference nor date — the asymmetry is
-      // deliberate, and an assertion is the only thing that keeps it.
-      const cashOnly = await rpc(PAY_SQL, [inv, 100, "cash", null, null, null, ACTOR, null]);
-      ok("cash payment with no proof, no reference and no date is ACCEPTED", cashOnly.err === null);
-      if (cashOnly.err) console.log(`          db said: ${cashOnly.err.message.split("\n")[0]}`);
 
       await refuses("anon denied record_invoice_payment", PAY_SQL,
         [inv, 100, "cash", null, null, PAID_ON, ACTOR, null], "permission denied", "anon");
       await refuses("anon denied apply_balance_to_invoice", APPLY_SQL, [inv, ACTOR], "permission denied", "anon");
+      await refuses("anon denied record_topup", TOPUP_SQL,
+        [pp.customer, 100, "cash", null, null, ACTOR, null], "permission denied", "anon");
+      await refuses("anon denied record_refund", REFUND_SQL,
+        [pp.customer, 1, "cash", null, null, ACTOR, null], "permission denied", "anon");
       await refuses("anon denied void_invoice", VOID_SQL, [inv, "x", ACTOR], "permission denied", "anon");
+      // The EXECUTE grant is checked before the function body runs, so it does
+      // not matter that this invoice is already confirmed: a denial here is
+      // the grant, and the "not in review status" raise would prove it was not.
+      await refuses("anon denied confirm_invoice", CONFIRM_SQL,
+        confirmArgs(inv, seeded.tripA, "prepaid", TRIP_NET, TRIP_VAT, TRIP_GROSS),
+        "permission denied", "anon");
     });
   } finally {
     // ---- TEARDOWN. Unconditional: a thrown assertion must not strand rows.
+    //      Everything above ran inside this one transaction, so the rollback is
+    //      the whole cleanup — no fixture of this harness's making can survive
+    //      it, and nothing pre-existing was ever written to.
     await c.query("rollback");
     await c.end();
   }
 
   // ---- ZERO-LEAK, on a FRESH connection so it cannot read its own
   //      uncommitted transaction. Counters included: confirm allocated invoice
-  //      numbers and record_topup allocated receipt numbers in nearly every
-  //      scenario above.
+  //      numbers, record_topup allocated receipt numbers and record_refund
+  //      allocated credit-note numbers in nearly every scenario above.
   const postConn = new Client(conn);
   await postConn.connect();
   const censusAfter = (await postConn.query(censusSql)).rows[0];
@@ -647,18 +995,25 @@ async function main(): Promise<void> {
      union all select 'invoice', id from public.invoices where id = any($2::uuid[])
      union all select 'trip', id from public.trips where id = any($3::uuid[])`,
     [
-      [seeded.customer, seeded.customer2],
-      [seeded.invoice, seeded.invoice2],
-      [seeded.tripA, seeded.tripB, seeded.tripC],
+      [seeded.customer, seeded.customer2, seeded.customer3, seeded.customer4],
+      [seeded.invoice, seeded.invoice2, seeded.invoice3, seeded.invoice4],
+      [seeded.tripA, seeded.tripB, seeded.tripC, seeded.tripD, seeded.tripE],
     ],
   )).rows;
   check("zero-leak — none of the seeded ids survive", leaked, []);
   await postConn.end();
 
+  // ---- SUMMARY. The assertion count is part of the verdict: a run that
+  //      asserted nothing has zero failures too, and must not read as a pass.
   const n = failureCount();
+  if (assertions === 0) {
+    console.log("\ninvoice-settlement-check: NO ASSERTIONS RAN — that is a failure, not a pass.\n");
+    process.exit(1);
+  }
   console.log(n === 0
-    ? "\ninvoice-settlement-check: ALL ASSERTIONS PASSED — the draw, the payable, the settlement and the void all hold.\n"
-    : `\ninvoice-settlement-check: ${n} FAILURE(S)\n`);
+    ? `\ninvoice-settlement-check: ALL ${assertions} ASSERTIONS PASSED — confirm moves no money, ` +
+      `settlement does, Available reserves confirmed debt, and a transfer needs its proof.\n`
+    : `\ninvoice-settlement-check: ${n} FAILURE(S) out of ${assertions} assertions\n`);
   process.exit(n === 0 ? 0 : 1);
 }
 
