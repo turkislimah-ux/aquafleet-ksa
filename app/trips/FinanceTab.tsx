@@ -349,11 +349,19 @@ export default function FinanceTab({
       // them as Payment rows; prepaid as record-only "Invoice payable" rows.
       const customerPaidInvoices = paidInvoicesByCustomer.get(c.id) ?? [];
 
-      // "Unsettled Trips": delivered trips not yet on a PAID invoice —
-      // unchanged, a count of rows, not a money figure.
-      const unsettledTripsCount = project
-        ? (tripsByProject.get(project.id) ?? []).filter((t) => t.delivered_at != null && !t.invoiceLocked).length
-        : 0;
+      // "Unsettled Trips": delivered work not yet on a CONFIRMED or PAID
+      // invoice — a count of rows, not a money figure. Turki's ruling.
+      //
+      // READ FROM THE SAME SOURCE AS EVERY OTHER SURFACE. This used to count
+      // locally, `delivered_at != null && !invoiceLocked`, and invoiceLocked
+      // is `status = 'paid'` BY CONTRACT — so a confirmed invoice left its
+      // trips counted here while v_customer_uninvoiced had already dropped
+      // them. The column then disagreed with Available, with the statement
+      // footer and with the statement's own trip rows, on the same screen.
+      // fetchUninvoicedTripCounts restates the view's trip predicate exactly
+      // (delivered AND (no invoice OR the invoice is still draft/review)),
+      // and it was already fetched and passed in — just unread.
+      const unsettledTripsCount = uninvoicedTripCounts[c.id] ?? 0;
 
       // "Rate": per-trip price, VAT-inclusive — display of the project's
       // CURRENT rate, pre-dating the ledger and untouched by it.
