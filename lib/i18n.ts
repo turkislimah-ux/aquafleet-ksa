@@ -9798,37 +9798,65 @@ export const dict = {
       confirmUnpay: { en: "Yes, un-pay", ar: "نعم، ألغِ السداد" },
       working: { en: "Working…", ar: "جارٍ التنفيذ…" },
 
-      // ── Settlement workspace, LEDGER ERA (0203) — ALL `no-print` ─────────
-      // ALL FRESH, and none of it reaches paper. The DOCUMENT states what was
-      // billed and what the balance covered at issue (prepaidApplied /
-      // amountPayable above, frozen columns); THIS states what is still owed
-      // today, which moves every time money arrives. Two different facts, which
-      // is why they have two different vocabularies and never share a string.
-      sTitle: { en: "Settlement", ar: "التسوية" },
-      // The chain: Amount Payable − Paid − Applied − Written off = Outstanding.
-      // `sPaid` is NOT `paid` above: that one is the invoice's STATUS ("مدفوعة",
-      // feminine, describing the invoice), this one is an AMOUNT.
-      sPaid: { en: "Paid", ar: "المسدَّد" },
-      sApplied: { en: "Applied from balance", ar: "المطبَّق من الرصيد" },
-      sWrittenOff: { en: "Written off", ar: "المشطوب" },
+      // ── Settlement, LEDGER ERA (0203) — ALL `no-print` ───────────────────
+      // None of it reaches paper. The DOCUMENT states what was billed and what
+      // the balance covered at issue (prepaidApplied / amountPayable above,
+      // frozen columns); THIS names what is still owed today, which moves every
+      // time money arrives. Two different facts, two vocabularies, never a
+      // shared string.
+      //
+      // FIVE LEAVES STOOD HERE AND ARE GONE with the panel that read them:
+      // sTitle, sPaid, sApplied, sWrittenOff and sAvailable captioned a
+      // five-row restatement of v_invoice_settlement, shown so the operator
+      // could choose between Record payment and Apply balance. Mark Paid
+      // removes that choice, so the rows had no question left to answer. The
+      // two survivors are the two the rest of the app still asks for.
+      //
+      // `sRemainder` is NOT screen copy any more — it is the printed
+      // settlement list's closing caption (lib/invoiceViewModel.ts). Deleting
+      // it with its neighbours would have blanked a row on the customer's
+      // document.
       sRemainder: { en: "Outstanding", ar: "المتبقي" },
-      // The Available balance, shown beside the payable while an invoice RESTS
-      // at Confirmed. Since 0204 confirm draws nothing, so the operator looking
-      // at a confirmed invoice needs both halves of the decision in one place:
-      // what this invoice wants, and what the customer has to give it. Same
-      // words as the apply panel's own first row — one concept, one wording.
-      sAvailable: { en: "Available balance", ar: "الرصيد المتاح" },
       // Words, never a zero. An unreadable settlement and a settled invoice
       // look identical in figures and could not be less alike in meaning.
       sUnavailable: {
         en: "Settlement figures could not be read — nothing can be recorded against this invoice until they load.",
         ar: "تعذّرت قراءة أرقام التسوية — لا يمكن تسجيل أي شيء على هذه الفاتورة حتى تُحمَّل.",
       },
-      // Buttons. "Record payment" replaces "Mark Paid" on every ledger-era
-      // invoice: the act is no longer "declare this settled", it is "money
-      // arrived, here is how much".
+      // Buttons. `markPaid` above is THE settlement action on a ledger-era
+      // invoice again — the two that replaced it, Record payment and Apply
+      // balance, asked the operator to choose between two money doors on
+      // figures only the server holds. `recordPaymentBtn` survives as the
+      // second step's label: once the balance has been drawn, what is left is
+      // cash arriving, and that IS "record payment".
       recordPaymentBtn: { en: "Record payment", ar: "تسجيل سداد" },
-      applyBalanceBtn: { en: "Apply balance", ar: "تطبيق الرصيد" },
+      // ── MARK PAID's one confirmation ─────────────────────────────────────
+      // It states the amount leaving the balance; these four say what that
+      // leaves behind and what happens next. Every other row in the dialog
+      // reuses the apply-* wording above, because it is the same figure under
+      // the same name — a second vocabulary for one concept is how two screens
+      // start disagreeing about a number they share.
+      mpOutstandingAfter: { en: "Outstanding afterwards", ar: "المتبقي بعد ذلك" },
+      // The draw settles it outright, so there is no second step to warn about.
+      mpNoteClears: {
+        en: "This clears the invoice in full and marks it paid.",
+        ar: "هذا يسدّد الفاتورة بالكامل ويحدّدها كمدفوعة.",
+      },
+      // …and when it does not, the cash form is coming. Said BEFORE the press,
+      // so a second step is never something the operator discovers by arriving
+      // at it.
+      mpNoteShortfall: {
+        en: "The balance does not cover all of it. What is left will be collected on the next step.",
+        ar: "الرصيد لا يغطيها بالكامل. وسيُحصَّل المتبقي في الخطوة التالية.",
+      },
+      // NOT "the balance is zero" — it may be a real figure that is entirely
+      // spoken for by other confirmed work. What is being stated is that none
+      // of it can reach THIS invoice, which is the database's own rule and the
+      // reason no draw is attempted.
+      mpNoBalance: {
+        en: "None of this balance is available for this invoice, so nothing will be applied — record the payment instead.",
+        ar: "لا شيء من هذا الرصيد متاح لهذه الفاتورة، فلن يُطبَّق شيء — سجّل السداد بدلاً من ذلك.",
+      },
       fPayAmount: { en: "Amount received (SAR) *", ar: "المبلغ المستلم (ريال) *" },
       payAmountHint: {
         en: "Outstanding on this invoice: {amount}. Less than that is recorded as a partial payment.",

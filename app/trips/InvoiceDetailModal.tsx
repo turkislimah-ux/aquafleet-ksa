@@ -336,12 +336,11 @@ export default function InvoiceDetailModal({
   // Forces the (still uncontrolled, as file inputs must be) proof picker to
   // remount and clear — same technique as chargeImageInputKey above.
   const [payProofInputKey, setPayProofInputKey] = useState(0);
-  // Apply-balance confirmation. Not a form — apply_balance_to_invoice takes no
-  // amount at all (it draws min(Available, remainder) under its own row lock).
-  // This flag only opens the panel that STATES those two figures before the
-  // ledger row is written, which is the same courtesy the old pay-with-balance
-  // panel paid and the only thing worth keeping from it.
-  const [applyOpen, setApplyOpen] = useState(false);
+  // MARK PAID's one confirmation. Not a form — apply_balance_to_invoice takes
+  // no amount at all (it draws min(Available + remainder, remainder) under its
+  // own row lock). This flag only opens the panel that STATES the amount about
+  // to leave the balance before the ledger row is written.
+  const [markPaidOpen, setMarkPaidOpen] = useState(false);
   const [unpaying, setUnpaying] = useState(false);
   const [unpayReason, setUnpayReason] = useState("");
   const [deletingDraft, setDeletingDraft] = useState(false);
@@ -365,15 +364,21 @@ export default function InvoiceDetailModal({
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
 
-  async function load() {
-    if (!invoiceId) return;
+  // RETURNS WHAT IT LOADED, as well as storing it. Mark Paid is a COMPOSED
+  // action — apply the balance, then look at what is left and decide whether a
+  // payment form is still needed — and `raw` is state, so it does not change
+  // until the next render. Reading the decision off the returned row keeps the
+  // whole sequence on one set of figures; reading it off `raw` would branch on
+  // the settlement as it stood BEFORE the draw.
+  async function load(): Promise<typeof raw> {
+    if (!invoiceId) return null;
     setLoading(true);
     setError(null);
     const r = await getInvoice(invoiceId);
     if (r.error || !r.data) {
       setError(r.error ?? t("trips.invoice.errLoad", lang));
       setLoading(false);
-      return;
+      return null;
     }
     setRaw(r.data);
 
@@ -391,7 +396,7 @@ export default function InvoiceDetailModal({
       if (p.error || !p.data) {
         setError(p.error ?? t("trips.invoice.errPreview", lang));
         setLoading(false);
-        return;
+        return null;
       }
       setView({
         paymentMode: p.data.paymentMode,
@@ -451,6 +456,7 @@ export default function InvoiceDetailModal({
       });
     }
     setLoading(false);
+    return r.data;
   }
 
   useEffect(() => {
@@ -462,7 +468,7 @@ export default function InvoiceDetailModal({
     setPayingOpen(false);
     setPayMethod("cash");
     setPayAmount("");
-    setApplyOpen(false);
+    setMarkPaidOpen(false);
     setUnpaying(false);
     setUnpayReason("");
     setDeletingDraft(false);
@@ -904,24 +910,70 @@ export default function InvoiceDetailModal({
     if (ok) setPayingOpen(false);
   }
 
-  // APPLY BALANCE — settle (part of) a confirmed prepaid invoice out of the
-  // customer's Available balance, AFTER confirm.
+  // MARK PAID — THE one settlement action on a ledger-era confirmed invoice.
   //
-  // It exists because the confirm-time draw is a SNAPSHOT. confirm_invoice()
-  // takes min(Available, grand total) at the confirm instant and freezes the
-  // shortfall as amount_payable_sar; a top-up the next day cannot retroactively
-  // change a frozen figure, so it is applied here as its own dated ledger row.
+  // It is composed, not new: the balance draw and the cash receipt are the two
+  // money doors 0204 built, and this walks the operator through them in the
+  // order the money actually moves. What it replaces is a screen that offered
+  // both doors side by side and made the operator decide which one settlement
+  // needed — a question only the figures can answer, and they are on the server.
   //
-  // NO AMOUNT IS SENT, and that is the design: the RPC draws
-  // min(Available, remainder) under the customer row lock. An amount computed
-  // in this component would be a second opinion on the customer's balance, read
-  // a moment earlier than the write — which is precisely the class of bug the
-  // old pay-with-balance panel kept producing. The panel above this button
-  // PREVIEWS the two figures; it does not decide them.
-  async function onApplyBalance() {
+  //   1. Draw whatever the balance can cover (prepaid, and only when there is
+  //      something to draw). NO AMOUNT IS SENT: apply_balance_to_invoice()
+  //      computes it under the customer row lock. An amount decided here would
+  //      be a second opinion on the balance, read a moment before the write.
+  //   2. Re-read. Remainder at zero means the RPC already flipped the invoice
+  //      to paid and there is nothing further to ask for.
+  //   3. Anything still outstanding is cash the customer owes, so the payment
+  //      form opens pre-filled with exactly that — which is the same form a
+  //      postpaid invoice goes straight to, because by then it is the same fact.
+  //
+  // THE RE-READ USES load()'s RETURN, not `raw`. `raw` is state and still holds
+  // the pre-draw settlement at this point, so branching on it would offer a
+  // payment form for an invoice that just went paid, or skip one that did not.
+  //
+  // EVERY REFUSAL IS THE SERVER'S OWN SENTENCE. Nothing here interprets an RPC
+  // error or substitutes a friendlier one: the reasons it can raise (wrong
+  // status, wrong mode, nothing to apply) are distinctions the operator needs
+  // in the database's own words.
+  async function onMarkPaid() {
     if (!invoiceId) return;
-    const ok = await runAction(() => applyBalanceToInvoice(invoiceId));
-    if (ok) setApplyOpen(false);
+    setBusy(true);
+    setActionError(null);
+    try {
+      // The cash-only paths — postpaid, an unusable balance, or a prepaid
+      // customer whose Available cannot cover a halala of this invoice. No
+      // draw is attempted because the RPC would refuse one ("Nothing to
+      // apply"), and a refusal the screen could have predicted is noise.
+      if (!isPrepaid || markPaidDraw == null || markPaidDraw <= 0) {
+        setMarkPaidOpen(false);
+        setPayAmount(remainderSar != null ? String(remainderSar) : "");
+        setPayingOpen(true);
+        return;
+      }
+
+      const res = await applyBalanceToInvoice(invoiceId);
+      if (res.error) {
+        setActionError(res.error);
+        return;
+      }
+      const fresh = await load();
+      onMutated();
+      router.refresh();
+
+      const left = fresh?.settlement?.remainder_sar ?? null;
+      setMarkPaidOpen(false);
+      // A null remainder here is a READ that failed, not a settled invoice, so
+      // it must not close the flow as though the invoice were paid. The form
+      // opens with an empty amount and the operator types what arrived.
+      if (left != null && left <= 0) return;
+      setPayAmount(left != null ? String(left) : "");
+      setPayingOpen(true);
+    } catch {
+      setActionError(t("shared.upload.saveFailedNetwork", lang));
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!open || !invoiceId || !mounted) return null;
@@ -975,12 +1027,30 @@ export default function InvoiceDetailModal({
   // be confused with prepaid_applied_sar beside it, which froze at confirm:
   // this is what a post-confirm apply-balance would have to draw from.
   const availableSar = raw?.availableSar ?? null;
-  // What Apply Balance would actually move — the RPC's own min(), previewed.
-  // Null when either side is unreadable, never zero: "nothing to apply" and "we
-  // could not find out" are different answers and only one of them is a reason
-  // to hide the button.
-  const applicableSar =
-    availableSar == null || remainderSar == null ? null : round2(Math.min(availableSar, remainderSar));
+  // WHAT MARK PAID WILL TAKE OFF THE BALANCE — apply_balance_to_invoice()'s own
+  // arithmetic, previewed. Null when either side is unreadable, never zero:
+  // "nothing to draw" and "we could not find out" are different answers and
+  // only one of them is a reason to send the operator straight to the cash
+  // form.
+  //
+  // THE ADD-BACK IS THE WHOLE POINT, and its absence was a real defect. Since
+  // 0204 `v_customer_available` RESERVES the unsettled remainder of every
+  // confirmed ledger invoice — including this one — so Available is already
+  // this invoice's own debt lighter. A plain min(Available, remainder)
+  // therefore UNDERSTATES every draw and reads negative on exactly the common
+  // case: balance 300 against a remainder of 400 shows Available −100, so the
+  // panel promised nothing while the RPC went on to draw the whole 300.
+  // Migration 0204 adds the invoice's own remainder back before capping, and
+  // this line is that same expression — not an approximation of it:
+  //
+  //     draw = min(Available + remainder, remainder)
+  //
+  // It is a FORECAST, never an instruction. Nothing sends it: the RPC re-reads
+  // under the customer row lock and its answer is the one that lands.
+  const markPaidDraw =
+    availableSar == null || remainderSar == null
+      ? null
+      : Math.max(0, round2(Math.min(round2(availableSar + remainderSar), remainderSar)));
 
   // UN-PAY'S GATE, mirroring unpay_invoice()'s two guards exactly (0203 §12):
   // no invoice_payments rows, and no balance_applied ledger rows. Both are
@@ -1775,102 +1845,26 @@ export default function InvoiceDetailModal({
               </div>
             )}
 
-            {/* ═══ SETTLEMENT (0203) — what is still owed TODAY ═══════════════
-                Not a second copy of the document's closing chain. The document
-                (GrandTotalStack above) states two FROZEN figures — what the
-                balance covered at confirm and what was payable then — and a tax
-                document may not restate itself as money arrives. This panel
-                states the living position, and every figure in it is a column
-                of v_invoice_settlement:
+            {/* ═══ SETTLEMENT FIGURES — ONLY WHEN THEY CANNOT BE READ ══════
+                The Amount Payable / Outstanding / Available panel that stood
+                here is GONE (Turki's ruling). It was a five-row restatement of
+                v_invoice_settlement offered beside two buttons, and it existed
+                to help the operator choose between them; Mark Paid removes the
+                choice, so the panel was answering a question nobody is asked
+                any more. What this invoice still owes now reaches the operator
+                where it is acted on — in Mark Paid's own confirmation, and in
+                the payment form's pre-filled amount.
 
-                  Amount payable  (frozen at confirm)
-                − Paid            (sum of invoice_payments)
-                − Applied         (post-confirm balance draws)
-                − Written off
-                = Outstanding     (the view's greatest(…, 0))
-
-                NOTHING IS COMPUTED HERE. Not even the subtraction: the last row
-                is remainder_sar, which the view computes under the same
-                rounding the RPCs enforce. A subtraction performed in this
-                component would be a fourth opinion about a figure three RPCs
-                already agree on, and it would disagree in halalas.
-
-                Rendered on a READ-ONLY mount too, deliberately — these are
-                facts, not controls, and the archive reader needs them as much
-                as the operator. Zero rows are omitted rather than shown as
-                0.00: an invoice with no write-off should not have to say so. */}
-            {(status === "confirmed" || status === "paid") && isLedger && (
-              settlementReadable ? (
-                <div className="rounded-lg border border-app p-3 space-y-1.5 text-sm">
-                  <div className="font-medium">{t("trips.invoiceSheet.sTitle", lang)}</div>
-                  <div className="flex items-center justify-between">
-                    <span className="muted">{t("trips.invoiceSheet.amountPayable", lang)}</span>
-                    <span className="tabular-nums">{formatSar(settlement!.payable_sar as number)}</span>
-                  </div>
-                  {settlement!.paid_sar > 0 && (
-                    <div className="flex items-center justify-between">
-                      <span className="muted">{t("trips.invoiceSheet.sPaid", lang)}</span>
-                      <span className="tabular-nums">{formatSar(round2(-settlement!.paid_sar))}</span>
-                    </div>
-                  )}
-                  {settlement!.applied_sar > 0 && (
-                    <div className="flex items-center justify-between">
-                      <span className="muted">{t("trips.invoiceSheet.sApplied", lang)}</span>
-                      <span className="tabular-nums">{formatSar(round2(-settlement!.applied_sar))}</span>
-                    </div>
-                  )}
-                  {settlement!.written_off_sar > 0 && (
-                    <div className="flex items-center justify-between">
-                      <span className="muted">{t("trips.invoiceSheet.sWrittenOff", lang)}</span>
-                      <span className="tabular-nums">{formatSar(round2(-settlement!.written_off_sar))}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between pt-1.5 mt-0.5 border-t border-app">
-                    <span className="font-semibold">{t("trips.invoiceSheet.sRemainder", lang)}</span>
-                    <span
-                      className={
-                        "text-lg font-semibold tabular-nums " +
-                        ((remainderSar as number) > 0
-                          ? "text-brand-600 dark:text-brand-300"
-                          : "text-emerald-600 dark:text-emerald-400")
-                      }
-                    >
-                      {formatSar(remainderSar as number)}
-                    </span>
-                  </div>
-                  {/* THE CONFIRMED PHASE (0204, item 3). A prepaid invoice now
-                      RESTS here: confirm froze a payable and moved no money, so
-                      "confirmed" is a standing position rather than a moment in
-                      passing. The operator looking at that position needs both
-                      halves of it — what this invoice still wants, above, and
-                      what the customer actually has to meet it with.
-
-                      SEPARATED BY A RULE because it is not part of the
-                      subtraction above it. Every row above comes from
-                      v_invoice_settlement and is about THIS invoice; this one
-                      comes from v_customer_available and is about the CUSTOMER,
-                      across all their work. Running them together would read as
-                      a sixth term in a five-term sum.
-
-                      Withheld when the read failed, never shown as 0 — the same
-                      rule the apply panel follows for the same figure. Hidden
-                      once the remainder is nil because there is then nothing
-                      this balance could be for. */}
-                  {isPrepaid && availableSar != null && (remainderSar as number) > 0 && (
-                    <div className="flex items-center justify-between pt-1.5 mt-0.5 border-t border-app">
-                      <span className="muted">{t("trips.invoiceSheet.sAvailable", lang)}</span>
-                      <span className="tabular-nums">{formatSar(availableSar)}</span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                /* WORDS, NEVER A ZERO — a failed read and a settled invoice are
-                   the same figures and opposite facts. The pay/apply controls
-                   are withheld below on the same condition. */
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-300">
-                  {t("trips.invoiceSheet.sUnavailable", lang)}
-                </div>
-              )
+                THE FAILED READ STAYS, and it is not a leftover. Every control
+                below is gated on `settlementReadable`, so an unreadable
+                settlement produces a confirmed invoice with no settlement
+                action and no stated reason — which reads as a bug in the
+                screen rather than a fact about the data. This says which it
+                is, in words, and never as a zero. */}
+            {(status === "confirmed" || status === "paid") && isLedger && !settlementReadable && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-300">
+                {t("trips.invoiceSheet.sUnavailable", lang)}
+              </div>
             )}
 
             {/* PAYMENT HISTORY — arrivals, oldest first, never summed here.
@@ -1998,34 +1992,39 @@ export default function InvoiceDetailModal({
                   floating above an open form is how the wrong button gets
                   clicked. */}
               {(status === "confirmed" || status === "paid") &&
-                !voiding && !payingOpen && !applyOpen && !unpaying && (
+                !voiding && !payingOpen && !markPaidOpen && !unpaying && (
                 <div className="flex items-center gap-2 flex-wrap">
-                  {/* RECORD PAYMENT — ledger era, and only while something is
-                      outstanding. At zero there is nothing left to receive and
-                      record_invoice_payment() would refuse the amount anyway;
-                      withholding the button says so before a figure is typed.
+                  {/* MARK PAID — ONE button, ledger era, and only while
+                      something is outstanding. At zero there is nothing left
+                      to settle and both RPCs behind it would refuse; the
+                      absence says so before a figure is typed.
 
-                      The pre-fill happens HERE, at open, rather than in an
-                      effect: the field's starting value is a property of this
-                      click (the remainder as it stands now), not a thing to be
-                      re-synced afterwards while the operator is editing it. */}
+                      Two buttons stood here — Record payment and Apply balance
+                      — and choosing between them was the operator's problem.
+                      It should never have been: whether the balance covers
+                      this invoice is a question about figures held on the
+                      server, and getting it wrong meant either a refused RPC
+                      or cash collected that the balance would have paid.
+
+                      PREPAID OPENS THE CONFIRMATION; postpaid goes straight to
+                      the payment form, because a customer with no pool has
+                      nothing to confirm about one. The pre-fill happens HERE,
+                      at the click, rather than in an effect: the field's
+                      starting value is the remainder as it stands now, not a
+                      thing to be re-synced while the operator is editing it. */}
                   {isLedger && settlementReadable && (remainderSar as number) > 0 && (
                     <Btn
                       variant="primary"
                       onClick={() => {
+                        if (isPrepaid) {
+                          setMarkPaidOpen(true);
+                          return;
+                        }
                         setPayAmount(String(remainderSar));
                         setPayingOpen(true);
                       }}
                     >
-                      {t("trips.invoiceSheet.recordPaymentBtn", lang)}
-                    </Btn>
-                  )}
-                  {/* APPLY BALANCE — prepaid only, which is the RPC's own rule
-                      restated as an absence. A postpaid customer has no balance
-                      to draw from, so there is nothing for the button to do. */}
-                  {isLedger && isPrepaid && settlementReadable && (remainderSar as number) > 0 && (
-                    <Btn variant="outline" onClick={() => setApplyOpen(true)}>
-                      {t("trips.invoiceSheet.applyBalanceBtn", lang)}
+                      {t("trips.invoiceSheet.markPaid", lang)}
                     </Btn>
                   )}
                   {/* LEGACY — the old single button, old label, old flow, and
@@ -2217,24 +2216,49 @@ export default function InvoiceDetailModal({
                 </form>
               )}
 
-              {/* ── APPLY BALANCE (ledger era, prepaid) ──────────────────────
-                  A PREVIEW OF THE SERVER'S OWN min(), AND NOTHING ELSE. The
-                  third row is applicableSar, which restates what the RPC will
-                  draw under the customer row lock — it does not decide it and
-                  it is not sent. An amount computed in this component would be
-                  a second opinion on the customer's balance, read a moment
-                  earlier than the write, which is precisely the bug class the
-                  deleted pay-with-balance panel kept producing.
+              {/* ── MARK PAID: THE ONE CONFIRMATION (ledger era, prepaid) ────
+                  It states ONE thing — the amount about to leave the balance —
+                  because that is the only consequence the operator is being
+                  asked to accept. The rows under it are that figure's
+                  arithmetic, in the order it is reached: what the customer has,
+                  what this invoice wants, what will move, and what is left of
+                  each afterwards.
 
-                  A failed read refuses the action outright. `availableSar` and
+                  A PREVIEW OF THE SERVER'S OWN min(), AND NOTHING ELSE.
+                  `markPaidDraw` restates apply_balance_to_invoice()'s
+                  expression, add-back included; it does not decide the draw and
+                  it is not sent. See its definition for why the add-back is
+                  load-bearing rather than cosmetic.
+
+                  A FAILED READ REFUSES OUTRIGHT. `availableSar` and
                   `remainderSar` are null, never zero, when unreadable, so
-                  "nothing to apply" and "we could not find out" stay different
-                  answers — and only the first of them is a settled invoice. */}
-              {applyOpen && (
+                  "nothing to draw" and "we could not find out" stay different
+                  answers — and only the first of them lets the flow continue to
+                  the cash form. */}
+              {markPaidOpen && (
                 <div className="space-y-3 max-w-sm">
-                  {availableSar == null || remainderSar == null ? (
+                  {availableSar == null || remainderSar == null || markPaidDraw == null ? (
                     <div className="card p-3 text-sm text-amber-700 dark:text-amber-400" style={{ borderColor: "rgb(var(--border))" }}>
                       {t("trips.invoiceSheet.applyUnavailable", lang)}
+                    </div>
+                  ) : markPaidDraw <= 0 ? (
+                    /* NOTHING THE BALANCE CAN COVER. The RPC would refuse this
+                       draw, so it is never attempted — the dialog says why and
+                       the button goes on to the cash form. The two figures stay
+                       on screen: "no balance to apply" is a conclusion, and the
+                       operator is owed the numbers it came from. */
+                    <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
+                      <div className="flex justify-between">
+                        <span className="muted">{t("trips.invoiceSheet.applyAvailable", lang)}</span>
+                        <span className="tabular-nums">{formatSar(availableSar)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="muted">{t("trips.invoiceSheet.applyRemainder", lang)}</span>
+                        <span className="tabular-nums">{formatSar(remainderSar)}</span>
+                      </div>
+                      <p className="pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                        {t("trips.invoiceSheet.mpNoBalance", lang)}
+                      </p>
                     </div>
                   ) : (
                     <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
@@ -2246,40 +2270,72 @@ export default function InvoiceDetailModal({
                         <span className="muted">{t("trips.invoiceSheet.applyRemainder", lang)}</span>
                         <span className="tabular-nums">{formatSar(remainderSar)}</span>
                       </div>
+                      {/* THE FIGURE THIS DIALOG EXISTS FOR — what leaves the
+                          balance the moment Confirm is pressed. */}
                       <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
                         <span>{t("trips.invoiceSheet.applyWillApply", lang)}</span>
-                        <span className="tabular-nums">{formatSar(applicableSar as number)}</span>
+                        <span className="tabular-nums">{formatSar(markPaidDraw)}</span>
                       </div>
-                      {/* WHAT THE BALANCE WILL BE AFTERWARDS (0204, item 3).
-                          The row above says how much leaves; this one says
-                          what is left, which is the question the operator
-                          actually has to answer for the customer standing in
-                          front of them. Quiet, and below the rule, because it
-                          is a consequence of the conclusion rather than
-                          another term in it.
+                      {/* THE TWO AFTER-STATES. The row above says how much
+                          moves; these say what each side is left with, which is
+                          what the operator has to tell the customer standing in
+                          front of them. Quiet, and below the rule, because they
+                          are consequences of the conclusion rather than further
+                          terms in it.
 
-                          Arithmetic on two figures this panel has already
-                          stated, both of which came whole from the server. It
-                          is NOT a fourth opinion about the balance: the RPC
-                          re-reads under the row lock and its answer is the one
-                          that lands, so if anything moved in between, this
-                          line was a forecast and the ledger is the record. */}
+                          Display arithmetic on figures the panel has already
+                          stated, all of which came whole from the server. NOT a
+                          second opinion: the RPC re-reads under the row lock, so
+                          if anything moved in between these were forecasts and
+                          the ledger is the record. */}
                       <div className="flex justify-between text-xs muted">
                         <span>{t("trips.invoiceSheet.applyAfter", lang)}</span>
-                        <span className="tabular-nums">
-                          {formatSar(round2(availableSar - (applicableSar as number)))}
-                        </span>
+                        <span className="tabular-nums">{formatSar(round2(availableSar - markPaidDraw))}</span>
+                      </div>
+                      <div className="flex justify-between text-xs muted">
+                        <span>{t("trips.invoiceSheet.mpOutstandingAfter", lang)}</span>
+                        <span className="tabular-nums">{formatSar(round2(remainderSar - markPaidDraw))}</span>
                       </div>
                     </div>
                   )}
+                  {/* What happens NEXT, said before it happens: a draw that
+                      clears the invoice ends here, and one that does not opens
+                      the cash form for the rest. The operator should not
+                      discover a second step by arriving at it. */}
+                  <p className="text-xs muted">
+                    {t(
+                      markPaidDraw != null && markPaidDraw > 0 && remainderSar != null && markPaidDraw >= remainderSar
+                        ? "trips.invoiceSheet.mpNoteClears"
+                        : "trips.invoiceSheet.mpNoteShortfall",
+                      lang,
+                    )}
+                  </p>
                   <p className="text-xs muted">{t("trips.invoiceSheet.applyNote", lang)}</p>
                   <div className="flex items-center gap-2">
-                    <Btn type="button" variant="ghost" onClick={() => setApplyOpen(false)}>
+                    <Btn type="button" variant="ghost" onClick={() => setMarkPaidOpen(false)}>
                       {t("common.cancel", lang)}
                     </Btn>
-                    {applicableSar != null && applicableSar > 0 && (
-                      <Btn type="button" variant="primary" onClick={onApplyBalance} className={busy ? "opacity-50 pointer-events-none" : ""}>
-                        {t(busy ? "common.recording" : "trips.invoiceSheet.confirmApply", lang)}
+                    {/* ONE BUTTON, BOTH PATHS. With a draw it applies the
+                        balance and then decides; with none it goes straight to
+                        the cash form. The label follows the act, so the
+                        operator reads what the press will do rather than what
+                        the dialog is called. Withheld entirely on a failed
+                        read — there is no safe act to offer. */}
+                    {availableSar != null && remainderSar != null && markPaidDraw != null && (
+                      <Btn
+                        type="button"
+                        variant="primary"
+                        onClick={onMarkPaid}
+                        className={busy ? "opacity-50 pointer-events-none" : ""}
+                      >
+                        {t(
+                          busy
+                            ? "common.recording"
+                            : markPaidDraw > 0
+                              ? "trips.invoiceSheet.confirmApply"
+                              : "trips.invoiceSheet.recordPaymentBtn",
+                          lang,
+                        )}
                       </Btn>
                     )}
                   </div>

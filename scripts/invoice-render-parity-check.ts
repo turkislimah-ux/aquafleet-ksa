@@ -873,24 +873,68 @@ async function main() {
     const src = readFileSync(join(process.cwd(), rel), "utf8");
     const stripped = stripComments(src, "ts").split("\n");
 
-    // ── Ledger settlement panel ────────────────────────────────────────────
-    // Bounded by its own title string and the payment-history block that
-    // follows it — both are `no-print` i18n keys used exactly once, which makes
-    // them stabler landmarks than a JSX condition that may gain a clause.
-    const sOpen = liveHits(src, "trips.invoiceSheet.sTitle", "ts");
-    const sClose = liveHits(src, "trips.invoiceSheet.historyTitle", "ts");
-    check("the ledger settlement panel is locatable, exactly once", sOpen.length === 1 && sClose.length === 1);
+    // ── Mark Paid's confirmation ───────────────────────────────────────────
+    // THE PANEL THIS REPLACED was the five-row Settlement block, located by
+    // `sTitle`. That block is gone (Turki's ruling: Mark Paid is the one
+    // settlement action), and the guard moves to the dialog that now states
+    // this invoice's money — the rule it enforces never changed: a settlement
+    // figure comes from v_invoice_settlement, never from the frozen document.
+    //
+    // Bounded by an i18n key used exactly once inside it and the legacy panel's
+    // own JSX condition below it — both stabler landmarks than a condition that
+    // may gain a clause.
+    const sOpen = liveHits(src, "trips.invoiceSheet.mpOutstandingAfter", "ts");
+    const sClose = liveHits(src, "payingOpen && !isLedger && isPrepaid", "ts");
+    check("Mark Paid's confirmation is locatable, exactly once", sOpen.length === 1 && sClose.length === 1);
     check(
-      "…and the payment history follows it",
+      "…and the legacy pay panel follows it",
       sOpen.length === 1 && sClose.length === 1 && sOpen[0].line < sClose[0].line,
     );
     if (sOpen.length === 1 && sClose.length === 1 && sOpen[0].line < sClose[0].line) {
       const panel = stripped.slice(sOpen[0].line - 1, sClose[0].line - 1).join("\n");
-      check("the settlement panel does NOT read grand.total", !panel.includes("grand.total"));
+      check("the confirmation does NOT read grand.total", !panel.includes("grand.total"));
       check("…nor the document's amountDue", !panel.includes("amountDue"));
       check("…and DOES state the view's own remainder", panel.includes("remainderSar"));
-      check("…off the frozen payable, not a recomputed one", panel.includes("payable_sar"));
+      check("…and the draw it is confirming", panel.includes("markPaidDraw"));
     }
+
+    // ── THE ADD-BACK, pinned at its definition ─────────────────────────────
+    // Since 0204 `v_customer_available` reserves the unsettled remainder of
+    // every confirmed ledger invoice, INCLUDING the one being settled. So the
+    // preview of what Mark Paid will draw must add that remainder back before
+    // capping — exactly as apply_balance_to_invoice() does — or it understates
+    // every draw and reads negative on the ordinary case (balance 300 against
+    // a remainder of 400 shows Available −100, so the dialog promises nothing
+    // while the RPC goes on to draw the whole 300).
+    //
+    // TWO SIDES, because either alone is satisfiable by accident: the add-back
+    // must be PRESENT, and the naive expression it replaced must be ABSENT
+    // anywhere in the file. Comments are stripped first — this very rule is
+    // explained in prose beside the code it guards, and an unstripped scan
+    // would read the explanation as the defect.
+    const code = stripped.join("\n");
+    check(
+      "the Mark Paid draw adds this invoice's own remainder back before capping",
+      /availableSar \+ remainderSar/.test(code),
+    );
+    check(
+      "…and the un-added-back min() appears nowhere",
+      !/Math\.min\(\s*availableSar\s*,/.test(code),
+    );
+    // THE CONTROL. Both lines above are green on a file that never mentions
+    // either expression, so plant the exact pre-fix code and require each scan
+    // to change its answer. Without this the pair is two regexes that could be
+    // matching nothing at all — the failure 11e exists for in the statement's
+    // own proof, in a different syntax.
+    const plantedDraw = `const applicableSar = round2(Math.min(availableSar, remainderSar));`;
+    check(
+      "CONTROL: the absence scan FIRES on the pre-fix expression",
+      /Math\.min\(\s*availableSar\s*,/.test(plantedDraw),
+    );
+    check(
+      "CONTROL: …and the pre-fix expression does NOT satisfy the add-back scan",
+      !/availableSar \+ remainderSar/.test(plantedDraw),
+    );
 
     // ── Legacy pay-with-balance panel ──────────────────────────────────────
     const open = liveHits(src, "payingOpen && !isLedger && isPrepaid", "ts");

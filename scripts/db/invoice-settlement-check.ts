@@ -946,6 +946,146 @@ async function main(): Promise<void> {
     });
 
     // =====================================================================
+    // §J — MARK PAID, THE COMPOSED FLOW (Fix Group 2).
+    //
+    // The screen no longer offers apply-balance and record-payment as two
+    // choices; Mark Paid walks the SAME two RPCs in the order money moves —
+    // draw what the balance covers, then collect whatever is left. Every
+    // individual step is already proved above. What is NOT proved above is
+    // the COMPOSITION, and it is where the flow can go wrong in ways no
+    // single-RPC test can see:
+    //
+    //   1. balance covers    → one apply, nothing to collect, status paid
+    //   2. shortfall         → apply draws part, then CASH clears the rest
+    //   3. no usable balance → apply refuses, cash alone settles it
+    //
+    // MIXING THE TWO DOORS IS THE POINT OF CASE 2. §D applies twice and §B
+    // pays cash twice; neither shows that a balance draw and a cash receipt
+    // land on one invoice and foot to the frozen payable together. They are
+    // disjoint writers — customer_ledger and invoice_payments — so nothing
+    // but a test that uses both proves v_invoice_settlement adds them up.
+    //
+    // THE DIALOG'S FIGURE IS ASSERTED AGAINST THE RPC'S, not against a
+    // constant. `previewDraw` below is the expression the screen shows
+    // (lib: markPaidDraw in InvoiceDetailModal), computed from the SAME live
+    // Available and remainder the operator would be looking at, and each case
+    // requires the applied amount to equal it exactly. That is the audit
+    // defect stated as an assertion: a preview that drops the add-back
+    // understates the draw, and here it would simply be a wrong number.
+    // =====================================================================
+
+    /** What Mark Paid's confirmation states it will draw, from the two live
+     *  figures the screen reads. Mirrors apply_balance_to_invoice()'s own
+     *  arithmetic INCLUDING the self-reservation add-back. */
+    function previewDraw(avail: number, remainder: number): number {
+      return Math.max(0, money(Math.min(money(avail + remainder), remainder)));
+    }
+
+    await scenario("§J1 — Mark Paid: the balance covers it, paid in one step", async () => {
+      const t = await rpc(TOPUP_SQL, [ref.customer, REF_TOPUP, "cash", null, null, ACTOR, null]);
+      ok("top-up accepted", t.err === null);
+      const r = await rpc(CONFIRM_SQL, confirmArgs(ref.invoice, ref.trip, "prepaid", SMALL_NET, SMALL_VAT, SMALL_GROSS));
+      ok("confirm accepted", r.err === null);
+      if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
+
+      const availBefore = await available(ref.customer);
+      const remBefore = money((await settlement(ref.invoice)).remainder_sar);
+      check("the confirmed remainder is the whole payable", remBefore, SMALL_GROSS);
+      check("Available reserves it, so it sits a whole remainder below the balance",
+        availBefore, money(REF_TOPUP - SMALL_GROSS));
+      const shown = previewDraw(availBefore, remBefore);
+      check("the dialog would state the WHOLE remainder as leaving the balance", shown, SMALL_GROSS);
+
+      const a = await rpc(APPLY_SQL, [ref.invoice, ACTOR]);
+      ok("the single apply is accepted", a.err === null);
+      if (a.err) { console.log(`          db said: ${a.err.message.split("\n")[0]}`); return; }
+      const s = await settlement(ref.invoice);
+      check("§J1 — the RPC drew EXACTLY what the dialog stated", money(s.applied_sar), shown);
+      check("§J1 — the remainder reached zero, so no payment form is needed", money(s.remainder_sar), 0);
+      check("§J1 — status is paid after ONE step", (await invoiceRow(ref.invoice)).status, "paid");
+      check("§J1 — no cash was recorded: the balance did all of it", money(s.paid_sar), 0);
+      check("§J1 — Balance after", await balance(ref.customer), money(REF_TOPUP - SMALL_GROSS));
+      check("§J1 — the trip is stamped to the paid invoice", await tripInvoiceId(ref.trip), ref.invoice);
+    });
+
+    await scenario("§J2 — Mark Paid: shortfall, applied then cash, both doors on one invoice", async () => {
+      const t = await rpc(TOPUP_SQL, [pin.customer, PIN_TOPUP, "cash", null, null, ACTOR, null]);
+      ok("top-up accepted", t.err === null);
+      const r = await rpc(CONFIRM_SQL, confirmArgs(pin.invoice, pin.trip, "prepaid", SMALL_NET, SMALL_VAT, SMALL_GROSS));
+      ok("confirm accepted", r.err === null);
+      if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
+
+      const availBefore = await available(pin.customer);
+      const remBefore = money((await settlement(pin.invoice)).remainder_sar);
+      check("Available is NEGATIVE — the invoice reserves against a thinner balance", availBefore, PIN_AVAIL);
+      const shown = previewDraw(availBefore, remBefore);
+      // THE DEFECT, AS A NUMBER. Dropping the add-back gives
+      // min(-100.00, 400.00) = -100.00, i.e. the dialog would offer nothing
+      // (or a negative) on a case where the RPC draws the customer's whole
+      // 300.00. The two expressions are stated side by side so the gap is the
+      // assertion rather than a comment about one.
+      check("the dialog states the whole thin balance, not the negative Available", shown, PIN_DRAW);
+      check("the un-added-back preview would have UNDERSTATED it",
+        money(Math.min(availBefore, remBefore)) < shown, true);
+
+      const a = await rpc(APPLY_SQL, [pin.invoice, ACTOR]);
+      ok("apply accepted", a.err === null);
+      if (a.err) { console.log(`          db said: ${a.err.message.split("\n")[0]}`); return; }
+      let s = await settlement(pin.invoice);
+      check("§J2 — the RPC drew EXACTLY what the dialog stated", money(s.applied_sar), shown);
+      check("§J2 — a shortfall remains, so the flow must go on to cash", money(s.remainder_sar), PIN_REMAINDER);
+      check("§J2 — the invoice is NOT paid yet", (await invoiceRow(pin.invoice)).status, "confirmed");
+      check("§J2 — the balance is spent to the halala", await balance(pin.customer), 0);
+
+      // Step 3 — the payment form opens pre-filled with exactly this figure.
+      const p = await rpc(PAY_SQL, [pin.invoice, PIN_REMAINDER, "cash", null, null, PAID_ON, ACTOR, null]);
+      ok("the shortfall payment is accepted", p.err === null);
+      if (p.err) { console.log(`          db said: ${p.err.message.split("\n")[0]}`); return; }
+      s = await settlement(pin.invoice);
+      check("§J2 — remainder reached exactly zero", money(s.remainder_sar), 0);
+      check("§J2 — and ONLY then does the status flip", (await invoiceRow(pin.invoice)).status, "paid");
+      // THE COMPOSITION, FOOTED. Two disjoint writers, one frozen payable.
+      check("§J2 — payable == applied + paid, across BOTH doors",
+        money(s.payable_sar), money(money(s.applied_sar) + money(s.paid_sar)));
+      check("§J2 — the balance door contributed the draw", money(s.applied_sar), PIN_DRAW);
+      check("§J2 — the cash door contributed the shortfall", money(s.paid_sar), PIN_REMAINDER);
+      check("§J2 — the cash leg wrote NO ledger row", (await ledgerByType(pin.invoice)).balance_applied, money(-PIN_DRAW));
+      check("§J2 — the trip is stamped once the last riyal lands", await tripInvoiceId(pin.trip), pin.invoice);
+    });
+
+    await scenario("§J3 — Mark Paid: no usable balance, cash alone settles it", async () => {
+      // NO TOP-UP. Balance 0.00, so Available is the reservation itself and
+      // the add-back lands exactly on zero — the boundary the screen uses to
+      // skip the draw entirely rather than let the RPC refuse it.
+      const r = await rpc(CONFIRM_SQL, confirmArgs(pin.invoice, pin.trip, "prepaid", SMALL_NET, SMALL_VAT, SMALL_GROSS));
+      ok("confirm accepted", r.err === null);
+      if (r.err) { console.log(`          db said: ${r.err.message.split("\n")[0]}`); return; }
+
+      const availBefore = await available(pin.customer);
+      const remBefore = money((await settlement(pin.invoice)).remainder_sar);
+      check("Balance is empty", await balance(pin.customer), 0);
+      check("Available is the reservation, negated", availBefore, money(-SMALL_GROSS));
+      const shown = previewDraw(availBefore, remBefore);
+      check("the dialog would state ZERO leaving the balance", shown, 0);
+
+      // The screen does not attempt this draw. The RPC's refusal is asserted
+      // anyway: the skip is a courtesy, and the database is what makes it safe.
+      await refuses("apply_balance with nothing available", APPLY_SQL, [pin.invoice, ACTOR], "Nothing to apply");
+      check("the refused apply moved no money", await balance(pin.customer), 0);
+      check("…and left the remainder whole", money((await settlement(pin.invoice)).remainder_sar), SMALL_GROSS);
+
+      const p = await rpc(PAY_SQL, [pin.invoice, SMALL_GROSS, "cash", null, null, PAID_ON, ACTOR, null]);
+      ok("the full cash payment is accepted", p.err === null);
+      if (p.err) { console.log(`          db said: ${p.err.message.split("\n")[0]}`); return; }
+      const s = await settlement(pin.invoice);
+      check("§J3 — the remainder reached zero on cash alone", money(s.remainder_sar), 0);
+      check("§J3 — status is paid", (await invoiceRow(pin.invoice)).status, "paid");
+      check("§J3 — nothing was drawn from the balance", money(s.applied_sar), 0);
+      check("§J3 — the whole payable arrived as cash", money(s.paid_sar), SMALL_GROSS);
+      check("§J3 — no ledger row was written at all", await ledgerCount(pin.customer), 0);
+    });
+
+    // =====================================================================
     // §I — ANON (CLAUDE.md §6). Every money RPC this file drives must be
     // closed to the anon role.
     // =====================================================================
