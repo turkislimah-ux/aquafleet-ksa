@@ -558,7 +558,7 @@ export async function setTripStation(id: string, waterStation: string): Promise<
 // stamped on delivered (setTripStage), and pay_commission only tags rows where
 // delivered_at is not null — so a commission-paid trip is always delivered.
 // An invoice-locked trip is ALSO always delivered — only delivered trips are
-// ever billed (see isTripLocked's comment / lib/prepaid.ts's consumingItems)
+// ever billed (see isTripLocked's comment / lib/money.ts's consumingItems)
 // — so this one check already excludes BOTH locks too; no separate
 // payout_id/invoice check needed here. No table has a FK on trips.id
 // (checked: no `references public.trips` in any migration), so a

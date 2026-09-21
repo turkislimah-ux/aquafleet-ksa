@@ -229,7 +229,7 @@ export default function InvoiceDetailModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // paidUpBalanceSar rides on `raw` because it comes from getInvoice, which is
-  // the ONE call site of lib/prepaid's paid-up expression in this path. The
+  // the ONE call site of the paid-up read (loadPaidUpBalance) in this path. The
   // popup never computes a balance of its own — that is the entire point of the
   // running-balance removal. null = postpaid, or a fetch that failed.
   const [raw, setRaw] = useState<
@@ -1065,8 +1065,8 @@ export default function InvoiceDetailModal({
   const unpayBlocked = payments.length > 0 || (settlement != null && settlement.applied_sar > 0);
 
   // THE paid-up balance, straight off the server payload. Server-side it is
-  // ONE expression (lib/prepaid's paidUpBalance / paidUpBalanceAsOf, reached
-  // only through loadPaidUpBalance in invoiceActions), so this screen, the PDF
+  // ONE expression (invoiceActions' loadPaidUpBalance — the ledger balance,
+  // frozen at paid_at/voided_at as the rows that existed by then), so this screen, the PDF
   // and the print document cannot disagree. A partial figure is never shown.
   //
   // THE TWO NULLS ARE NOT THE SAME NULL. `paidUpError` set means the read
@@ -1081,8 +1081,8 @@ export default function InvoiceDetailModal({
   // the case that rendered a full prepaid layout with no balance in it.
   const paidUpUnreadable = paidUpError != null || paidUp == null;
   // What paying this invoice will take off that balance, computed server-side
-  // by the SAME expression the payment itself will apply (lib/prepaid's
-  // settlementGross, which is paidUpCore's debit side). The panel below
+  // by the SAME expression the payment itself will apply (lib/money's
+  // settlementGross over this invoice's own rows). The panel below
   // subtracts THIS, never `view.grand.total`: on an invoice frozen by the
   // covered-only engine the stored grand total excludes lines the document
   // lists, so it previewed a draw-down the payment then did not make.
@@ -1111,8 +1111,8 @@ export default function InvoiceDetailModal({
 
   // --- LEDGER-ERA BALANCE ROW ----------------------------------------------
   // The same pair of rows, fed by the OTHER era's money. A ledger-era prepaid
-  // invoice has no paid-up figure — lib/prepaid's expression answers a question
-  // 0203 stopped asking — so both figures come off the `balance_applied`
+  // invoice has no paid-up figure — the retired pool expression answered a
+  // question 0203 stopped asking — so both figures come off the `balance_applied`
   // ledger rows for THIS invoice: the balance immediately before the draw and
   // immediately after it, the last draw winning when there were several.
   //
@@ -1475,8 +1475,8 @@ export default function InvoiceDetailModal({
                   subtotal={ledgerTripsTotal}
                   fallbackWaterType={view.projectWaterType}
                   // Balance and Remaining are BACK on this table (0204, item
-                  // 6), fed by the ledger reader rather than lib/prepaid's
-                  // paid-up expression. The earlier note here said these props
+                  // 6), fed by the ledger reader rather than the retired
+                  // pool's paid-up expression. The earlier note here said these props
                   // were deliberately omitted because the settlement is stated
                   // once at the bottom; that reasoning conflated two different
                   // questions. The closing chain answers "what is owed on THIS
@@ -2791,8 +2791,9 @@ function PrepaidTripTable({
   // an empty balance.
   balance?: { amount: number } | { note: string } | null;
   // The caption for that row, because the two eras put DIFFERENT NUMBERS in
-  // it. Legacy passes lib/prepaid's paid-up balance, frozen at paid_at or
-  // voided_at; the ledger era passes v_customer_available.balance_sar, read
+  // it. Legacy passes the paid-up balance (since 0206 the LEDGER balance,
+  // frozen at paid_at or voided_at by loadPaidUpBalance); the ledger era
+  // passes v_customer_available.balance_sar, read
   // live. Same customer, same table, two figures that can legitimately
   // disagree — so naming both "Paid-up balance" would be a false statement on
   // one of them.

@@ -66,7 +66,7 @@ type ProjectHeader = {
 // v3 cutover — every special charge belonging to a NON-VOID invoice, across
 // the whole app (not just one invoice's own charges): every charge from a
 // draft/review/confirmed/paid invoice consumes prepaid balance the instant
-// it's added (lib/prepaid.ts header), so FinanceTab's balance/statement math
+// it's added (lib/money.ts header), so FinanceTab's balance/statement math
 // needs this customer-wide, void-excluded set — same rule
 // assembleForCustomerPeriod (app/trips/invoiceActions.ts) already applies.
 export type SpecialChargeRow = {

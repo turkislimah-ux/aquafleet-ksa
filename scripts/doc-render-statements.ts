@@ -128,7 +128,7 @@ import {
 } from "../lib/reports";
 import type { DriverViolationView, ViolationType } from "../lib/violations";
 import { buildReport, GROUPING_TKEY, type BuilderSelection } from "../lib/report-builder";
-import { round2, type ConsumingTrip } from "../lib/prepaid";
+import { round2, type ConsumingTrip } from "../lib/money";
 import { buildStatementHtml } from "../lib/statementPdfTemplate";
 import {
   buildStatementVm,

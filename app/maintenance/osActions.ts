@@ -7,7 +7,7 @@
 //
 // Money (workshop_payments): VAT is computed HERE, app-side, via
 // lib/outsourced-vat.ts's computeWorkshopPaymentTotals() — which itself
-// only imports the rate from lib/prepaid.ts, never touching that file, per
+// only imports the rate from lib/money.ts, never touching that file, per
 // the same borrow-the-rate convention lib/inventory-vat.ts established.
 // The DB's own CHECK (grand_total_sar = subtotal_sar + vat_sar) is the
 // final consistency floor regardless of what this file computes and sends.

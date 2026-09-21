@@ -1,5 +1,5 @@
 // Inventory (parts) VAT — PURE math, no Supabase/Next/I-O. Mirrors
-// lib/prepaid.ts's own discipline (pure functions, no I/O).
+// lib/money.ts's own discipline (pure functions, no I/O).
 //
 // DELIBERATELY SEPARATE FROM lib/vat.ts. That file computes DOCUMENT-LEVEL
 // VAT for customer invoices — subtotal summed first, VAT rounded ONCE
@@ -13,11 +13,11 @@
 // purchase/receiving records) — forcing parts VAT through
 // lib/vat.ts's calculateVat() would silently apply the wrong one.
 //
-// This file borrows ONLY the 15% rate from lib/prepaid.ts (a read, an
+// This file borrows ONLY the 15% rate from lib/money.ts (a read, an
 // import — not a modification of that file, and lib/vat.ts/prepaid.ts/
 // invoice.ts are never touched by anything in this file or its callers).
 // Its own rounding is round-half-up to 2 decimals — same arithmetic
-// Postgres's round(numeric, 2) and lib/prepaid.ts's Math.round-based
+// Postgres's round(numeric, 2) and lib/money.ts's Math.round-based
 // round2() both already use for positive amounts, so the SQL side
 // (migration 0056's receive_loose_parts/create_purchase_order/
 // receive_purchase_order) and this TS side agree without sharing code.
@@ -34,7 +34,7 @@
 // consumption figure, or price trend — those stay VAT-free by design
 // (0056's own header) and this file is never imported by any of that math.
 
-import { VAT_RATE } from "./prepaid";
+import { VAT_RATE } from "./money";
 import { formatNum } from "./utils";
 export { VAT_RATE };
 

@@ -14,13 +14,17 @@ file. It holds RULES ONLY. If it exceeds 15KB, Code is appending — cut back.**
 
 Two files own ALL money math for the customer-facing finance/invoice system:
 
-- `lib/prepaid.ts` — prepaid ledger logic (VAT-inclusive balances, FIFO trip
-  coverage, reserve-at-draft, release-on-cancel)
+- `lib/money.ts` — money primitives (round2, VAT_RATE, inclVat,
+  settlementGross) and consumingItems, the ONE expression of what delivered
+  work costs. Replaced `lib/prepaid.ts` (0206): balances are the 0203 ledger's
+  VIEW columns, never app-derived.
 - `lib/vat.ts` — ZATCA-compliant VAT calculation (15%, document-level rounding)
 
 Rules:
 - Inventory does NOT touch these files. Inventory money is internal-only.
 - Never duplicate VAT logic. Import from lib/vat.ts.
+- Never re-derive a balance app-side. Balance/Uninvoiced/Available are view
+  columns; the statement, refunds and settlement read the ledger.
 
 ---
 

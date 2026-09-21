@@ -48,7 +48,7 @@ import {
   type StatementLedgerEntry,
   type StatementVmInput,
 } from "../lib/statementViewModel";
-import { round2 } from "../lib/prepaid";
+import { round2 } from "../lib/money";
 import type { Lang } from "../lib/i18n";
 
 const OUT = process.env.DOC_SHEETS ?? "/tmp/atlas-sheets";

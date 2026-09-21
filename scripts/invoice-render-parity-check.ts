@@ -856,7 +856,7 @@ async function main() {
   //
   //   LEGACY (pre-0203, pay_invoice) — the balance a full-amount payment will
   //   leave behind. Must subtract `settlementSar`, summed server-side by
-  //   lib/prepaid's `settlementGross`, which IS paidUpCore's debit side.
+  //   lib/money's `settlementGross` over the invoice's own rows.
   //   `view.grand.total` is the stored `grand_total_sar`, and on invoices frozen
   //   by the covered-only engine that column EXCLUDES lines the document lists:
   //   026-000017 previewed 7,544.00 against a real 8,694.00 draw-down,

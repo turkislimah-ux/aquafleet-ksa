@@ -474,7 +474,7 @@ export type MetricDictionaryRow = {
   // LAST fall-through, not because anything renders them directly.
   //
   // `metric_key` and `source_view` are rendered raw, in both languages: their
-  // values are POINTERS (`v_pnl_by_period.payroll_sar`, `lib/prepaid.ts:
+  // values are POINTERS (`v_pnl_by_period.payroll_sar`, `lib/money.ts:
   // paidUpBalance()`) and a translated address does not resolve. `unit` and
   // `basis` are closed enums and go through unitLabel() / basisLabel().
 };

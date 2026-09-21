@@ -4,7 +4,7 @@
 // few summary rows as correctness allows, for display. Never recomputes any
 // amount/VAT/total — Amount here is always exactly Price * Quantity where
 // Price is one real line's amount_sar (all trip lines in a table currently
-// share the same resolved project rate — see lib/prepaid.ts header).
+// share the same resolved project rate — see lib/money.ts header).
 //
 // Grouping key: water type is fixed per project (Finance polish batch B) —
 // every trip line in a group shares one water_type, so no "Mixed" case can

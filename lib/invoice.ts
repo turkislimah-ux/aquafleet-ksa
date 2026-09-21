@@ -1,5 +1,5 @@
 // Invoice assembly engine (Finance Commit 5a, spec §6/§7/§8/§10/§11). Pure
-// math, no I/O — mirrors lib/prepaid.ts / lib/vat.ts's discipline (pure
+// math, no I/O — mirrors lib/money.ts / lib/vat.ts's discipline (pure
 // functions, own test harness before the lifecycle actions / UI touch it).
 //
 // ===========================================================================
@@ -36,11 +36,11 @@
 // their flags and keep printing their pills.
 // ===========================================================================
 //
-// ENGINES: consumingItems (lib/prepaid.ts) for the delivered-trip list, and
-// calculateVat (lib/vat.ts) for every document-level VAT figure.
-// splitCoveredUnpaidItems is NOT imported here any more; it is still live in
-// lib/prepaid.ts and still tested there (scripts/frozen-split-check.ts reads
-// frozen rows through it), it just no longer decides what a document says.
+// ENGINES: consumingItems (lib/money.ts) for the delivered-trip list, and
+// calculateVat (lib/vat.ts) for every document-level VAT figure. The FIFO
+// coverage walk (splitCoveredUnpaidItems) is GONE with lib/prepaid.ts (0206
+// Group B) — the 29 invoices frozen under it render from their stored columns
+// (freeze law 0027) and are never re-derived, so nothing needs it to run.
 //
 // PERIOD-MEMBERSHIP RULE (the one subtle correctness point in this file):
 // splitCoveredUnpaidItems/consumingItems are called over the customer's FULL
@@ -49,7 +49,7 @@
 // other way around. The FIFO pool-drain order depends on every item ever
 // consumed, not just this period's; pre-filtering to the period first would
 // let an item "skip the queue" and appear falsely Covered by ignoring
-// balance an earlier period's items already spent. lib/prepaid.ts's own
+// balance an earlier period's items already spent. lib/money.ts's own
 // header already established consumption depends only on
 // trip_date/delivered_at/rate (or charge_date/amount), never on invoice
 // linkage — this reuses that guarantee correctly. Callers MUST pass the
@@ -171,7 +171,7 @@
 //
 // UNITS. Each uncovered charge contributes round2(amount_sar * (1 + VAT_RATE))
 // — per item, rounded per item, then summed. That is BYTE-FOR-BYTE how
-// lib/prepaid.ts computes ConsumedItem.consumedAmount, which is what the FIFO
+// lib/money.ts computes ConsumedItem.consumedAmount, which is what the FIFO
 // pool actually deducted, so Amount Due reconciles to the balance engine to
 // the halala. It is deliberately NOT a calculateVat() document-level pass over
 // the charges: that would round once against their combined subtotal and could
@@ -233,15 +233,7 @@
 // when it was walked — this filter only hides it from THIS invoice's line
 // items, it doesn't un-consume it).
 
-import {
-  consumingItems,
-  VAT_RATE,
-  round2,
-  type BalanceReturnLite,
-  type ConsumingTrip,
-  type ConsumedItem,
-  type TopupLite,
-} from "./prepaid";
+import { consumingItems, VAT_RATE, round2, type ConsumingTrip, type ConsumedItem } from "./money";
 import { calculateVat, type VatLineItem } from "./vat";
 import type { InvoiceStatus } from "./db-types";
 
@@ -393,30 +385,19 @@ export type AssembleInvoiceInput = {
   // pre-filtered to the period. See PERIOD-MEMBERSHIP RULE above. rate_sar must
   // already be RESOLVED BY THE CALLER, frozen-first: the trip's own
   // trips.rate_sar, with the project's current rate_per_trip_sar only as the
-  // not-yet-delivered fallback (lib/prepaid.ts's ConsumingTrip note). An invoice
+  // not-yet-delivered fallback (lib/money.ts's ConsumingTrip note). An invoice
   // bills each trip at what it was worth on the day it was delivered, so a rate
   // change between delivery and invoicing cannot move an already-delivered line.
   trips: ConsumingTrip[];
-  // ALL topups for this customer, any date. Ignored entirely for postpaid.
-  topups: TopupLite[];
-  // ALL recorded refunds of prepaid credit for this customer, any date (0142).
-  // Prepaid only — a postpaid customer has no pool to refund from, so the
-  // postpaid arm never reads it.
-  //
-  // A refund SHRINKS THE POOL, which moves the FIFO wall backwards: work that
-  // the pool covered before the refund can fall into Unpaid after it. That is
-  // the correct invoice, not a defect — the customer no longer holds the money
-  // that was covering it. Defaulted to [] so the harness and any caller with no
-  // refunds assemble byte-identically to before.
-  //
-  // It never becomes a LINE. lib/invoice.ts maps covered/unpaid ConsumedItems
-  // straight into billable lines, and a refund is not a supply we can bill for;
-  // it only ever changes where the covered/unpaid boundary sits.
-  returns?: BalanceReturnLite[];
+  // `topups` and `returns` are GONE (0206 Group B). They fed the FIFO coverage
+  // walk, which stopped running here at 0203 — the draw is a ledger fact
+  // decided at settlement — and the two fields sat accepted-and-ignored until
+  // this cleanup removed them from the type. An invoice is assembled from
+  // WORK, not from money held on account.
   // v3: for prepaid this must be the customer's FULL non-void-invoice charge
   // history (every charge on a draft/review/confirmed/paid invoice, any
   // invoice) — NOT just this invoice's own charges — so the FIFO walk sees
-  // every consumer of the pool. See PERIOD-MEMBERSHIP RULE + lib/prepaid.ts's
+  // every consumer of the pool. See PERIOD-MEMBERSHIP RULE + lib/money.ts's
   // "which invoices' charges consume" note. reservedElsewhereIds (below)
   // then narrows the DISPLAYED chargeLines down to this invoice's own.
   // For postpaid this can just be this invoice's own charges (no FIFO runs).
@@ -450,10 +431,6 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     periodStart,
     periodEnd,
     trips,
-    // `topups` and `returns` are ACCEPTED AND IGNORED since 0203. They fed the
-    // FIFO coverage walk, which no longer runs here — the draw is a ledger fact
-    // decided by confirm_invoice(). They stay on AssembleInvoiceInput so no
-    // caller has to churn this release; removing them from the type is Batch 3.
     specialCharges,
     sellerSnapshot = null,
     buyerSnapshot = null,

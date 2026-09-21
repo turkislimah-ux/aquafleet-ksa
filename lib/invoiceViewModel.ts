@@ -258,7 +258,7 @@ export type PdfInvoiceData = {
    * `null` means "print nothing": postpaid always, since a postpaid customer has
    * no pool to be paid up against.
    *
-   * COMPUTED BY THE CALLER, ONCE, through lib/prepaid.ts's `paidUpBalance` —
+   * COMPUTED BY THE CALLER, ONCE, through invoiceActions' loadPaidUpBalance —
    * never here and never in a renderer. Which figure it is depends on the
    * invoice's own status, and that decision belongs with the code that can read
    * `paid_at` off the row (app/trips/invoiceActions.ts's `loadPaidUpBalance`):
@@ -423,7 +423,7 @@ export type VmChargeRow = {
  *
  * WHICH honest figure feeds it depends on the era, which is why the caption
  * travels with it as `balanceLabel` instead of being picked by the renderer:
- *   legacy — the PAID-UP BALANCE (lib/prepaid.ts, via invoiceActions'
+ *   legacy — the PAID-UP BALANCE (the ledger balance, via invoiceActions'
  *            `loadPaidUpBalance`), handed in as `paidUpBalanceSar`. As issued.
  *   ledger — the LEDGER BALANCE, `v_customer_available.balance_sar`, handed in
  *            as `ledgerBalanceSar`. The same column the Finance tab reads.

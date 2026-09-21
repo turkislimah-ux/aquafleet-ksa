@@ -4355,7 +4355,7 @@ export const dict = {
     // absent caveat and a mistyped one.
     //
     // NOT HERE, DELIBERATELY: `metric_key` and `source_view`. Their values are
-    // POINTERS — `v_pnl_by_period.payroll_sar`, `lib/prepaid.ts: paidUpBalance()`
+    // POINTERS — `v_pnl_by_period.payroll_sar`, `lib/money.ts: consumingItems()`
     // — and a translated address does not resolve. `basis` and `unit` are not
     // here either: they are closed enums with their own key sets above, so five
     // words are stored once rather than thirty-three times.
@@ -4376,7 +4376,7 @@ export const dict = {
       amount_payable: {
         label: { en: "Amount Payable", ar: "المبلغ الواجب السداد" },
         meaning: { en: "What the customer still owes for work already provided: delivered trips and special charges not yet on a PAID invoice.", ar: "ما يزال العميل مدينًا به مقابل عمل تم تنفيذه بالفعل: الرحلات المسلَّمة والرسوم الخاصة التي لم تُدرَج بعد في فاتورة مدفوعة." },
-        formula: { en: "computeAmountPayable in app/trips/amountPayable.ts: derivedBalanceItems run with an EMPTY credits side over the delivered trips and non-void special charges that are not on a paid invoice, VAT-inclusive at the project rate. Negative means owed to us, zero means settled; <= 0 by construction.", ar: "الدالة computeAmountPayable في app/trips/amountPayable.ts: تشغيل derivedBalanceItems بجانب دائن فارغ على الرحلات المسلَّمة والرسوم الخاصة غير الملغاة التي ليست على فاتورة مدفوعة، شاملة الضريبة بسعر المشروع. والسالب يعني مستحقًا لنا، والصفر يعني مسدَّدًا؛ وهو ≤ 0 بحكم تكوينه." },
+        formula: { en: "computeAmountPayable in app/trips/amountPayable.ts: zero minus the sum of consumingItems (lib/money.ts) over the delivered trips and non-void special charges that are not on a paid invoice, VAT-inclusive at the frozen trip rate. Negative means owed to us, zero means settled; <= 0 by construction.", ar: "الدالة computeAmountPayable في app/trips/amountPayable.ts: صفر ناقص مجموع consumingItems (في lib/money.ts) على الرحلات المسلَّمة والرسوم الخاصة غير الملغاة التي ليست على فاتورة مدفوعة، شاملة الضريبة بالسعر المجمَّد للرحلة. والسالب يعني مستحقًا لنا، والصفر يعني مسدَّدًا؛ وهو ≤ 0 بحكم تكوينه." },
         grain: { en: "one customer, at an instant", ar: "عميل واحد، في لحظة بعينها" },
         caveat: { en: "Only marking an invoice PAID reduces it — a deposit funds work rather than settling it, so nothing else moves this figure. Since the ledger cutover it renders for POSTPAID (and unset) customers only: a prepaid row shows no Amount Payable, because Available answers that question. Not a period measure and not a view.", ar: "لا يقلّ هذا المبلغ إلا بتحديد الفاتورة كمدفوعة — فالإيداع يموّل العمل ولا يسدده، فلا شيء غير ذلك يحرّك هذا الرقم. ومنذ الانتقال إلى الدفتر يظهر لعملاء الدفع الآجل (وغير المحدد) فقط: فصف الدفع المقدم لا يعرض مبلغًا واجب السداد، لأن «المتاح» يجيب عن ذلك السؤال. وهو ليس مقياس فترة ولا عرضًا." },
       },
@@ -4571,10 +4571,10 @@ export const dict = {
       },
       running_balance: {
         label: { en: "Running Balance", ar: "الرصيد الجاري" },
-        meaning: { en: "The spendable pool: a prepaid customer's deposits minus every delivered trip and charge, minus refunds.", ar: "الرصيد القابل للإنفاق: إيداعات عميل الدفع المقدم ناقص كل رحلة ورسم تم تسليمه، ناقص المبالغ المستردة." },
-        formula: { en: "derivedBalanceItems in lib/prepaid.ts: credits (all top-ups) minus debits (delivered trips and non-void special charges, VAT-inclusive at the project rate) minus balance returns. Model A — deducted at DELIVERY, not at invoice and not at payment. The credit side carries no date gate; asOfDate scopes consumption only.", ar: "الدالة derivedBalanceItems في lib/prepaid.ts: الجانب الدائن (كل عمليات الشحن) ناقص الجانب المدين (الرحلات المسلَّمة والرسوم الخاصة غير الملغاة، شاملة الضريبة بسعر المشروع) ناقص المبالغ المستردة. النموذج A — يُخصم عند التسليم، لا عند الفاتورة ولا عند الدفع. والجانب الدائن بلا قيد تاريخي؛ وasOfDate يحدّ الاستهلاك وحده." },
+        meaning: { en: "The money a prepaid customer holds on account: the sum of their ledger — deposits and corrections in, settlements and refunds out.", ar: "ما يحمله عميل الدفع المقدم في حسابه: مجموع دفتره — الإيداعات والتصحيحات دخولًا، والتسويات والمبالغ المستردة خروجًا." },
+        formula: { en: "v_customer_ledger_balance.balance_sar: the sum of the customer's customer_ledger rows. Deducted at SETTLEMENT (a balance draw or a refund), not at delivery — delivered-but-unsettled work shows in Uninvoiced and is netted off in Available.", ar: "العمود balance_sar من العرض v_customer_ledger_balance: مجموع صفوف customer_ledger للعميل. يُخصم عند التسوية (سحب رصيد أو استرداد) لا عند التسليم — فالعمل المسلَّم غير المسوّى يظهر في «غير المفوتر» ويُصفّى في «المتاح»." },
         grain: { en: "one customer, at an instant", ar: "عميل واحد، في لحظة بعينها" },
-        caveat: { en: "Not a period measure and not a view: it is computed in the app, per customer, for the instant you are looking at. paid-up = running - payable. It moves the moment a trip is DELIVERED, before any invoice exists, so it can and does differ from what the invoice documents say. A customer can hold pool credit here and still owe on Amount Payable at the same time. Prepaid only — a postpaid customer has no pool. The pool is a lifetime net: no date gate is ever applied to top-ups or returns.", ar: "ليس مقياس فترة ولا عرضًا: فهو يُحسب داخل التطبيق، لكل عميل، للحظة التي تنظر فيها. والمعادلة: الرصيد المسدَّد = الرصيد الجاري - المبلغ الواجب السداد. وهو يتحرك لحظة تسليم الرحلة، قبل وجود أي فاتورة، فقد يختلف فعلًا عمّا تقوله مستندات الفواتير. وقد يحمل العميل رصيدًا هنا ويكون مدينًا بالمبلغ الواجب السداد في الوقت نفسه. وهو مقصور على الدفع المقدم — فعميل الدفع الآجل بلا حوض رصيد. والحوض صافٍ على مدى العمر: لا يُطبَّق أي قيد تاريخي على الشحن ولا على المبالغ المستردة." },
+        caveat: { en: "Not a period measure and not app-computed: it is the ledger view's own column, per customer, for the instant you are looking at. It is NOT the spendable figure — that is Available (balance minus uninvoiced work minus confirmed unsettled invoices). Since the ledger cutover the Running and Paid-up figures are ONE number, the ledger's sum, kept as two entries only because both labels still appear on screens. Prepaid only — a postpaid customer has no ledger. Never place it in a period column or on a monthly trend line.", ar: "ليس مقياس فترة ولا يُحسب داخل التطبيق: فهو عمود عرض الدفتر نفسه، لكل عميل، للحظة التي تنظر فيها. وليس هو الرقم القابل للإنفاق — فذلك هو «المتاح» (الرصيد ناقص العمل غير المفوتر ناقص الفواتير المؤكَّدة غير المسوّاة). ومنذ الانتقال إلى الدفتر صار الرصيد الجاري والرصيد المسدَّد رقمًا واحدًا، هو مجموع الدفتر، وبقيا مدخلَين اثنين فقط لأن التسميتين ما زالتا تظهران على الشاشات. وهو مقصور على الدفع المقدم — فعميل الدفع الآجل بلا دفتر. ولا يوضع أبدًا في عمود فترة ولا على خط اتجاه شهري." },
       },
       topups: {
         label: { en: "Prepaid top-ups", ar: "شحن الأرصدة المقدمة" },
@@ -9510,7 +9510,7 @@ export const dict = {
       // "Paid-up", not "settled" and not "running": it counts only what PAID
       // invoices have settled. It is NOT the spendable pool — that is the
       // running balance, which lives on the statement and on the Finance row
-      // beside this one. See lib/prepaid.ts's paidUpBalance.
+      // beside this one. See invoiceActions' loadPaidUpBalance (the ledger balance).
       //
       // `runningBalance` ("Running Balance") STOOD HERE and is NOT coming back
       // even though the footer row it labelled has. That row now carries the
@@ -10028,7 +10028,7 @@ export const dict = {
     // THE FINANCIAL VOCABULARY STARTS HERE. Everything below names a money
     // CONCEPT — running balance, settled balance, amount payable, unsettled
     // trips — and NOT ONE OF THEM CHANGES A FIGURE. Every number this tab
-    // prints still comes from `derivedBalanceItems`, `computeAmountPayable`
+    // prints still comes from the ledger views, `computeAmountPayable`
     // and `formatSar`, untouched; these are the words wrapped around them.
     //
     // The same four concepts are re-read by StatementModal, BreakdownReport
@@ -10360,7 +10360,7 @@ export const dict = {
       // water type through waterTypeLabel(), off the enum value.
       //
       // "Invoice payable" is the RECORD-ONLY settlement row — it is not a
-      // movement and the running balance holds flat across it (lib/prepaid.ts).
+      // movement and the running balance holds flat across it (statement law).
       // The Arabic says the same: a document being noted, not money moving.
       typeSettlement: { en: "Invoice payable", ar: "فاتورة مستحقة" },
       typeReturn: { en: "Balance returned", ar: "رصيد مُعاد" },

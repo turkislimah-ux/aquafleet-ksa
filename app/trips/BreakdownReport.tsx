@@ -77,7 +77,7 @@ import { buildBreakdownVm } from "@/lib/docvm/breakdown";
 import { printHtml } from "@/lib/printHtml";
 // round2 from the money engine, not a local copy — a revenue figure should round
 // the same way the balance it is compared against does.
-import { round2 } from "@/lib/prepaid";
+import { round2 } from "@/lib/money";
 import { computeAmountPayable } from "./amountPayable";
 import type { SpecialChargeRow, PaidInvoiceRow } from "./page";
 import ScrollLock from "@/components/ScrollLock";
@@ -254,7 +254,7 @@ export default function BreakdownReport({
   // first rate change produces.
   //
   // The `?? rate` fallback mirrors COALESCE(t.rate_sar, p.rate_per_trip_sar),
-  // the pattern every money path uses (lib/prepaid.ts's ConsumingTrip note; both
+  // the pattern every money path uses (lib/money.ts's ConsumingTrip note; both
   // v_customer_* views). It is unreachable for a delivered trip on a project:
   // 0128 backfilled every one and setTripStage stamps every delivery since. The
   // single delivered trip with a NULL rate_sar carries no project, so it never

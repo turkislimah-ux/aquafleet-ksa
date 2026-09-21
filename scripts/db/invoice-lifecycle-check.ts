@@ -24,7 +24,7 @@
 //    write, the pool double-counts (once at delivery, once at payment) and this
 //    case is the only thing in the repo that would notice.
 //
-//    The covered-vs-grand rule lives one layer up, in lib/prepaid.ts's
+//    The covered-vs-grand rule lived one layer up, in the retired lib/prepaid.ts's
 //    settlementGross() — the pay-with-balance figure sums the invoice's COVERED
 //    items, deliberately not the stored grand_total_sar. What the database can
 //    prove about it is asserted in case 1: on a split invoice the frozen

@@ -62,7 +62,7 @@ import { createPortal } from "react-dom";
 import { X, Printer, Download } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar, formatNum } from "@/lib/utils";
-import type { ConsumingTrip } from "@/lib/prepaid";
+import type { ConsumingTrip } from "@/lib/money";
 import { type WaterType } from "@/lib/db-types";
 import {
   buildStatementVm,
@@ -118,7 +118,7 @@ const CREDIT_INK_CLS = "text-emerald-600 dark:text-emerald-400";
 
 // Per-trip display metadata (truck + paid-lock), keyed by trip id. Built once
 // in FinanceTab from the FULL trips list (app/trips/page.tsx's existing truck
-// join + invoiceLocked flag) — deliberately kept OUTSIDE lib/prepaid.ts's
+// join + invoiceLocked flag) — deliberately kept OUTSIDE lib/money.ts's
 // ConsumingTrip/ConsumedItem types, which stay untouched.
 //
 // ALIASED, not re-declared: this used to be its own shape and the view-model

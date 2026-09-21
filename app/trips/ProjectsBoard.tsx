@@ -47,7 +47,7 @@ import { type LeavePeriod } from "@/lib/leave";
 import { type CustomerAvailableRow } from "@/lib/customer-ledger";
 // THE prepaid gross-up. Same import CreateTripForm makes, for the same reason:
 // the per-delivery draw is round2(rate * (1 + VAT_RATE)) and is expressed once.
-import { inclVat } from "@/lib/prepaid";
+import { inclVat } from "@/lib/money";
 import { pillColor } from "@/lib/project-colors";
 import { formatTripRef } from "@/lib/trip-ref";
 import { useIncomingTripHighlight } from "@/lib/tripHighlight";
@@ -763,7 +763,7 @@ function PhasePickerModal({
   // ever stamped on delivered (setTripStage), and pay_commission only tags
   // rows where delivered_at is not null — so a commission-paid trip is
   // always delivered. An invoice-locked trip is ALSO always delivered (only
-  // delivered trips are ever billed — see lib/prepaid.ts's consumingItems /
+  // delivered trips are ever billed — see lib/money.ts's consumingItems /
   // lib/invoice.ts). So this single check already excludes BOTH locks too —
   // no separate payout_id/invoiceLocked check needed here.
   const deletable = trip.stage !== "delivered";

@@ -523,8 +523,8 @@ export type Trip = {
   invoice_id: string | null;
 };
 
-// customer_topups row (0025) — a prepaid customer's credit ledger entries.
-// See lib/prepaid.ts for the derived-balance/statement math built on top.
+// customer_topups row (0025) — the RETIRED pre-ledger top-up table. Dummy
+// data; nothing app-side reads it any more (0206), and 0207 drops it.
 export type CustomerTopup = {
   id: string;
   customer_id: string;
@@ -670,7 +670,7 @@ export type InvoiceLineSnapshot = {
 // confirmed, then frozen forever (see 0027 migration header for why).
 export type Invoice = {
   id: string;
-  // No project_id column — project is 1:1 with customer (lib/prepaid.ts
+  // No project_id column — project is 1:1 with customer (lib/money.ts
   // header), so it's derived via customer_id, not duplicated here.
   customer_id: string;
   period_start: string;

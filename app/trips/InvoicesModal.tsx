@@ -53,7 +53,7 @@ const ROW_PLAIN = "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]";
 // `settledBalance` REMOVED from this type. It ferried the Finance tab's
 // per-row figure down to InvoiceDetailModal's "Pay with Balance" panel; the
 // popup now reads its paid-up balance off its own getInvoice payload, from the
-// one shared expression in lib/prepaid. A money figure travelling as a prop is
+// one shared expression in lib/money. A money figure travelling as a prop is
 // a second copy that can drift from the first. Do not reinstate it.
 export type InvoiceCustomer = { id: string; name: string; email: string | null };
 

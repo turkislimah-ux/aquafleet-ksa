@@ -11,9 +11,9 @@
 //   Available  = v_customer_available.available_sar      (Balance − Uninvoiced,
 //                                                         computed IN the view)
 //
-// Nothing here reads v_customer_prepaid_balance, v_customer_amount_payable, or
-// lib/prepaid.ts's derived balance — those legacy readers keep serving the
-// Batch 2–3 surfaces until 0204 drops them. Writes never happen here either:
+// Nothing here reads v_customer_prepaid_balance or v_customer_amount_payable
+// — the last app readers of those views left in 0206, and the app-derived
+// balance died with lib/prepaid.ts. Writes never happen here either:
 // they go through the SECURITY DEFINER RPCs (record_topup, record_refund,
 // propose_ledger_correction, vote_ledger_correction) via lib/actions/finance.ts.
 

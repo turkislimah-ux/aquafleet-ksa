@@ -16,12 +16,7 @@ import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type Spec
 // Pure, and outside this file BECAUSE this file is `"use server"` — see the
 // header of lib/invoice-era.ts.
 import { invoiceEra } from "@/lib/invoice-era";
-import {
-  settlementGross,
-  type BalanceReturnLite,
-  type ConsumingTrip,
-  type TopupLite,
-} from "@/lib/prepaid";
+import { settlementGross, type ConsumingTrip } from "@/lib/money";
 import type { Invoice, CompanySettings, Customer, WaterType, PaymentMode } from "@/lib/db-types";
 import { generateInvoicePdf, PdfServiceNotConfiguredError } from "@/lib/pdf";
 import { buildInvoicePdfHtml, type PdfInvoiceData, type PdfIdentity } from "@/lib/invoicePdfTemplate";
@@ -36,8 +31,8 @@ import {
 import { round2 } from "@/lib/vat";
 // THE ledger reader (0203). Settlement and payment history come from here and
 // nowhere else — this file must never query v_invoice_settlement or
-// invoice_payments directly, for the same reason lib/prepaid.ts owns the legacy
-// figures: one module per money model, so a schema change lands in one place.
+// invoice_payments directly — one module per money model, so a schema change
+// lands in one place.
 import {
   fetchCustomerAvailable,
   fetchInvoicePayments,
@@ -159,10 +154,10 @@ const SPECIAL_CHARGE_IMAGE_BUCKET = "special-charge-images";
 // v3: the special-charges fetch is now CUSTOMER-WIDE (every charge on every
 // NON-VOID invoice for this customer, not just this invoiceId's own) — the
 // FIFO pool must see every charge that ever consumed it (see lib/invoice.ts's
-// PERIOD-MEMBERSHIP RULE + lib/prepaid.ts's "which invoices' charges
+// PERIOD-MEMBERSHIP RULE + lib/money.ts's "which invoices' charges
 // consume" note: void-invoice charges are excluded here, at the fetch, by
 // filtering out void invoice ids before the charges query even runs — this
-// IS the caller-side exclusion lib/prepaid.ts's header defers to). Charges
+// IS the caller-side exclusion lib/money.ts's header defers to). Charges
 // belonging to another (non-void) invoice than the one being assembled are
 // still included in the FIFO input but excluded from the DISPLAYED
 // chargeLines via reservedElsewhereIds, exactly like trips.
@@ -190,7 +185,7 @@ async function assembleForCustomerPeriod(params: {
     .single();
   if (custErr || !customer) return { error: custErr?.message ?? "Customer not found." };
 
-  // Project is 1:1 with customer (lib/prepaid.ts header) — no project_id
+  // Project is 1:1 with customer (lib/money.ts header) — no project_id
   // stored on invoices, derived here.
   const { data: project, error: projErr } = await supabase
     .from("projects")
@@ -226,34 +221,6 @@ async function assembleForCustomerPeriod(params: {
     ref: t.ref,
     water_type: t.water_type,
   }));
-
-  // THE POOL'S TWO SIDES COME FROM THE LEDGER (0206 app cutover). The
-  // customer_topups / customer_balance_returns reads are gone with their
-  // tables' readers: money in is a customer_ledger 'topup' row (a positive
-  // 'correction' counts with it), money handed back is a 'refund' (a negative
-  // 'correction' counts with it, as a positive figure — BalanceReturnLite
-  // stores refunds unsigned). invoice_draw / balance_applied / draw_reversal
-  // rows are SETTLEMENTS of the very work this assembly derives from the
-  // trips and charges themselves — feeding them in as well would count every
-  // settlement twice. Fails LOUD like every other fetch here: falling back to
-  // [] would assemble an invoice against a pool that never existed.
-  const { data: ledgerRows, error: ledgerErr } = await supabase
-    .from("customer_ledger")
-    .select("id, entry_type, amount_sar, created_at")
-    .eq("customer_id", customerId);
-  if (ledgerErr) return { error: ledgerErr.message };
-  const topups: TopupLite[] = [];
-  const returns: BalanceReturnLite[] = [];
-  for (const row of ledgerRows ?? []) {
-    // created_at is timestamptz; the engine walks calendar days — same
-    // first-10-chars convention as the statement's date column.
-    const day = row.created_at.slice(0, 10);
-    if (row.entry_type === "topup" || (row.entry_type === "correction" && row.amount_sar > 0)) {
-      topups.push({ id: row.id, amount_sar: row.amount_sar, topup_date: day });
-    } else if (row.entry_type === "refund" || (row.entry_type === "correction" && row.amount_sar < 0)) {
-      returns.push({ id: row.id, amount_sar: Math.abs(row.amount_sar), returned_on: day });
-    }
-  }
 
   // v3: customer-wide, non-void-invoice charges only — see header note.
   // Two-step (no nested-join precedent elsewhere in this codebase, kept
@@ -332,8 +299,6 @@ async function assembleForCustomerPeriod(params: {
     periodStart,
     periodEnd,
     trips,
-    topups,
-    returns,
     specialCharges,
     sellerSnapshot: seller ?? null,
     buyerSnapshot: {
@@ -999,7 +964,7 @@ export async function revertInvoiceToDraft(invoiceId: string): Promise<ActionRes
 // for predicate: same project (via customer_id), same period bounds, same
 // delivered_at is null filter — so the UI's block reason and the DB's hard
 // block can never disagree. Note consumingItems()/splitCoveredUnpaidItems()
-// (lib/prepaid.ts) filter OUT undelivered trips entirely, so this can't be
+// (lib/money.ts) filter OUT undelivered trips entirely, so this can't be
 // derived from the assembly — it's a separate raw query.
 // ---------------------------------------------------------------------------
 export type UndeliveredTripBlocker = { id: string; trip_date: string; ref: string | null };
@@ -2046,7 +2011,7 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
   // A LEDGER-ERA PREPAID DOCUMENT IS NEVER CACHEABLE, in any status, and for
   // the same reason `confirmed` came out. Its Balance row is
   // `v_customer_available.balance_sar` read LIVE — there is no as-of ledger
-  // balance to freeze the way lib/prepaid.ts freezes the paid-up figure at
+  // balance to freeze the way loadPaidUpBalance freezes the paid-up figure at
   // paid_at — so it keeps moving after this invoice is paid, every time the
   // customer tops up or another invoice settles. Bytes stored once would pin
   // that figure at whatever it was on the first download and serve it forever,

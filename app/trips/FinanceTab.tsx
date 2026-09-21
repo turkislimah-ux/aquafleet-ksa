@@ -10,10 +10,10 @@
 // The one KPI that used to total money now counts rows instead, because a
 // count is not a figure the ledger owns.
 //
-// lib/prepaid.ts is NOT imported for prepaid figures any more. Its two
-// remaining imports here (round2/VAT_RATE for the display-only Rate column,
-// ConsumingTrip for the POSTPAID statement's itemized trips) predate the
-// ledger and serve surfaces the rebuild leaves untouched.
+// lib/money.ts is imported for primitives only (round2/VAT_RATE for the
+// display-only Rate column, ConsumingTrip for the POSTPAID statement's
+// itemized trips) — never for a prepaid figure. The old lib/prepaid.ts pool
+// math is gone entirely (0206 Group B).
 //
 // Balance model: payment_mode lives on the PROJECT (1:1 with its customer).
 // Only PREPAID projects run a ledger — postpaid and unset (legacy, pre-0025
@@ -29,7 +29,7 @@ import { monthKeyOf } from "@/lib/commission";
 // enum's English source of truth in db-types.ts, and the helper keys off the
 // same enum values.
 import { type PaymentMode, type CompanySettings } from "@/lib/db-types";
-import { round2, VAT_RATE, type ConsumingTrip } from "@/lib/prepaid";
+import { round2, VAT_RATE, type ConsumingTrip } from "@/lib/money";
 import { computeAmountPayable, toConsumingTrip } from "./amountPayable";
 import type { WaterType } from "@/lib/db-types";
 import type { SpecialChargeRow, PaidInvoiceRow, InvoicePaymentStatementRow } from "./page";
@@ -92,7 +92,7 @@ type TripLite = {
   // (trips.truck_id -> trucks.plate/capacity_m3 join) and flows straight
   // through boardProps.trips, same as invoiceLocked above. Display-only,
   // threaded into the statement's Truck/Capacity columns via tripMetaById
-  // below — never touches lib/prepaid.ts's ConsumingTrip.
+  // below — never touches lib/money.ts's ConsumingTrip.
   truckPlate?: string | null;
   truckCapacityM3?: number | null;
 };

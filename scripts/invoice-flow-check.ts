@@ -48,7 +48,25 @@
 //           all go red, so a green run is not a green tautology
 // ---------------------------------------------------------------------------
 
-import { round2 } from "../lib/prepaid";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { consumingItems, round2, type ConsumingTrip } from "../lib/money";
+import {
+  assembleInvoice,
+  canEditSpecialCharges,
+  type InvoiceAssembly,
+  type SpecialChargeInput,
+} from "../lib/invoice";
+import {
+  computeAmountPayable,
+  toConsumingTrip,
+  toConsumingCharge,
+  isUnsettledTrip,
+  isUnsettledCharge,
+  type PayableTrip,
+  type PayableCharge,
+} from "../app/trips/amountPayable";
+import type { InvoiceStatus } from "../lib/db-types";
 import { invoiceEra } from "../lib/invoice-era";
 import { buildInvoiceViewModel, type PdfInvoiceData, type PdfLine } from "../lib/invoiceViewModel";
 
@@ -504,9 +522,560 @@ console.log("\n-- case 9: the negative control");
     "the printed chain still closed with a mutated deduction — case 6 proves nothing");
 }
 
+
+// ===========================================================================
+// MOVED LAWS (0206 Group B). The five old-model harnesses are retired; every
+// still-true money law they guarded lives HERE now, adapted to the ledger-era
+// inputs. Deep-equal helper local to this block so the file's own boolean
+// check() is untouched.
+// ===========================================================================
+let movedFailures = 0;
+function deep(name: string, got: unknown, want: unknown) {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) {
+    movedFailures++;
+    failures++;
+  }
+  console.log(`[${ok ? "PASS" : "FAIL"}] ${name}` + (ok ? "" : `\n        got:  ${JSON.stringify(got)}\n        want: ${JSON.stringify(want)}`));
+}
+const deepTrue = (name: string, cond: boolean) => deep(name, cond, true);
+
+// ---------------------------------------------------------------------------
+// A. MONEY-CORE LAWS — consumingItems (moved from scripts/prepaid-check.ts).
+// The pool/statement/paid-up laws that file also held died with the pool;
+// these are the ones the ledger era still leans on: the statement's deduction,
+// the assembly's trip list and the payable all read this one function.
+// ---------------------------------------------------------------------------
+{
+  const trip = (id: string, date: string, rate: number, delivered = true): ConsumingTrip => ({
+    id,
+    trip_date: date,
+    delivered_at: delivered ? `${date}T10:00:00Z` : null,
+    rate_sar: rate,
+  });
+
+  const one = consumingItems([trip("t1", "2026-06-05", 400)]);
+  deep("money-core: trip amount stays 400 (pre-VAT, display)", one[0]?.amount, 400);
+  deep("money-core: trip consumedAmount = 460 (400 * 1.15, per item)", one[0]?.consumedAmount, 460);
+
+  const chargeOnly = consumingItems([], [{ id: "c1", charge_date: "2026-06-06", amount_sar: 200 }]);
+  deep("money-core: charge-only -> 1 item, kind=charge", [chargeOnly.length, chargeOnly[0]?.kind], [1, "charge"]);
+  deep("money-core: charge consumedAmount = 230 (200 * 1.15)", chargeOnly[0]?.consumedAmount, 230);
+
+  const sameDay = consumingItems(
+    [trip("t1", "2026-06-05", 100)],
+    [{ id: "c1", charge_date: "2026-06-05", amount_sar: 100 }],
+  );
+  deep("money-core: same-date tiebreak — trip sorts before charge", sameDay.map((e) => e.kind), ["trip", "charge"]);
+
+  // Membership is the CALLER'S array, never a date or a status read in here: a
+  // voided invoice's charge is simply not passed, and it vanishes.
+  deep(
+    "money-core: charge released by omission (void) — queue shrinks to the trip",
+    consumingItems([trip("t1", "2026-06-05", 100)], []).map((e) => e.id),
+    ["t1"],
+  );
+
+  // A reversed trip (delivered_at -> null) drops out before any amount exists.
+  deep(
+    "money-core: undelivered/reversed trip never reaches the money",
+    consumingItems([trip("t1", "2026-06-05", 100, false)]).length,
+    0,
+  );
+
+  // asOfDate filters TRIPS ONLY; a charge is invoice-bound, not date-scoped.
+  const gated = consumingItems(
+    [trip("early", "2026-06-05", 100), trip("late", "2026-07-05", 100)],
+    [{ id: "cLate", charge_date: "2026-07-09", amount_sar: 50 }],
+    "2026-06-30",
+  );
+  deep("money-core: asOfDate drops the late TRIP, keeps the late CHARGE", gated.map((e) => e.id), ["early", "cLate"]);
+}
+
+// ---------------------------------------------------------------------------
+// B. ASSEMBLY LAWS (moved whole from scripts/invoice-check.ts). The fixtures
+// are the same; the retired `topups`/`returns` inputs are gone from
+// AssembleInvoiceInput itself, which promotes that file's sharpest law — THE
+// POOL CANNOT MOVE THE DOCUMENT — from a runtime sweep to a TYPE FACT, pinned
+// by the @ts-expect-error tripwire at the end of this block.
+// ---------------------------------------------------------------------------
+{
+  // The two money invariants, asserted on EVERY assembled case: they were both
+  // violated in production once (grand built from covered lines only — 8 of 24
+  // live invoices did not add up) and an identity catches that class where a
+  // per-case expected value cannot.
+  function reconciles(name: string, r: InvoiceAssembly) {
+    deep(
+      `${name}: covered + amountDue === grand (subtotal/vat/total)`,
+      {
+        subtotal: round2(r.covered.subtotal + r.amountDue.subtotal),
+        vat: round2(r.covered.vat + r.amountDue.vat),
+        total: round2(r.covered.total + r.amountDue.total),
+      },
+      r.grand,
+    );
+    const everyLine = round2(
+      [...r.coveredLines, ...r.unpaidLines, ...r.chargeLines].reduce((s, l) => s + l.amount_sar, 0),
+    );
+    deep(`${name}: every line is inside grand.subtotal (nothing dropped)`, everyLine, r.grand.subtotal);
+    // LEDGER ERA (0203): the whole document is billable in BOTH modes. The
+    // prepaid draw is a ledger fact decided at settlement, not a line split.
+    deep(`${name}: covered is zero (the draw is a ledger fact, not a line split)`, r.covered, {
+      subtotal: 0,
+      vat: 0,
+      total: 0,
+    });
+    deepTrue(
+      `${name}: amountDue === grand EXACTLY (the whole invoice is billable)`,
+      JSON.stringify(r.amountDue) === JSON.stringify(r.grand),
+    );
+    deep(`${name}: coveredLines is empty in both modes`, r.coveredLines, []);
+    deepTrue(
+      `${name}: no line carries a coverage verdict`,
+      [...r.coveredLines, ...r.unpaidLines, ...r.chargeLines].every((l) => l.covered === undefined),
+    );
+    deep(`${name}: no tripTotals — one trips table, document-level foot`, r.tripTotals, undefined);
+  }
+
+  const T = (id: string, date: string, rate: number, delivered = true): ConsumingTrip => ({
+    id,
+    trip_date: date,
+    delivered_at: delivered ? `${date}T10:00:00Z` : null,
+    rate_sar: rate,
+  });
+  const base = { customerId: "c1", periodStart: "2026-06-01", periodEnd: "2026-06-30" };
+
+  {
+    const r = assembleInvoice({
+      ...base,
+      paymentMode: "postpaid",
+      trips: [T("t1", "2026-06-05", 300), T("t2", "2026-06-10", 300)],
+      specialCharges: [],
+    });
+    deep("assembly: postpaid coveredLines always empty", r.coveredLines, []);
+    deep("assembly: postpaid unpaidLines = both trips", r.unpaidLines.map((l) => l.id).sort(), ["t1", "t2"]);
+    deep("assembly: postpaid amountDue totals", r.amountDue, { subtotal: 600, vat: 90, total: 690 });
+    reconciles("assembly postpaid", r);
+  }
+
+  {
+    const charges: SpecialChargeInput[] = [{ id: "ch1", label: "Extra hose fee", amount_sar: 150 }];
+    const r = assembleInvoice({ ...base, paymentMode: "postpaid", trips: [T("t1", "2026-06-05", 300)], specialCharges: charges });
+    deep("assembly: charge lands in unpaidLines with kind=charge", r.unpaidLines.find((l) => l.id === "ch1")?.kind, "charge");
+    deep("assembly: charge amountDue = 300+150 -> 450/67.5/517.5", r.amountDue, { subtotal: 450, vat: 67.5, total: 517.5 });
+    reconciles("assembly postpaid charge", r);
+  }
+
+  {
+    // Period window is the ONLY scope: full history passed, May's trip absent.
+    const r = assembleInvoice({
+      ...base,
+      paymentMode: "prepaid",
+      trips: [T("tA-prior-period", "2026-05-15", 300), T("tB-this-period", "2026-06-15", 300)],
+      specialCharges: [],
+    });
+    deep("assembly: period scope — June's trip billed", r.unpaidLines.map((l) => l.id), ["tB-this-period"]);
+    deep("assembly: period scope — May's trip absent from every total", r.grand, { subtotal: 300, vat: 45, total: 345 });
+    reconciles("assembly period scope", r);
+  }
+
+  {
+    const r = assembleInvoice({
+      ...base,
+      paymentMode: "prepaid",
+      trips: [T("before", "2026-05-31", 100), T("inside", "2026-06-15", 100), T("after", "2026-07-01", 100)],
+      specialCharges: [],
+    });
+    deep("assembly: period boundary — only 'inside' appears", [...r.coveredLines, ...r.unpaidLines].map((l) => l.id), ["inside"]);
+    reconciles("assembly period boundary", r);
+  }
+
+  {
+    const r = assembleInvoice({
+      ...base,
+      paymentMode: "prepaid",
+      trips: [T("t1", "2026-06-01", 100), T("t2", "2026-06-02", 100), T("t3", "2026-06-03", 100), T("t4", "2026-06-04", 100, false)],
+      specialCharges: [],
+    });
+    const ids = [...r.coveredLines, ...r.unpaidLines].map((l) => l.id).sort();
+    deep("assembly: reconciliation — t1/t2/t3 in, undelivered t4 excluded", ids, ["t1", "t2", "t3"]);
+    deepTrue("assembly: no id duplicated across tables", new Set(ids).size === ids.length);
+    reconciles("assembly reconciliation", r);
+  }
+
+  {
+    // ROUNDING CONVERGENCE — one document-level pass, so the per-item halala
+    // the old covered/unpaid split argued over is UNREACHABLE, not resolved.
+    const r = assembleInvoice({
+      ...base,
+      paymentMode: "prepaid",
+      trips: [T("t1", "2026-06-01", 0.05), T("t2", "2026-06-02", 0.05), T("t3", "2026-06-03", 0.05)],
+      specialCharges: [],
+    });
+    deep("assembly: convergence — all three billed", r.unpaidLines.map((l) => l.id), ["t1", "t2", "t3"]);
+    deep("assembly: convergence — grand = one pass = 0.15/0.02/0.17", r.grand, { subtotal: 0.15, vat: 0.02, total: 0.17 });
+    deep("assembly: convergence — amountDue is the SAME figure, not per-item 0.12", r.amountDue, { subtotal: 0.15, vat: 0.02, total: 0.17 });
+    deep("assembly: convergence — per-item rounding would still say 0.06; nothing reads it", round2(0.05 * 1.15), 0.06);
+    reconciles("assembly convergence", r);
+  }
+
+  {
+    // THE STRANDED CHARGE CANNOT RECUR (026-000009's shape in miniature).
+    const r = assembleInvoice({
+      customerId: "c1",
+      paymentMode: "prepaid",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-31",
+      trips: [T("t1", "2026-07-17", 500)],
+      specialCharges: [{ id: "ch1", label: "emergency hours", amount_sar: 450, charge_date: "2026-07-18" }],
+    });
+    deep("assembly: stranded-charge — no coverage verdict on the charge", r.chargeLines.find((l) => l.id === "ch1")?.covered, undefined);
+    deep("assembly: stranded-charge — amountDue = trip 500 + charge 450, one VAT pass", r.amountDue, { subtotal: 950, vat: 142.5, total: 1092.5 });
+    reconciles("assembly stranded-charge", r);
+  }
+
+  {
+    // Trips and charges TOGETHER — the old 575/345 halves appear nowhere.
+    const r = assembleInvoice({
+      customerId: "c1",
+      paymentMode: "prepaid",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-31",
+      trips: [T("tA", "2026-07-01", 500), T("tB", "2026-07-02", 200)],
+      specialCharges: [{ id: "ch1", label: "a charge", amount_sar: 100, charge_date: "2026-07-03" }],
+    });
+    deep("assembly: one table — both trips billed, no wall", r.unpaidLines.map((l) => l.id), ["tA", "tB"]);
+    deep("assembly: one table — amountDue = 500+200+100, one VAT pass", r.amountDue, { subtotal: 800, vat: 120, total: 920 });
+    deepTrue(
+      "assembly: one table — the old 575 / 345 halves appear nowhere",
+      [r.grand, r.amountDue, r.covered].every((t) => t.total !== 575 && t.total !== 345),
+    );
+    reconciles("assembly one table", r);
+  }
+
+  {
+    // A FULLY-FUNDED customer is still billed in full: the draw happens at
+    // settlement and is reported as applied/payable, never by zeroing the
+    // document. The case most likely to be "fixed" back by a reader who takes
+    // a funded prepaid invoice for a paid one.
+    const r = assembleInvoice({
+      customerId: "c1",
+      paymentMode: "prepaid",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-31",
+      trips: [T("t1", "2026-07-01", 500)],
+      specialCharges: [{ id: "ch1", label: "a charge", amount_sar: 100, charge_date: "2026-07-02" }],
+    });
+    deep("assembly: fully funded — amountDue is the FULL invoice, not zero", r.amountDue, { subtotal: 600, vat: 90, total: 690 });
+    reconciles("assembly fully funded", r);
+  }
+
+  {
+    // A FUTURE-DATED charge is LISTED AND BILLED — the live 0181 guard, and
+    // the one case 0203 did not weaken. Fails loudly if a charge_date gate
+    // ever returns to consumingItems() or the prepaid arm's charge filter.
+    const r = assembleInvoice({
+      customerId: "c1",
+      paymentMode: "prepaid",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-31",
+      trips: [T("t1", "2026-07-10", 500)],
+      specialCharges: [{ id: "ch1", label: "charge dated after periodEnd", amount_sar: 100, charge_date: "2026-08-15" }],
+    });
+    deep("assembly: future-dated charge — still listed (0181)", r.chargeLines.map((l) => l.id), ["ch1"]);
+    deep("assembly: future-dated charge — BILLED, amountDue = 500 + 100", r.amountDue, { subtotal: 600, vat: 90, total: 690 });
+    reconciles("assembly future-dated charge", r);
+  }
+
+  {
+    const r = assembleInvoice({ ...base, paymentMode: "prepaid", trips: [], specialCharges: [] });
+    deep("assembly: empty — everything zero", [r.covered, r.amountDue, r.grand], [
+      { subtotal: 0, vat: 0, total: 0 },
+      { subtotal: 0, vat: 0, total: 0 },
+      { subtotal: 0, vat: 0, total: 0 },
+    ]);
+    deep("assembly: empty — no lines", [r.coveredLines, r.unpaidLines], [[], []]);
+    reconciles("assembly empty", r);
+  }
+
+  {
+    let threw = false;
+    try {
+      assembleInvoice({ ...base, paymentMode: null, trips: [], specialCharges: [] });
+    } catch {
+      threw = true;
+    }
+    deepTrue("assembly: paymentMode null throws instead of silently defaulting", threw);
+  }
+
+  {
+    const r = assembleInvoice({
+      ...base,
+      paymentMode: "postpaid",
+      trips: [],
+      specialCharges: [],
+      sellerSnapshot: { legal_name: "Bin Slimah Group" },
+      buyerSnapshot: { name: "Acme Co" },
+      customerEmail: "acme@example.com",
+    });
+    deep("assembly: passthrough seller/buyer/email", [r.sellerSnapshot, r.buyerSnapshot, r.customerEmail], [
+      { legal_name: "Bin Slimah Group" },
+      { name: "Acme Co" },
+      "acme@example.com",
+    ]);
+  }
+
+  {
+    // Reserve-at-draft exclusion (0030): a trip claimed by ANOTHER non-void
+    // invoice appears in NO table and NO total, or one trip is billed twice.
+    const r = assembleInvoice({
+      ...base,
+      paymentMode: "prepaid",
+      trips: [T("t1", "2026-06-01", 100), T("t2", "2026-06-02", 100), T("t3", "2026-06-03", 100)],
+      specialCharges: [],
+      reservedElsewhereIds: ["t2"],
+    });
+    deep("assembly: reserve-exclusion — t1 + t3 billed, t2 absent", r.unpaidLines.map((l) => l.id), ["t1", "t3"]);
+    deep("assembly: reserve-exclusion — grand excludes t2 too", r.grand, { subtotal: 200, vat: 30, total: 230 });
+    reconciles("assembly reserve-exclusion", r);
+  }
+
+  {
+    const r = assembleInvoice({
+      ...base,
+      paymentMode: "postpaid",
+      trips: [T("t1", "2026-06-05", 300), T("t2", "2026-06-10", 300)],
+      specialCharges: [],
+      reservedElsewhereIds: ["t2"],
+    });
+    deep("assembly: postpaid reserve-exclusion — only t1 billable", r.unpaidLines.map((l) => l.id), ["t1"]);
+    reconciles("assembly postpaid reserve-exclusion", r);
+  }
+
+  {
+    const editable: InvoiceStatus[] = ["draft", "review"];
+    const locked: InvoiceStatus[] = ["confirmed", "paid", "void"];
+    deepTrue("assembly: special charges editable in draft/review only", editable.every((s) => canEditSpecialCharges(s)));
+    deepTrue("assembly: special charges frozen from confirm onward", locked.every((s) => !canEditSpecialCharges(s)));
+  }
+
+  // THE POOL CANNOT MOVE THE DOCUMENT — now a TYPE fact. The old runtime sweep
+  // (identical assembly under empty / flooded / refunded pools) died with the
+  // `topups`/`returns` inputs themselves: an input that does not exist cannot
+  // move anything. If either field ever returns to AssembleInvoiceInput, the
+  // suppressed excess-property error below stops firing and tsc fails the
+  // build with TS2578 (unused @ts-expect-error) — a tripwire that can fail.
+  void (() =>
+    assembleInvoice({
+      ...base,
+      paymentMode: "postpaid",
+      trips: [],
+      specialCharges: [],
+      // @ts-expect-error -- the pool left the assembly input in 0206 Group B
+      topups: [],
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// C. AMOUNT PAYABLE LAWS (moved from scripts/amount-payable-check.ts). The
+// figure the postpaid Finance column and the Breakdown box render. Its old
+// decoupling proof ("a top-up moves the balance, not the payable") is a type
+// fact now too: computeAmountPayable takes no pool inputs at all, and the
+// running balance it was decoupled FROM is the ledger view's, not the app's.
+// ---------------------------------------------------------------------------
+{
+  const RATE = 400;
+  const TRIP_VAT = 460;
+  const CHARGE_VAT = 230;
+  type FixtureStatus = "draft" | "review" | "confirmed" | "paid";
+  const lockedFor = (status: FixtureStatus | null): boolean => status === "paid";
+  const trip = (id: string, opts: { delivered: boolean; invoice: FixtureStatus | null }): PayableTrip => ({
+    id,
+    trip_date: "2026-06-03",
+    delivered_at: opts.delivered ? "2026-06-03T08:00:00.000Z" : null,
+    rate_sar: RATE,
+    invoiceLocked: lockedFor(opts.invoice),
+  });
+  const charge = (id: string, status: FixtureStatus): PayableCharge => ({
+    id,
+    label: id,
+    amount_sar: 200,
+    charge_date: "2026-06-04",
+    created_at: "2026-06-04T09:00:00.000Z",
+    paid: status === "paid",
+  });
+  const TRIPS: PayableTrip[] = [
+    trip("t-none", { delivered: true, invoice: null }),
+    trip("t-draft", { delivered: true, invoice: "draft" }),
+    trip("t-review", { delivered: true, invoice: "review" }),
+    trip("t-confirmed", { delivered: true, invoice: "confirmed" }),
+    trip("t-paid", { delivered: true, invoice: "paid" }),
+    trip("t-undelivered", { delivered: false, invoice: null }),
+    trip("t-undelivered-draft", { delivered: false, invoice: "draft" }),
+  ];
+  const CHARGES: PayableCharge[] = [charge("ch-draft", "draft"), charge("ch-paid", "paid")];
+  const EXPECTED = -2070; // 4 payable trips x 460 + 1 payable charge x 230, owed
+  const payable = (mode: "prepaid" | "postpaid" | null, trips: PayableTrip[] = TRIPS, charges2: PayableCharge[] = CHARGES) =>
+    computeAmountPayable({ mode, hasProject: true, projectRate: RATE, trips, charges: charges2 });
+
+  for (const [name, id, want] of [
+    ["delivered, NO invoice -> IN", "t-none", -TRIP_VAT],
+    ["delivered, DRAFT invoice -> IN", "t-draft", -TRIP_VAT],
+    ["delivered, REVIEW invoice -> IN", "t-review", -TRIP_VAT],
+    ["delivered, CONFIRMED invoice -> IN", "t-confirmed", -TRIP_VAT],
+    ["delivered, PAID invoice -> OUT", "t-paid", 0],
+    ["UNDELIVERED, no invoice -> OUT", "t-undelivered", 0],
+    ["UNDELIVERED on a draft invoice -> OUT", "t-undelivered-draft", 0],
+  ] as const) {
+    deep(`payable: ${name}`, payable("postpaid", TRIPS.filter((t) => t.id === id), []), want);
+  }
+  deep("payable: charge on a DRAFT invoice -> IN", payable("postpaid", [], [charge("c", "draft")]), -CHARGE_VAT);
+  deep("payable: charge on a REVIEW invoice -> IN", payable("postpaid", [], [charge("c", "review")]), -CHARGE_VAT);
+  deep("payable: charge on a CONFIRMED invoice -> IN", payable("postpaid", [], [charge("c", "confirmed")]), -CHARGE_VAT);
+  deep("payable: charge on a PAID invoice -> OUT", payable("postpaid", [], [charge("c", "paid")]), 0);
+
+  deep("payable: full fixture", payable("postpaid"), EXPECTED);
+  deepTrue("payable: one path for both modes — identical inputs, identical figure", payable("prepaid") === payable("postpaid"));
+
+  {
+    const noFlag: PayableTrip = { id: "t-noflag", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", rate_sar: RATE };
+    deep("payable: absent invoiceLocked counts as unsettled (owes)", payable("postpaid", [noFlag], []), -TRIP_VAT);
+    deep("payable: isUnsettledTrip(absent flag) === true", isUnsettledTrip(noFlag), true);
+    deep("payable: isUnsettledCharge mirrors it", isUnsettledCharge(charge("c", "draft")), true);
+  }
+
+  {
+    const shapes: Array<[string, PayableTrip[], PayableCharge[]]> = [
+      ["empty", [], []],
+      ["all settled", TRIPS.filter((t) => t.invoiceLocked), CHARGES.filter((ch) => ch.paid)],
+      ["all undelivered", TRIPS.filter((t) => t.delivered_at == null), []],
+      ["charges only", [], CHARGES],
+      ["full fixture", TRIPS, CHARGES],
+    ];
+    for (const [name, ts, chs] of shapes) {
+      deepTrue(`payable: never positive — ${name}`, (payable("postpaid", ts, chs) as number) <= 0);
+    }
+    deep("payable: nothing owed reads as 0, not null", payable("postpaid", [], []), 0);
+  }
+
+  deep("payable: no project -> null", computeAmountPayable({ mode: "postpaid", hasProject: false, projectRate: RATE, trips: TRIPS, charges: CHARGES }), null);
+  deep("payable: payment_mode unset -> null (em dash on screen)", payable(null), null);
+
+  {
+    const frozen: PayableTrip = { id: "t-frozen", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", rate_sar: 100 };
+    deep("payable: frozen trips.rate_sar wins over the project rate", payable("postpaid", [frozen], []), -115);
+    const unpriced: PayableTrip = { id: "t-unpriced", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", rate_sar: null };
+    deep("payable: no frozen rate falls back to the project rate", payable("postpaid", [unpriced], []), -TRIP_VAT);
+  }
+
+  {
+    // THE COMPLEMENT INVARIANT: the payable slice and the settled slice are
+    // the two halves of ONE consumingItems queue, split by the same flags.
+    // The settled half used to be summed through derivedBalanceItems; it is
+    // restated here over consumingItems directly — same figure, no pool.
+    const sumConsumed = (trips2: PayableTrip[], charges2: PayableCharge[]) =>
+      round2(
+        consumingItems(
+          trips2.map((t) => toConsumingTrip(t, RATE)),
+          charges2.map(toConsumingCharge),
+        ).reduce((s, e) => s + e.consumedAmount, 0),
+      );
+    const unpaidConsumption = -(payable("postpaid") as number);
+    const settledSlice = sumConsumed(TRIPS.filter((t) => t.invoiceLocked), CHARGES.filter((ch) => ch.paid));
+    const total = sumConsumed(TRIPS, CHARGES);
+    deep("payable: complement — unpaid + settled === total consumption", round2(unpaidConsumption + settledSlice), total);
+    deepTrue("payable: complement — the settled half is non-empty (not vacuous)", settledSlice > 0);
+    deep("payable: complement — total is every delivered trip + every charge", total, 2760);
+  }
+
+  // NO POOL INPUT EXISTS — the decoupling law as a type fact, with the same
+  // TS2578 tripwire as the assembly's above.
+  void (() =>
+    computeAmountPayable({
+      mode: "postpaid",
+      hasProject: true,
+      projectRate: RATE,
+      trips: [],
+      charges: [],
+      // @ts-expect-error -- computeAmountPayable takes no pool; a topups field
+      // returning here would let a deposit look like a settlement
+      topups: [],
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// D. THE FREEZE BOUNDARY (moved from scripts/frozen-split-check.ts). That
+// file's covered/unpaid RE-DERIVATION died with splitCoveredUnpaidItems; what
+// it also guarded, and what stays true for the 29 pre-ledger invoices until
+// the deploy-phase wipe, is the freeze law itself: an invoice carries a frozen
+// snapshot IF AND ONLY IF it is issued, and the issued render path reads the
+// FROZEN columns, never a recomputation. Fixture measured 2026-08-31.
+// ---------------------------------------------------------------------------
+{
+  /** [invoice key, customer key, status, period_start, period_end,
+   *   covered_total_sar, amount_due_sar, grand_total_sar,
+   *   effective_payment_mode, frozen] */
+  type FrozenInvoiceRow = [string, string, string, string, string, number, number, number, string, boolean];
+  const INVOICES: FrozenInvoiceRow[] = [
+    ["026-000001", "C1", "paid", "2026-07-15", "2026-07-16", 0, 920, 920, "prepaid", true],
+    ["026-000003", "C1", "paid", "2026-07-10", "2026-07-16", 0, 920, 920, "prepaid", true],
+    ["026-000004", "C1", "paid", "2026-07-12", "2026-07-16", 4140, 0, 4140, "prepaid", true],
+    ["026-000005", "C3", "confirmed", "2026-07-16", "2026-07-16", 0, 0, 0, "prepaid", true],
+    ["026-000006", "C2", "paid", "2026-07-12", "2026-07-16", 3381, 2300, 5681, "prepaid", true],
+    ["026-000007", "C3", "paid", "2026-07-16", "2026-07-16", 1414.5, 471.5, 1414.5, "prepaid", true],
+    ["026-000008", "C1", "paid", "2026-06-01", "2026-07-17", 1380, 0, 2530, "prepaid", true],
+    ["026-000009", "C3", "confirmed", "2026-07-17", "2026-07-18", 0, 4243.5, 0, "prepaid", true],
+    ["026-000011", "C1", "confirmed", "2026-07-18", "2026-07-18", 0, 0, 0, "prepaid", true],
+    ["026-000012", "C1", "paid", "2026-07-24", "2026-07-27", 920, 0, 46920, "prepaid", true],
+    ["026-000013", "C3", "paid", "2026-08-01", "2026-08-15", 33005, 0, 34155, "prepaid", true],
+    ["026-000014", "C2", "paid", "2026-08-01", "2026-08-29", 24150, 32844, 24150, "prepaid", true],
+    ["1", "C2", "void", "2026-07-01", "2026-07-12", 2415, 11500, 13915, "prepaid", true],
+    ["2", "C2", "paid", "2026-07-01", "2026-07-12", 2415, 1150, 3565, "prepaid", true],
+    ["3", "C1", "paid", "2026-07-01", "2026-07-12", 2300, 920, 3220, "prepaid", true],
+    ["6", "C2", "void", "2026-06-01", "2026-06-30", 0, 1449, 1449, "prepaid", true],
+    ["8", "C1", "paid", "2026-07-13", "2026-07-14", 0, 4600, 4600, "prepaid", true],
+    ["X3607", "C1", "review", "2026-08-01", "2026-08-15", 0, 0, 0, "prepaid", false],
+  ];
+  const ISSUED = new Set(["confirmed", "paid", "void"]);
+
+  /** Pure, so the negative control below can drive it with synthetic rows. */
+  const freezeBoundaryBreaks = (rows: FrozenInvoiceRow[]): string[] =>
+    rows.filter((i) => i[9] !== ISSUED.has(i[2])).map((i) => `${i[0]} (${i[2]}, frozen=${i[9]})`);
+
+  const breaks = freezeBoundaryBreaks(INVOICES);
+  deepTrue(`freeze boundary holds: frozen if and only if issued${breaks.length ? ` — ${breaks.join(", ")}` : ""}`, breaks.length === 0);
+
+  // NEGATIVE CONTROL — a guard nobody has seen fail is not a guard.
+  const control = freezeBoundaryBreaks([
+    ["CTL-A", "C1", "paid", "2026-01-01", "2026-01-31", 0, 0, 0, "prepaid", false],
+    ["CTL-B", "C1", "draft", "2026-01-01", "2026-01-31", 0, 0, 0, "prepaid", true],
+  ]);
+  deepTrue("freeze boundary control: both synthetic breaks are caught", control.length === 2);
+
+  // THE OTHER HALF, in the source: the issued render path reads FROZEN
+  // columns. If the frozen branch ever recomputes, this fails and the freeze
+  // law has to be revisited on purpose.
+  const actionsSrc = readFileSync(join(__dirname, "..", "app", "trips", "invoiceActions.ts"), "utf8");
+  for (const needle of [
+    'if (inv.status === "draft" || inv.status === "review") {',
+    "coveredLines: inv.covered_lines ?? []",
+    "unpaidLines: inv.unpaid_lines ?? []",
+    "covered: { subtotal: inv.covered_subtotal_sar, vat: inv.covered_vat_sar, total: inv.covered_total_sar }",
+    "amountDue: { subtotal: inv.amount_due_subtotal_sar, vat: inv.amount_due_vat_sar, total: inv.amount_due_sar }",
+  ]) {
+    deepTrue(`freeze law in source — invoiceActions.ts still contains: ${needle}`, actionsSrc.includes(needle));
+  }
+}
+
+if (movedFailures > 0) {
+  console.log(`\n${movedFailures} moved-law check(s) FAILED within the sections above.`);
+}
+
 console.log("");
 if (failures === 0) {
-  console.log("All invoice-flow checks PASSED ✓ — the frozen pair, the settlement walk and the printed chain all close.");
+  console.log(
+    "All invoice-flow checks PASSED ✓ — the frozen pair, the settlement walk, the printed chain, and the moved assembly/payable/money-core/freeze laws all close.",
+  );
   process.exit(0);
 } else {
   console.log(`${failures} invoice-flow check(s) FAILED ✗`);

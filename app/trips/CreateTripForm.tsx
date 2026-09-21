@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui";
 import { cn, formatSar, monthName, riyadhDayKey } from "@/lib/utils";
 // THE prepaid gross-up, imported rather than restated — see availNeeded below.
-import { inclVat } from "@/lib/prepaid";
+import { inclVat } from "@/lib/money";
 import {
   type WaterType,
   WATER_TYPE_LABELS,
@@ -363,8 +363,8 @@ export default function CreateTripForm({
   const availProject = kind === "project" ? (projects.find((p) => p.id === projectId) ?? null) : null;
   const availSar = availProject ? (availableByCustomer[availProject.customer_id] ?? null) : null;
   // inclVat() is IMPORTED, never re-expressed. A trip consumes
-  // round2(rate_sar * (1 + VAT_RATE)) off the prepaid pool — one expression in
-  // lib/prepaid.ts serves the statement, the coverage walk and now this — so a
+  // round2(rate_sar * (1 + VAT_RATE)) off the account — one expression in
+  // lib/money.ts serves the statement, the invoice assembly and this — so a
   // hand-rolled `* 1.15` here would be a second opinion that disagrees in
   // halalas on exactly the trips where the warning matters most. The batch
   // multiplies an ALREADY-ROUNDED per-trip figure, which is what actually

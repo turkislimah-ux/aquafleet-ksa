@@ -1,7 +1,7 @@
 // Outsourced-jobs (workshop payments) VAT — PURE math, no Supabase/Next/I-O.
 // Mirrors lib/inventory-vat.ts's own discipline and its own header's rule:
-// "borrows ONLY the rate from lib/prepaid.ts (a read, an import — not a
-// modification of that file)". Same here — lib/prepaid.ts/vat.ts/invoice.ts
+// "borrows ONLY the rate from lib/money.ts (a read, an import — not a
+// modification of that file)". Same here — lib/money.ts/vat.ts/invoice.ts
 // are never touched by anything in this file or its callers.
 //
 // DELIBERATELY SEPARATE FROM lib/vat.ts AND lib/inventory-vat.ts. Turki's
@@ -16,7 +16,7 @@
 // this file imports either of those, and nothing outside app/maintenance
 // should import this file.
 
-import { VAT_RATE } from "./prepaid";
+import { VAT_RATE } from "./money";
 export { VAT_RATE };
 
 function round2(n: number): number {

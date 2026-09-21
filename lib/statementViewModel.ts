@@ -65,9 +65,9 @@
 //   The ONE cumulative walk below is presentation of the ledger rows' own
 //   amounts in sequence — the directive's sanctioned display device — and is
 //   never used as a source figure: the headline is the view's, not the walk's.
-//   Nothing reads lib/prepaid.ts's derived balance any more.
+//   The old app-derived balance is gone with lib/prepaid.ts (0206).
 //
-//   POSTPAID (unchanged): lib/prepaid.ts's consumingItems() remains the only
+//   POSTPAID (unchanged): lib/money.ts's consumingItems() remains the only
 //   expression of what a postpaid trip costs, called with exactly the
 //   arguments the modal always passed.
 //
@@ -103,7 +103,7 @@ import { t, type TKey } from "./i18n";
 // what one of those costs (VAT-inclusive `consumedAmount`, the same basis
 // v_customer_uninvoiced totals). The prepaid arm still derives no BALANCE from
 // it — its figures are view columns passed in, exactly as before.
-import { consumingItems, round2, type ConsumedItem, type ConsumingCharge, type ConsumingTrip } from "./prepaid";
+import { consumingItems, round2, type ConsumedItem, type ConsumingCharge, type ConsumingTrip } from "./money";
 // The ref column's wording lives here for BOTH surfaces. lib/trip-ref.ts's own
 // header requires it: "ALL trip-ref rendering (Kanban cards, invoice tables,
 // statements) must go through this file". A document that printed a bare blank
@@ -127,7 +127,7 @@ function bi(key: TKey): BiLabel {
 
 // Per-trip display metadata, keyed by trip id (app/trips/StatementModal.tsx's
 // TripMeta, re-declared here so the view-model does not import a React module).
-// Kept OUTSIDE lib/prepaid.ts's ConsumingTrip/ConsumedItem, which stay untouched.
+// Kept OUTSIDE lib/money.ts's ConsumingTrip/ConsumedItem, which stay untouched.
 export type StatementTripMeta = {
   truckPlate: string | null;
   truckCapacityM3: number | null;
@@ -225,7 +225,7 @@ export type StatementLedgerEntry = {
 // One special charge, as invoice_special_charges stores it. `charge_date` is
 // NULLABLE at the database level (migration 0032 added the column, so rows
 // older than it carry none) and this is the one place that decides the
-// fallback: the row's own created_at date. lib/prepaid.ts's ConsumingCharge
+// fallback: the row's own created_at date. lib/money.ts's ConsumingCharge
 // demands a resolved date and refuses to guess, so the resolution happens here
 // on the way in, exactly the caller-resolves convention that type documents.
 export type StatementChargeInput = {
@@ -575,7 +575,7 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
 
   // ---- Prepaid: one chronological record of the whole account ------------
   if (mode === "prepaid") {
-    // SPECIAL CHARGES, dated on the way in. lib/prepaid.ts's ConsumingCharge
+    // SPECIAL CHARGES, dated on the way in. lib/money.ts's ConsumingCharge
     // requires a resolved charge_date and holds no opinion about where it came
     // from; invoice_special_charges.charge_date is nullable, so the row's own
     // created_at date is the fallback. Resolved here and nowhere else.

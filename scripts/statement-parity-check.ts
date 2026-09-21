@@ -17,7 +17,7 @@
 // The popup is React and cannot be rendered here without a DOM, so this file
 // guards the half that CAN be measured without one, and the structure makes
 // that enough: both surfaces call buildStatementVm() and neither can reach
-// lib/prepaid.ts on its own. So if the VIEW-MODEL is right and the DOCUMENT
+// lib/money.ts on its own. So if the VIEW-MODEL is right and the DOCUMENT
 // omits nothing from it, the document matches the screen — there is no third
 // place for a figure to come from. Case 1 checks the second half; cases 3-6
 // and 9 check the first.
@@ -35,7 +35,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { round2, type ConsumingTrip } from "../lib/prepaid";
+import { round2, type ConsumingTrip } from "../lib/money";
 import { num2 } from "../lib/docPrimitives";
 import { fill, t, type TKey } from "../lib/i18n";
 import { formatSar } from "../lib/utils";

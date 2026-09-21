@@ -271,10 +271,19 @@ function literals(sql: string): string[] {
   return out;
 }
 
-// The four cells the 0206 app cutover rewrote — see the override note inside
-// the byte-fidelity loop below. Keyed `<metric>.<field>`; values are the
-// exact i18n `en` strings.
+// The cells the 0206 cutover rewrote (Group A: four; Group B: four more when
+// derivedBalanceItems and the app-derived running balance were retired) — see
+// the override note inside the byte-fidelity loop below. Keyed
+// `<metric>.<field>`; values are the exact i18n `en` strings.
 const LEDGER_COPY_OVERRIDES: Record<string, string> = {
+  "running_balance.meaning":
+    "The money a prepaid customer holds on account: the sum of their ledger — deposits and corrections in, settlements and refunds out.",
+  "running_balance.formula":
+    "v_customer_ledger_balance.balance_sar: the sum of the customer's customer_ledger rows. Deducted at SETTLEMENT (a balance draw or a refund), not at delivery — delivered-but-unsettled work shows in Uninvoiced and is netted off in Available.",
+  "running_balance.caveat":
+    "Not a period measure and not app-computed: it is the ledger view's own column, per customer, for the instant you are looking at. It is NOT the spendable figure — that is Available (balance minus uninvoiced work minus confirmed unsettled invoices). Since the ledger cutover the Running and Paid-up figures are ONE number, the ledger's sum, kept as two entries only because both labels still appear on screens. Prepaid only — a postpaid customer has no ledger. Never place it in a period column or on a monthly trend line.",
+  "amount_payable.formula":
+    "computeAmountPayable in app/trips/amountPayable.ts: zero minus the sum of consumingItems (lib/money.ts) over the delivered trips and non-void special charges that are not on a paid invoice, VAT-inclusive at the frozen trip rate. Negative means owed to us, zero means settled; <= 0 by construction.",
   "paid_up_balance.meaning":
     "A prepaid customer's ledger balance: money put on account minus what settlements and refunds have taken out. Not the spendable figure — that is Available.",
   "paid_up_balance.formula":

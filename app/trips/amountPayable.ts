@@ -56,10 +56,11 @@
 // different number than the one the Finance tab's column renders.
 
 import {
-  derivedBalanceItems,
+  consumingItems,
+  round2,
   type ConsumingTrip,
   type ConsumingCharge,
-} from "@/lib/prepaid";
+} from "@/lib/money";
 import type { PaymentMode, WaterType } from "@/lib/db-types";
 
 // Structural inputs — deliberately WIDER than either caller's own row type so
@@ -95,7 +96,7 @@ export type PayableCharge = {
 
 // Engine-input adapters. These carry the RATE RESOLUTION, which is a money rule
 // (frozen `trips.rate_sar` first, the project's current rate only as the
-// not-yet-delivered fallback — lib/prepaid.ts's ConsumingTrip note, migration
+// not-yet-delivered fallback — lib/money.ts's ConsumingTrip note, migration
 // 0128), and a money rule copied N times can drift in N-1 places. One copy,
 // every slice.
 //
@@ -110,7 +111,7 @@ export function toConsumingTrip(t: PayableTrip, projectRate: number): ConsumingT
     // because the widened input type admits null, not because data does.
     trip_date: t.trip_date ?? "",
     delivered_at: t.delivered_at,
-    // FROZEN RATE FIRST — see lib/prepaid.ts's ConsumingTrip note. The
+    // FROZEN RATE FIRST — see lib/money.ts's ConsumingTrip note. The
     // project's current rate is only the not-yet-delivered fallback.
     rate_sar: t.rate_sar ?? projectRate,
     ref: t.ref,
@@ -171,20 +172,22 @@ export function computeAmountPayable(args: {
   if (!hasProject) return null;
   if (mode !== "prepaid" && mode !== "postpaid") return null;
 
-  // Same engine, no top-ups: derivedBalanceItems([], …) is credits minus debits
-  // with the credits side empty, i.e. the negated VAT-inclusive consumption of
-  // exactly this slice. It reuses consumingItems()'s delivered-only filter
-  // (lib/prepaid.ts:138) and its per-item rounding rather than restating either
-  // — there is no second summation of money anywhere in this file.
+  // Same engine, negated: the payable is 0 minus the VAT-inclusive
+  // consumption of exactly this slice, summed over consumingItems()'s own
+  // output so its delivered-only filter and per-item rounding are reused, not
+  // restated — there is no second summation of money anywhere in this file.
+  // (This expression IS the retired derivedBalanceItems([], …) call with the
+  // credits side empty; 0206 Group B inlined it here when that function died
+  // with the pool. Byte-identical: round2(0 − round2(Σ consumedAmount)).)
   //
-  // NO RETURNS TERM, and that is not an omission. A balance return refunds
-  // prepaid CREDIT: it moves the pool, not the work. This figure has no pool
-  // term at all, so netting a refund here would shrink a debt because we handed
-  // money back — the wrong direction. Refunds net in the running balance
-  // (lib/prepaid.ts's returnedTotal, 0142); they have no place here.
-  return derivedBalanceItems(
-    [],
-    trips.filter(isUnsettledTrip).map((t) => toConsumingTrip(t, projectRate)),
-    charges.filter(isUnsettledCharge).map(toConsumingCharge),
+  // NO CREDIT TERM AND NO REFUND TERM, and that is not an omission. Money on
+  // account funds work rather than settling it, and a refund moves the
+  // account, not the work. Both live in the ledger; neither has a place here.
+  const debits = round2(
+    consumingItems(
+      trips.filter(isUnsettledTrip).map((t) => toConsumingTrip(t, projectRate)),
+      charges.filter(isUnsettledCharge).map(toConsumingCharge),
+    ).reduce((s, e) => s + e.consumedAmount, 0),
   );
+  return round2(0 - debits);
 }
