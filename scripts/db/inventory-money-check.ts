@@ -1,5 +1,5 @@
 // LIVE DATABASE guard for the INVENTORY money path — FIFO lot consumption,
-// add_price_lot, and the return_customer_balance refund gate.
+// add_price_lot, and the record_refund refund gate (the Available cap).
 // Run:  npm run test:db   (or: npx tsx scripts/db/inventory-money-check.ts)
 // Exits 0 if every assertion passes, 1 otherwise (CI-friendly).
 //
@@ -59,18 +59,14 @@
 //    never gets a chance to fire. Asserted as measured, not as it ought to
 //    read — this file records behavior; changing the message is separate work.
 //
-// 3. return_customer_balance's ALREADY-REFUNDED GUARD DOES NOT FIRE ON AN
-//    ORDINARY DOUBLE REFUND. It sits BEHIND the amount-is-positive guard, and
-//    the first refund is itself subtracted from the balance, so a second call
-//    straight after the first is turned away by
-//      'This customer holds no balance to return.'
-//    and never reaches
-//      'This customer''s balance has already been returned.'
-//    The already-returned guard is reachable in exactly ONE shape: the customer
-//    is refunded and then FUNDED AGAIN. That is also the only shape in which it
-//    is load-bearing — with money back in the pool, nothing else stands between
-//    a second call and a second cash payout. B5 pins the ordering, B6 pins the
-//    guard itself. Neither alone proves the double-payout is closed.
+// 3. record_refund IS THE ONE REFUND DOOR (0206 — return_customer_balance is
+//    uncalled and 0207 drops it). Its whole gate is the Available cap, read
+//    under the customer row lock: a refund up to Available succeeds — live or
+//    archived customer alike, and MORE THAN ONCE if the account is funded
+//    again — and one halala over is refused. The retired one-row
+//    already-returned guard has no ledger equivalent, and needs none: the
+//    thing it closed (a second payout of money no longer held) is closed by
+//    the cap itself, which B5/B6 below now prove in both directions.
 // ===========================================================================
 //
 // WHAT IT ASSERTS
@@ -80,11 +76,11 @@
 //   case 2     a consume landing exactly on a lot boundary
 //   case 3     a consume spanning all three lots; on-hand == sum(remaining)
 //   case 4     consume_from_lots direct — its own ORDER BY, not the wrapper's
-//   case 5     return_customer_balance succeeds for an archived creditor
+//   case 5     record_refund pays an archived creditor exactly their Available
 //   F1..F6     stock and drift refusals
 //   A1..A3     add_price_lot input refusals
-//   B1..B6     the refund gate, including the DEBTOR case
-//   R1..R6     anon denied on every function in the chain
+//   B1..B6     the refund gate (the Available cap), including the DEBTOR case
+//   R1..R6     anon denied on every function in the chain (record_refund incl.)
 //
 // NO ROWS SURVIVE. One transaction ending in ROLLBACK, asserted afterwards by
 // a census taken on a FRESH connection.
@@ -112,12 +108,15 @@ const C1_COST_IF_CHEAPEST = 320.0; // 4*30.00 + 5*40.00
 const C3_QTY = 12.0;
 const C3_WEIGHTED = 44.17; // (300 + 200 + 30) / 12
 
-// --- The refund fixtures.
+// --- The refund fixtures (ledger era). A record_topup of 500 gives Balance
+// 500; one delivered, uninvoiced trip puts 115.00 in Uninvoiced; Available =
+// 385.00 — the exact cap record_refund enforces. The debtor holds no balance
+// and the same delivered trip, so their Available is −115.00.
 const TRIP_NET = 100.0;
 const TRIP_GROSS = 115.0;
 const TOPUP = 500.0;
-const REFUNDABLE = 385.0; // 500.00 − 115.00
-const DEBTOR_BALANCE = -115.0; // one delivered trip, no top-up
+const REFUNDABLE = 385.0; // Available: 500.00 − 115.00
+const DEBTOR_BALANCE = -115.0; // Available: one delivered trip, no top-up
 const TRIP_DATE = "2020-01-15";
 
 const ADD_LOT_SQL = `select * from public.add_price_lot($1::uuid, $2::numeric, $3::numeric, $4::date, $5::text, $6::text)`;
@@ -125,7 +124,8 @@ const START_WO_SQL = `select * from public.start_work_order($1::uuid, $2::text)`
 const CONSUME_SQL = `select * from public.consume_from_lots($1::uuid, $2::numeric, $3::text, $4::text)`;
 const CONSUME_LINE_SQL = `select * from public.consume_work_order_line($1::uuid, $2::numeric, $3::text)`;
 const DEDUCT_SQL = `select * from public.deduct_work_order_parts($1::uuid, $2::text)`;
-const RETURN_SQL = `select * from public.return_customer_balance($1::uuid, $2::text, $3::text, $4::text, $5::date, $6::text, $7::text)`;
+const REFUND_SQL = `select * from public.record_refund($1::uuid, $2::numeric, $3::text, $4::text, $5::text, $6::text, $7::text)`;
+const TOPUP_SQL = `select * from public.record_topup($1::uuid, $2::numeric, $3::text, $4::text, $5::text, $6::text, $7::text)`;
 
 type Row = Record<string, unknown>;
 type Outcome = { row: Row | null; err: { message: string } | null };
@@ -162,6 +162,7 @@ async function main(): Promise<void> {
       (select count(*) from public.trips)                         as trips,
       (select count(*) from public.customer_topups)               as topups,
       (select count(*) from public.customer_balance_returns)      as balance_returns,
+      (select count(*) from public.customer_ledger)                as ledger_rows,
       (select coalesce(sum(qty_on_hand), 0) from public.parts)    as total_on_hand,
       (select coalesce(sum(qty_remaining), 0) from public.price_lots) as total_remaining`;
 
@@ -236,17 +237,15 @@ async function main(): Promise<void> {
 
   const balance = async (customerId: string): Promise<number> =>
     money(
-      (await c.query(`select balance_sar from public.v_customer_prepaid_balance where customer_id = $1`, [customerId]))
+      (await c.query(`select balance_sar from public.v_customer_ledger_balance where customer_id = $1`, [customerId]))
         .rows[0].balance_sar,
     );
 
-  const payable = async (customerId: string): Promise<number> =>
+  const available = async (customerId: string): Promise<number> =>
     money(
       (
-        await c.query(`select amount_payable_sar from public.v_customer_amount_payable where customer_id = $1`, [
-          customerId,
-        ])
-      ).rows[0].amount_payable_sar,
+        await c.query(`select available_sar from public.v_customer_available where customer_id = $1`, [customerId])
+      ).rows[0].available_sar,
     );
 
   let spSeq = 0;
@@ -464,11 +463,10 @@ async function main(): Promise<void> {
         );
       }
       if (opts.topup > 0) {
-        await c.query(
-          `insert into public.customer_topups (customer_id, amount_sar, topup_date, method)
-           values ($1, $2, $3, 'cash')`,
-          [customer, opts.topup, TRIP_DATE],
-        );
+        // Through the door, not the table: record_topup is the one writer of
+        // ledger money in (0203), and the retired customer_topups table is
+        // dummy data 0207 drops.
+        await c.query(TOPUP_SQL, [customer, opts.topup, "cash", null, null, "DBCHK operator", null]);
       }
       return customer;
     }
@@ -484,13 +482,13 @@ async function main(): Promise<void> {
     Object.assign(seeded, { creditor: CREDITOR, debtor: DEBTOR, live: LIVE, postpaid: POSTPAID });
 
     console.log("\n-- baseline: the refund fixtures");
-    check("baseline — creditor holds 385.00", await balance(CREDITOR), REFUNDABLE);
-    check("baseline — creditor's payable mirrors the balance (0139, prepaid arm)", await payable(CREDITOR), REFUNDABLE);
-    check("baseline — DEBTOR is at −115.00, i.e. owes us", await payable(DEBTOR), DEBTOR_BALANCE);
-    ok("baseline — the debtor case is genuinely negative, so the guard has something to refuse", (await payable(DEBTOR)) < 0);
-    check("baseline — postpaid customer's payable is −115.00", await payable(POSTPAID), DEBTOR_BALANCE);
-    check("baseline — no balance return exists yet for the creditor",
-      Number((await c.query(`select count(*)::int n from public.customer_balance_returns where customer_id = $1`, [CREDITOR])).rows[0].n), 0);
+    check("baseline — creditor's ledger balance is the topup, 500.00", await balance(CREDITOR), TOPUP);
+    check("baseline — creditor's AVAILABLE is 385.00 (balance − uninvoiced trip)", await available(CREDITOR), REFUNDABLE);
+    check("baseline — DEBTOR's Available is −115.00, i.e. owes us", await available(DEBTOR), DEBTOR_BALANCE);
+    ok("baseline — the debtor case is genuinely negative, so the cap has something to refuse", (await available(DEBTOR)) < 0);
+    check("baseline — postpaid customer's Available is −115.00 too", await available(POSTPAID), DEBTOR_BALANCE);
+    check("baseline — no ledger refund exists yet for the creditor",
+      Number((await c.query(`select count(*)::int n from public.customer_ledger where customer_id = $1 and entry_type = 'refund'`, [CREDITOR])).rows[0].n), 0);
 
     // =====================================================================
     // CASE 1 — FIFO through start_work_order, spanning two lots.
@@ -588,34 +586,34 @@ async function main(): Promise<void> {
     });
 
     // =====================================================================
-    // CASE 5 — return_customer_balance, the one legal refund.
-    //
-    // NOTE: this RPC is SECURITY INVOKER, unlike everything else in this file.
-    // The harness runs as service_role, which bypasses RLS, so what is proven
-    // here is its ARITHMETIC and its EXPLICIT guards — not its row-level
-    // policies. Those need a JWT-bearing client and are out of scope.
+    // CASE 5 — record_refund, the one refund door (0206). The Archive's
+    // Return Balance flow submits the customer's WHOLE Available, so that is
+    // the case proven here: an archived creditor refunded exactly their
+    // Available, capped by the RPC under the customer row lock.
     // =====================================================================
-    await scenario("case 5 — refund an archived creditor", async () => {
-      const before = await payable(CREDITOR);
-      const r = await rpc(RETURN_SQL, [CREDITOR, "cash", "DBCHK-REF", null, TRIP_DATE, "DBCHK", "DBCHK operator"]);
-      ok("case 5 — return_customer_balance SUCCEEDED", r.err === null);
+    await scenario("case 5 — refund an archived creditor their whole Available", async () => {
+      const before = await available(CREDITOR);
+      const r = await rpc(REFUND_SQL, [CREDITOR, REFUNDABLE, "cash", "DBCHK-REF", null, "DBCHK operator", "DBCHK"]);
+      ok("case 5 — record_refund SUCCEEDED", r.err === null);
       if (r.err) return console.log(`          unexpected raise: ${r.err.message}`);
 
       const row = (
         await c.query(
-          `select amount_sar, method, reference, to_char(returned_on,'YYYY-MM-DD') returned_on, returned_by
-             from public.customer_balance_returns where customer_id = $1`,
+          `select amount_sar, method, reference, created_by, doc_number
+             from public.customer_ledger where customer_id = $1 and entry_type = 'refund'`,
           [CREDITOR],
         )
       ).rows[0];
-      // The modal has no amount field by design — the RPC freezes the figure it
-      // read. Asserting the amount is therefore asserting the whole design.
-      check("case 5 — the frozen amount is the balance the RPC read, 385.00", money(row.amount_sar), REFUNDABLE);
-      check("case 5 — the frozen amount equals the pre-refund payable", money(row.amount_sar), before);
+      // The Archive modal has no amount field by design — it submits the
+      // Available it shows. Asserting the row is asserting that design.
+      check("case 5 — the ledger row is the NEGATIVE of the Available refunded", money(row.amount_sar), money(-REFUNDABLE));
+      check("case 5 — the amount refunded equals the pre-refund Available", money(-row.amount_sar), before);
       check("case 5 — method recorded", row.method, "cash");
       check("case 5 — reference recorded", row.reference, "DBCHK-REF");
-      check("case 5 — returned_by recorded", row.returned_by, "DBCHK operator");
-      check("case 5 — the balance is now exactly 0.00, not merely small", await balance(CREDITOR), 0);
+      check("case 5 — actor recorded on the row", row.created_by, "DBCHK operator");
+      ok("case 5 — the refund carries a credit-note number", typeof row.doc_number === "string" && row.doc_number.length > 0);
+      check("case 5 — the ledger balance drops by exactly the refund (500 − 385)", await balance(CREDITOR), money(TOPUP - REFUNDABLE));
+      check("case 5 — Available lands on exactly 0.00, not merely small", await available(CREDITOR), 0);
     });
 
     // =====================================================================
@@ -715,72 +713,71 @@ async function main(): Promise<void> {
     });
 
     // =====================================================================
-    // THE REFUND GATE. B3 is the one that matters: amount_payable_sar is the
-    // prepaid RUNNING BALANCE, negative when the customer OWES us. Flip the
-    // comparison and the RPC pays a debtor their own debt, in cash, and
-    // freezes the figure into customer_balance_returns where nothing later
-    // re-derives it.
+    // THE REFUND GATE — the Available cap (0204/0206). B3 is the one that
+    // matters: Available is NEGATIVE when the customer owes us, so any
+    // positive refund exceeds it and the RPC refuses — flip that comparison
+    // and record_refund pays a debtor their own debt, in cash, onto the
+    // ledger where every surface believes it.
     // =====================================================================
     console.log("\n-- refusals: the refund gate");
 
-    await refuses("B1 refund — a method that is neither cash nor bank_transfer", RETURN_SQL,
-      [CREDITOR, "cheque", null, null, TRIP_DATE, null, "DBCHK"], "Return method must be cash or bank_transfer.");
+    await refuses("B1 refund — a method that is neither cash nor bank_transfer", REFUND_SQL,
+      [CREDITOR, 1.0, "cheque", null, null, "DBCHK operator", null], "Invalid refund method");
 
-    await refuses("B2 refund — a customer that does not exist", RETURN_SQL,
-      ["00000000-0000-0000-0000-000000000000", "cash", null, null, TRIP_DATE, null, "DBCHK"], "Customer not found.");
+    await refuses("B2 refund — a customer that does not exist", REFUND_SQL,
+      ["00000000-0000-0000-0000-000000000000", 1.0, "cash", null, null, "DBCHK operator", null], "Customer not found.");
 
-    await refuses("B3 refund — an archived customer who OWES money (the debtor gate)", RETURN_SQL,
-      [DEBTOR, "cash", null, null, TRIP_DATE, null, "DBCHK"], "This customer holds no balance to return.");
+    await refuses("B3 refund — an archived customer who OWES money (the debtor gate)", REFUND_SQL,
+      [DEBTOR, 1.0, "cash", null, null, "DBCHK operator", null], "exceeds the customer");
 
-    await refuses("B3b refund — an archived POSTPAID customer, payable <= 0 by construction", RETURN_SQL,
-      [POSTPAID, "cash", null, null, TRIP_DATE, null, "DBCHK"], "This customer holds no balance to return.");
+    await refuses("B3b refund — a POSTPAID customer, Available <= 0 by construction", REFUND_SQL,
+      [POSTPAID, 1.0, "cash", null, null, "DBCHK operator", null], "exceeds the customer");
 
-    await refuses("B4 refund — a customer holding money but NOT archived", RETURN_SQL,
-      [LIVE, "cash", null, null, TRIP_DATE, null, "DBCHK"], "Only an archived customer's balance can be returned.");
-
-    // B5 and B6 are one refusal measured twice, because the guard ORDER decides
-    // which message a double refund gets — and on the ordinary double refund it
-    // is NOT the one the wording leads you to expect. See fact 3 in the header.
-    await scenario("B5 refund — a SECOND refund immediately after the first", async () => {
-      const first = await rpc(RETURN_SQL, [CREDITOR, "cash", null, null, TRIP_DATE, null, "DBCHK"]);
-      ok("B5 — the first refund succeeded (so the second is the thing refused)", first.err === null);
-      check("B5 — the refund itself drove the balance to 0.00", await payable(CREDITOR), 0);
-      const second = await rpc(RETURN_SQL, [CREDITOR, "cash", null, null, TRIP_DATE, null, "DBCHK"]);
-      ok("B5 — the second refund REFUSED", second.err !== null);
-      if (second.err) {
-        // MEASURED, not assumed: the amount-is-positive gate sits AHEAD of the
-        // already-returned gate, and the first refund zeroed the balance, so it
-        // is the balance gate that answers here.
-        ok("B5 — it is the BALANCE gate that fires, not the already-returned one",
-          second.err.message.includes("This customer holds no balance to return."));
-        ok("B5 — and the already-returned wording is NOT what came back",
-          !second.err.message.includes("already been returned"));
-        console.log(`          db said: ${second.err.message.split("\n")[0]}`);
-      }
-      check("B5 — exactly one return row exists",
-        Number((await c.query(`select count(*)::int n from public.customer_balance_returns where customer_id = $1`, [CREDITOR])).rows[0].n), 1);
+    // B4 (the archived-only gate) IS RETIRED WITH ITS RPC, deliberately: the
+    // ledger refund door serves LIVE customers too — the Finance tab's ledger
+    // popup is exactly that flow — so the law here inverts: a live creditor's
+    // refund SUCCEEDS.
+    await scenario("B4 refund — a LIVE creditor is refundable under the ledger law", async () => {
+      const r = await rpc(REFUND_SQL, [LIVE, 100.0, "cash", null, null, "DBCHK operator", null]);
+      ok("B4 — record_refund SUCCEEDED for a live customer", r.err === null);
+      if (r.err) return console.log(`          unexpected raise: ${r.err.message}`);
+      check("B4 — the live customer's balance dropped by the refund", await balance(LIVE), money(TOPUP - 100));
     });
 
-    await scenario("B6 refund — refunded, then FUNDED AGAIN: now the already-returned gate fires", async () => {
-      const first = await rpc(RETURN_SQL, [CREDITOR, "cash", null, null, TRIP_DATE, null, "DBCHK"]);
-      ok("B6 — the first refund succeeded", first.err === null);
-      // Put real money back in, so the balance gate can no longer answer for it.
-      // This is the ONLY shape in which the already-returned guard is reachable,
-      // and it is the shape that would otherwise pay the customer twice.
-      await c.query(
-        `insert into public.customer_topups (customer_id, amount_sar, topup_date, method) values ($1, $2, $3, 'cash')`,
-        [CREDITOR, TOPUP, TRIP_DATE],
-      );
-      check("B6 — the customer is back in credit, so the balance gate is out of the way", await payable(CREDITOR), TOPUP);
-      const second = await rpc(RETURN_SQL, [CREDITOR, "cash", null, null, TRIP_DATE, null, "DBCHK"]);
-      ok("B6 — the second refund REFUSED", second.err !== null);
+    // B5/B6 restate the double-payout law in the cap's terms, both directions.
+    // The retired one-row model refused ANY second refund; the ledger allows
+    // one exactly when the account has been funded again — which is the shape
+    // the old already-returned guard existed to stop paying twice, and the cap
+    // stops it arithmetically instead.
+    await scenario("B5 refund — a SECOND refund immediately after refunding the whole Available", async () => {
+      const first = await rpc(REFUND_SQL, [CREDITOR, REFUNDABLE, "cash", null, null, "DBCHK operator", null]);
+      ok("B5 — the first refund succeeded (so the second is the thing refused)", first.err === null);
+      check("B5 — the refund itself drove Available to 0.00", await available(CREDITOR), 0);
+      const second = await rpc(REFUND_SQL, [CREDITOR, 0.01, "cash", null, null, "DBCHK operator", null]);
+      ok("B5 — the second refund REFUSED", second.err !== null);
       if (second.err) {
-        ok("B6 — refused for the RIGHT reason", second.err.message.includes("balance has already been returned"));
-        ok("B6 — and NOT via the balance gate this time", !second.err.message.includes("holds no balance"));
+        ok("B5 — it is the Available CAP that fires", second.err.message.includes("exceeds the customer"));
         console.log(`          db said: ${second.err.message.split("\n")[0]}`);
       }
-      check("B6 — still exactly one return row, so no second payout was recorded",
-        Number((await c.query(`select count(*)::int n from public.customer_balance_returns where customer_id = $1`, [CREDITOR])).rows[0].n), 1);
+      check("B5 — exactly one refund row exists",
+        Number((await c.query(`select count(*)::int n from public.customer_ledger where customer_id = $1 and entry_type = 'refund'`, [CREDITOR])).rows[0].n), 1);
+    });
+
+    await scenario("B6 refund — refunded, then FUNDED AGAIN: a second refund is now LEGAL", async () => {
+      const first = await rpc(REFUND_SQL, [CREDITOR, REFUNDABLE, "cash", null, null, "DBCHK operator", null]);
+      ok("B6 — the first refund succeeded", first.err === null);
+      // Put real money back in through the door. Under the retired model this
+      // was the one shape that reached the already-returned guard; under the
+      // ledger it re-opens the cap, which is the correct business outcome —
+      // new money is refundable money.
+      await c.query(TOPUP_SQL, [CREDITOR, TOPUP, "cash", null, null, "DBCHK operator", null]);
+      // Balance after refunding the Available is 115.00 (the uninvoiced
+      // trip's exact cover), so the new top-up lands whole in Available.
+      check("B6 — the account is funded again (new Available = the new top-up, 500.00)", await available(CREDITOR), TOPUP);
+      const second = await rpc(REFUND_SQL, [CREDITOR, 100.0, "cash", null, null, "DBCHK operator", null]);
+      ok("B6 — the second refund SUCCEEDED against the new money", second.err === null);
+      check("B6 — two refund rows now exist, each its own ledger fact",
+        Number((await c.query(`select count(*)::int n from public.customer_ledger where customer_id = $1 and entry_type = 'refund'`, [CREDITOR])).rows[0].n), 2);
     });
 
     // =====================================================================
@@ -801,9 +798,9 @@ async function main(): Promise<void> {
       "permission denied for function consume_from_lots", { role: "anon" });
     await refuses("R5 anon — add_price_lot", ADD_LOT_SQL, [part, 1.0, 1.0, L_OLD.received, "x", "x"],
       "permission denied for function add_price_lot", { role: "anon" });
-    await refuses("R6 anon — return_customer_balance", RETURN_SQL,
-      [CREDITOR, "cash", null, null, TRIP_DATE, null, "x"],
-      "permission denied for function return_customer_balance", { role: "anon" });
+    await refuses("R6 anon — record_refund", REFUND_SQL,
+      [CREDITOR, 1.0, "cash", null, null, "x", null],
+      "permission denied for function record_refund", { role: "anon" });
   } finally {
     await c.query("rollback");
     await c.end();

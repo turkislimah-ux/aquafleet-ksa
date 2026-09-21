@@ -774,10 +774,12 @@ function ArchivedCustomerDetail({
                   label={t("common.status", lang)}
                   value={enumLabel(PROJECT_STATUS_TKEY, project.status, lang)}
                 />
+                {/* The CUSTOMER's mode — the one authority (0206 Group C);
+                    the archived project row no longer carries one. */}
                 <Field
                   label={t("archive.customer.fPaymentMethod", lang)}
-                  value={project.payment_mode
-                    ? enumLabel(PAYMENT_MODE_TKEY, project.payment_mode, lang)
+                  value={customer.payment_mode
+                    ? enumLabel(PAYMENT_MODE_TKEY, customer.payment_mode, lang)
                     : "—"}
                 />
                 <Field label={t("archive.customer.fRatePerTrip", lang)} value={money(Number(project.rate_per_trip_sar))} />

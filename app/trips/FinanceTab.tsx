@@ -15,10 +15,11 @@
 // itemized trips) — never for a prepaid figure. The old lib/prepaid.ts pool
 // math is gone entirely (0206 Group B).
 //
-// Balance model: payment_mode lives on the PROJECT (1:1 with its customer).
-// Only PREPAID projects run a ledger — postpaid and unset (legacy, pre-0025
-// rows) projects keep their Amount Payable / statement / invoice surfaces
-// exactly as before.
+// Balance model: payment_mode is the CUSTOMER's (the one authority, 0206
+// Group C); the ProjectLite rows this tab receives carry it already resolved
+// from customers at the page boundary. Only PREPAID customers run a ledger —
+// postpaid and unset keep their Amount Payable / statement / invoice
+// surfaces exactly as before.
 
 import { useMemo, useState } from "react";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";

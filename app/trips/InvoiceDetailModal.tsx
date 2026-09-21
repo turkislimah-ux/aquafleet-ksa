@@ -235,7 +235,7 @@ export default function InvoiceDetailModal({
   const [raw, setRaw] = useState<
     | (Invoice & {
         projectWaterType: WaterType | null;
-        projectPaymentMode: PaymentMode;
+        customerPaymentMode: PaymentMode;
         paidUpBalanceSar: number | null;
         settlementSar: number | null;
         paidUpError: string | null;
@@ -416,7 +416,7 @@ export default function InvoiceDetailModal({
       // snapshot — fall back to the customer's CURRENT project.payment_mode
       // (correct for every invoice confirmed before any mode switch; see
       // migration 0037's header and getInvoicePdf()'s identical fallback).
-      const paymentMode = r.data.payment_mode ?? r.data.projectPaymentMode;
+      const paymentMode = r.data.payment_mode ?? r.data.customerPaymentMode;
       // The two `*_ledger_subtotal_sar` columns keep their 0036 names — they
       // are stored money and renaming a column that holds frozen figures is a
       // migration, not a refactor. Only the two balance/remaining pairs beside

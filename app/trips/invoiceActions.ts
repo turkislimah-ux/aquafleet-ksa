@@ -180,16 +180,17 @@ async function assembleForCustomerPeriod(params: {
 
   const { data: customer, error: custErr } = await supabase
     .from("customers")
-    .select("id, name, name_ar, vat_number, cr_number, billing_address, email")
+    .select("id, name, name_ar, vat_number, cr_number, billing_address, email, payment_mode")
     .eq("id", customerId)
     .single();
   if (custErr || !customer) return { error: custErr?.message ?? "Customer not found." };
 
   // Project is 1:1 with customer (lib/money.ts header) — no project_id
-  // stored on invoices, derived here.
+  // stored on invoices, derived here. payment_mode is NOT read off it any
+  // more: the mode is the CUSTOMER's (0206 Group C), selected above.
   const { data: project, error: projErr } = await supabase
     .from("projects")
-    .select("id, rate_per_trip_sar, payment_mode")
+    .select("id, rate_per_trip_sar")
     .eq("customer_id", customerId)
     .single();
   if (projErr || !project) return { error: projErr?.message ?? "No project found for this customer." };
@@ -286,16 +287,17 @@ async function assembleForCustomerPeriod(params: {
   // meaning until prepaid or postpaid is chosen, and lib/invoice.ts must keep
   // failing loudly for any caller that has NOT checked. This guard makes the
   // one known caller polite; it does not make the engine permissive.
-  if (project.payment_mode == null) {
+  const customerMode = (customer.payment_mode ?? null) as PaymentMode | null;
+  if (customerMode == null) {
     return {
       error:
-        "This customer's project has no payment mode set. Open the project and choose Prepaid or Postpaid, then build the invoice.",
+        "This customer has no payment mode set. Open their project and choose Prepaid or Postpaid, then build the invoice.",
     };
   }
 
   const assembly = assembleInvoice({
     customerId,
-    paymentMode: project.payment_mode,
+    paymentMode: customerMode,
     periodStart,
     periodEnd,
     trips,
@@ -733,7 +735,7 @@ export async function getInvoice(
       // report different balances, which is what 0205 exists to end.
       ledgerDraw: InvoiceLedgerDraw;
       projectWaterType: WaterType | null;
-      projectPaymentMode: PaymentMode;
+      customerPaymentMode: PaymentMode;
       paidUpBalanceSar: number | null;
       // What paying THIS invoice will take off that balance — the pay-with-
       // balance panel's middle row, and the only figure it may subtract. Not
@@ -758,32 +760,28 @@ export async function getInvoice(
   // instead of "—" — this never touches the frozen snapshot itself (covered_
   // lines/unpaid_lines stay exactly as confirm_invoice() wrote them).
   //
-  // projectPaymentMode: the customer's CURRENT project.payment_mode — used by
-  // the caller ONLY as a fallback for frozen invoices predating migration
-  // 0037's payment_mode snapshot (raw.payment_mode == null). See
-  // getInvoicePdf()'s identical fallback for the rationale.
+  // customerPaymentMode: the customer's CURRENT payment_mode — the one
+  // authority (0206 Group C) — used by the caller ONLY as a fallback for
+  // frozen invoices predating migration 0037's payment_mode snapshot
+  // (raw.payment_mode == null). See getInvoicePdf()'s identical fallback.
+  // water_type still comes off the project; the mode does not.
   const invoice = data as Invoice;
-  const { data: project, error: projectErr } = await supabase
-    .from("projects")
-    .select("water_type, payment_mode")
-    .eq("customer_id", invoice.customer_id)
-    .maybeSingle();
+  const [{ data: project, error: projectErr }, { data: custRow, error: custModeErr }] = await Promise.all([
+    supabase.from("projects").select("water_type").eq("customer_id", invoice.customer_id).maybeSingle(),
+    supabase.from("customers").select("payment_mode").eq("id", invoice.customer_id).maybeSingle(),
+  ]);
   // THIS ERROR USED TO BE DISCARDED, AND DISCARDING IT SILENTLY TURNED A
   // PREPAID CUSTOMER POSTPAID. `payment_mode` is null on every draft and review
   // invoice — the column is a snapshot written at CONFIRM (0037) — so on an
-  // unissued invoice the project row is the ONLY source of the mode. Lose it
+  // unissued invoice the customer row is the ONLY source of the mode. Lose it
   // and the chain below lands on "postpaid", loadPaidUpBalance returns
   // { ok: true, amount: null }, and the popup renders a prepaid invoice with no
   // balance line and no complaint, because "no line" is exactly what postpaid
   // is supposed to look like. A failed read and a customer who has no pool
-  // produced identical output.
-  //
-  // Note what the mode is NOT allowed to fall back to any more: a missing
-  // project is a fact this function cannot supply, and guessing the safer-
-  // looking mode is what made the guess invisible.
-  const paymentMode: PaymentMode | null = projectErr
+  // produced identical output. Same law, new source (0206 Group C).
+  const paymentMode: PaymentMode | null = custModeErr
     ? null
-    : (invoice.payment_mode ?? (project?.payment_mode as PaymentMode | null) ?? "postpaid");
+    : (invoice.payment_mode ?? (custRow?.payment_mode as PaymentMode | null) ?? "postpaid");
   // A null mode is a READ FAILURE, not a mode — hand loadPaidUpBalance nothing
   // to be confidently wrong with.
   const paidUp: PaidUpRead =
@@ -825,8 +823,8 @@ export async function getInvoice(
           : ledgerRes.error
             ? { state: "unreadable" }
             : ledgerDrawFrom(ledgerRes.data ?? [], invoiceId),
-      projectWaterType: (project?.water_type as WaterType | null) ?? null,
-      projectPaymentMode: (project?.payment_mode as PaymentMode | null) ?? "postpaid",
+      projectWaterType: projectErr ? null : ((project?.water_type as WaterType | null) ?? null),
+      customerPaymentMode: (custRow?.payment_mode as PaymentMode | null) ?? "postpaid",
       paidUpBalanceSar: paidUp.ok ? paidUp.amount : null,
       settlementSar: paidUp.ok ? paidUp.settlementSar : null,
       paidUpError: paidUp.ok ? null : paidUp.error,
@@ -1766,11 +1764,12 @@ async function toPdfInvoiceData(
   // CURRENT type the download printed a dash where the sheet — which has had
   // this fallback since Finance polish batch C — printed a real label. Same
   // fallback, same source, display-only: the frozen snapshot is never touched.
-  const { data: project } = await supabase
-    .from("projects")
-    .select("water_type, payment_mode")
-    .eq("customer_id", inv.customer_id)
-    .maybeSingle();
+  // The mode comes off the CUSTOMER (0206 Group C); the project supplies the
+  // water-type fallback only.
+  const [{ data: project }, { data: custRow }] = await Promise.all([
+    supabase.from("projects").select("water_type").eq("customer_id", inv.customer_id).maybeSingle(),
+    supabase.from("customers").select("payment_mode").eq("id", inv.customer_id).maybeSingle(),
+  ]);
   const projectWaterType = (project?.water_type as WaterType | null | undefined) ?? null;
 
   let pdfData: PdfInvoiceData;
@@ -1856,11 +1855,11 @@ async function toPdfInvoiceData(
     const seller = inv.seller_snapshot;
     const buyer = inv.buyer_snapshot;
     // Frozen invoices predating migration 0037 have no `payment_mode`
-    // snapshot — fall back to the customer's CURRENT project.payment_mode.
-    // Correct for every invoice confirmed before any mode switch (the
-    // overwhelming majority); see migration 0037's header for the tradeoff.
+    // snapshot — fall back to the customer's CURRENT payment_mode (the one
+    // authority, 0206 Group C). Correct for every invoice confirmed before
+    // any mode switch (the overwhelming majority); see 0037's header.
     const paymentMode: PaymentMode =
-      inv.payment_mode ?? (project?.payment_mode as PaymentMode | null | undefined) ?? "postpaid";
+      inv.payment_mode ?? (custRow?.payment_mode as PaymentMode | null | undefined) ?? "postpaid";
     const isPrepaid = paymentMode === "prepaid";
     // Same refusal as the draft/review branch above, for the same reason.
     const paidUp = await loadPaidUpBalance(supabase, inv, paymentMode);

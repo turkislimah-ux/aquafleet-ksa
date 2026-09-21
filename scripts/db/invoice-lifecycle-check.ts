@@ -14,15 +14,14 @@
 // WRITTEN. Read these before changing an assertion — two of them are the
 // opposite of what the RPC names suggest.
 //
-// 1. pay_invoice DOES NOT DRAW DOWN THE PREPAID POOL. It writes no ledger row
-//    at all — no customer_topups insert, nothing. v_customer_prepaid_balance is
-//    DERIVED: topups − delivered-trip gross − charge gross − returns, and not
-//    one term of it mentions `paid`. That is Model A, deduction at DELIVERY:
-//    a pool FUNDS delivered work, it does not SETTLE it. So the assertion here
-//    is that paying moves the pool by EXACTLY 0.00 — and that is a real guard,
-//    not a tautology: the day someone "fixes" pay_invoice by adding a ledger
-//    write, the pool double-counts (once at delivery, once at payment) and this
-//    case is the only thing in the repo that would notice.
+// 1. pay_invoice DOES NOT MOVE THE LEDGER. It writes no customer_ledger row
+//    at all — settlement money moves only through 0204's two doors
+//    (apply_balance_to_invoice / record_invoice_payment), and this legacy RPC
+//    is neither. So the assertion here is that paying moves
+//    v_customer_ledger_balance by EXACTLY 0.00 — a real guard, not a
+//    tautology: the day someone "fixes" pay_invoice by adding a ledger write,
+//    the balance double-counts against the modern doors and this case is the
+//    only thing in the repo that would notice.
 //
 //    The covered-vs-grand rule lived one layer up, in the retired lib/prepaid.ts's
 //    settlementGross() — the pay-with-balance figure sums the invoice's COVERED
@@ -38,21 +37,23 @@
 //
 // 3. void_invoice RELEASES TRIPS BUT NOT CHARGES — not at the FK, anyway. It
 //    nulls trips.invoice_id and leaves invoice_special_charges.invoice_id
-//    pointing at the void invoice. The charge is released ECONOMICALLY instead:
-//    v_customer_prepaid_balance counts charges on invoices `status <> 'void'`,
-//    so voiding returns the charge's gross to the pool without moving a row.
-//    Both halves are asserted, because they are different mechanisms and a
-//    change to either would look like the other still working.
+//    pointing at the void invoice. Under the ledger model the two part ways
+//    in v_customer_uninvoiced (which counts draft/review-era work only):
+//    the released trips COME BACK into it — delivered work with no document
+//    again — while the void invoice's charge enters NOTHING, because a charge
+//    is FK-bound to its document for life and a void document bills nobody.
+//    Both mechanisms are asserted separately. The LEDGER balance moves by
+//    nothing throughout: void writes no ledger row.
 // ===========================================================================
 //
 // WHAT IT ASSERTS — the refusals are half the test
 //
-//   case 1  pay (prepaid, 'balance')  pool unmoved; covered != grand; trips locked
-//   case 2  pay (postpaid, 'cash')    amount payable −230.00 -> 0.00
-//   case 3  unpay round trip          payable returns to −230.00 to the halala
-//   case 4  unpay round trip          prepaid pool identical at all three points
-//   case 5  void (prepaid)            trips released; pool rises by the charge gross
-//   case 6  void (postpaid)           trips released; payable unchanged
+//   case 1  pay (prepaid, 'balance')  ledger unmoved; covered != grand; trips locked
+//   case 2  pay (postpaid, 'cash')    open receivable 230.00 -> 0.00
+//   case 3  unpay round trip          the receivable returns, to the halala
+//   case 4  unpay round trip          ledger balance identical at all three points
+//   case 5  void (prepaid)            trips released; charge leaves Uninvoiced
+//   case 6  void (postpaid)           trips released; the claim leaves the open set
 //   R1..R7b, R9  every refusal the three RPCs encode
 //   R8      the 0203 INVERSION — a paid invoice now voids directly
 //   R10-12  anon denied on all three (CLAUDE.md section 6)
@@ -93,9 +94,10 @@ const CHARGE_NET = 50.0;
 const CHARGE_GROSS = 57.5;
 const TOPUP = 500.0;
 
-const POOL_BASE = 97.5; // 500.00 − 3*115.00 − 57.50
-const POOL_AFTER_VOID = 155.0; // charge released economically: +57.50
-const PAYABLE_BASE = -230.0; // −2 * 115.00
+const LEDGER_BASE = 500.0; // the record_topup — nothing below writes another row
+const OUTSTANDING_BASE = 230.0; // Q's frozen claim while open
+const UNINV_CONFIRMED = 0.0; // everything sits billed on the confirmed document
+const UNINV_AFTER_VOID = 345.0; // the released trips alone; the void charge enters nothing
 const COVERED_TOTAL = 115.0; // the figure a balance payment settles by
 const GRAND_TOTAL = 402.5; // the figure it must NOT settle by
 const OVERCHARGE_IF_GRAND = 287.5; // GRAND_TOTAL − COVERED_TOTAL
@@ -134,9 +136,10 @@ async function main(): Promise<void> {
   // a literal can be a typo, so the arithmetic is checked here, offline, before
   // a socket is opened. These fail on a bad constant, not on a bad database.
   console.log("");
-  check("fixture arithmetic — POOL_BASE = topup − 3 trips − 1 charge", POOL_BASE, money(TOPUP - 3 * TRIP_GROSS - CHARGE_GROSS));
-  check("fixture arithmetic — POOL_AFTER_VOID = POOL_BASE + the charge gross", POOL_AFTER_VOID, money(POOL_BASE + CHARGE_GROSS));
-  check("fixture arithmetic — PAYABLE_BASE = −2 trips gross", PAYABLE_BASE, money(-2 * TRIP_GROSS));
+  check("fixture arithmetic — LEDGER_BASE is the topup alone", LEDGER_BASE, TOPUP);
+  check("fixture arithmetic — OUTSTANDING_BASE = 2 trips gross", OUTSTANDING_BASE, money(2 * TRIP_GROSS));
+  check("fixture arithmetic — UNINV_CONFIRMED: a confirmed document leaves nothing uninvoiced", UNINV_CONFIRMED, 0);
+  check("fixture arithmetic — UNINV_AFTER_VOID = 3 trips gross", UNINV_AFTER_VOID, money(3 * TRIP_GROSS));
   check("fixture arithmetic — COVERED_TOTAL = 1 trip gross", COVERED_TOTAL, TRIP_GROSS);
   check("fixture arithmetic — GRAND_TOTAL = 3 trips + 1 charge, gross", GRAND_TOTAL, money(3 * TRIP_GROSS + CHARGE_GROSS));
   check("fixture arithmetic — OVERCHARGE_IF_GRAND = GRAND − COVERED", OVERCHARGE_IF_GRAND, money(GRAND_TOTAL - COVERED_TOTAL));
@@ -190,24 +193,35 @@ async function main(): Promise<void> {
     }
   }
 
-  // --- Money read-backs.
-  const pool = async (customerId: string): Promise<number> =>
+  // --- Money read-backs, all LEDGER-ERA sources (0206): the balance is the
+  //     ledger view's, the open claim is the receivables stack's, and the
+  //     delivery-time deduction lives in Uninvoiced.
+  const ledgerBalance = async (customerId: string): Promise<number> =>
     money(
       (
-        await c.query(`select balance_sar from public.v_customer_prepaid_balance where customer_id = $1`, [
+        await c.query(`select balance_sar from public.v_customer_ledger_balance where customer_id = $1`, [
           customerId,
         ])
       ).rows[0].balance_sar,
     );
 
-  const payable = async (customerId: string): Promise<number> =>
+  const uninvoiced = async (customerId: string): Promise<number> =>
+    money(
+      (
+        await c.query(`select uninvoiced_sar from public.v_customer_uninvoiced where customer_id = $1`, [
+          customerId,
+        ])
+      ).rows[0].uninvoiced_sar,
+    );
+
+  const outstanding = async (customerId: string): Promise<number> =>
     money(
       (
         await c.query(
-          `select amount_payable_sar from public.v_customer_amount_payable where customer_id = $1`,
+          `select coalesce(sum(outstanding_sar), 0) s from public.v_invoice_outstanding_live where customer_id = $1`,
           [customerId],
         )
-      ).rows[0].amount_payable_sar,
+      ).rows[0].s,
     );
 
   const invStatus = async (id: string): Promise<string> =>
@@ -346,10 +360,12 @@ async function main(): Promise<void> {
       qCustomer: Q.customer, qProject: Q.project, qInvoice: Q.invoice,
     });
 
+    // Through the door, not the table: record_topup writes the ledger row the
+    // balance below is measured against. (customer_topups is retired dummy
+    // data and 0207 drops it.)
     await c.query(
-      `insert into public.customer_topups (customer_id, amount_sar, topup_date, method)
-       values ($1, $2, $3, 'cash')`,
-      [P.customer, TOPUP, PERIOD_START],
+      `select * from public.record_topup($1::uuid, $2::numeric, 'cash', null, null, 'DBCHK operator', null)`,
+      [P.customer, TOPUP],
     );
 
     const pCharge = (
@@ -406,8 +422,8 @@ async function main(): Promise<void> {
 
     // --- Baselines. Asserted, not just recorded: if the seed does not produce
     //     these figures, every delta below is measured against the wrong thing.
-    check("baseline — prepaid pool (500.00 topup − 345.00 trips − 57.50 charge)", await pool(P.customer), POOL_BASE);
-    check("baseline — postpaid amount payable (−2 x 115.00)", await payable(Q.customer), PAYABLE_BASE);
+    check("baseline — prepaid ledger balance is the topup alone (deducts at settlement, never at delivery)", await ledgerBalance(P.customer), LEDGER_BASE);
+    check("baseline — postpaid open receivable (2 x 115.00 frozen on the confirmed invoice)", await outstanding(Q.customer), OUTSTANDING_BASE);
     check("baseline — prepaid invoice is 'confirmed'", await invStatus(P.invoice), "confirmed");
     check("baseline — postpaid invoice is 'confirmed'", await invStatus(Q.invoice), "confirmed");
     check("baseline — no trip is reserved to the prepaid invoice yet", await reservedCount(P.invoice), 0);
@@ -416,7 +432,7 @@ async function main(): Promise<void> {
     // CASE 1 — pay_invoice on the PREPAID invoice, method 'balance'.
     // =====================================================================
     await scenario("case 1 — pay (prepaid, 'balance')", async () => {
-      const before = await pool(P.customer);
+      const before = await ledgerBalance(P.customer);
       const r = await rpc(PAY_SQL, [P.invoice, "balance", null, null, PERIOD_END, "DBCHK"]);
       ok("case 1 — pay_invoice SUCCEEDED", r.err === null);
       if (r.err) return console.log(`          unexpected raise: ${r.err.message}`);
@@ -425,12 +441,12 @@ async function main(): Promise<void> {
       ok("case 1 — paid_at stamped", r.row!.paid_at != null);
       check("case 1 — payment_method recorded", r.row!.payment_method, "balance");
 
-      // THE ASSERTION THIS CASE EXISTS FOR. Model A: the pool deducted at
-      // DELIVERY, so payment moves it by nothing. A ledger write added to
-      // pay_invoice would double-count and land here.
-      const after = await pool(P.customer);
-      check("case 1 — prepaid pool UNMOVED by payment (Model A, deducts at delivery)", after, before);
-      check("case 1 — pool delta is exactly 0.00", money(after - before), 0);
+      // THE ASSERTION THIS CASE EXISTS FOR. This legacy RPC is neither of
+      // 0204's settlement doors, so it must move the ledger by NOTHING. A
+      // ledger write added to pay_invoice would double-count and land here.
+      const after = await ledgerBalance(P.customer);
+      check("case 1 — the LEDGER BALANCE is unmoved by payment (pay_invoice writes no ledger row)", after, before);
+      check("case 1 — the delta is exactly 0.00", money(after - before), 0);
 
       // The covered-vs-grand rule, in the form the database can prove: the
       // frozen covered total reconciles to the COVERED LINES, and the grand
@@ -463,31 +479,31 @@ async function main(): Promise<void> {
     // CASE 2 — pay_invoice on the POSTPAID invoice, method 'cash'.
     // =====================================================================
     await scenario("case 2 — pay (postpaid, 'cash')", async () => {
-      check("case 2 — payable before payment", await payable(Q.customer), PAYABLE_BASE);
+      check("case 2 — the open receivable before payment", await outstanding(Q.customer), OUTSTANDING_BASE);
       const r = await rpc(PAY_SQL, [Q.invoice, "cash", null, "DBCHK-REF", PERIOD_END, null]);
       ok("case 2 — pay_invoice SUCCEEDED", r.err === null);
       if (r.err) return console.log(`          unexpected raise: ${r.err.message}`);
       check("case 2 — status is 'paid'", r.row!.status, "paid");
-      check("case 2 — amount payable settles to 0.00", await payable(Q.customer), 0);
+      check("case 2 — the claim leaves the open receivables: outstanding 0.00", await outstanding(Q.customer), 0);
       check("case 2 — both trips locked to the invoice", await reservedCount(Q.invoice), 2);
     });
 
     // =====================================================================
     // CASE 3 — pay -> unpay is IDENTITY on the postpaid payable.
     // =====================================================================
-    await scenario("case 3 — unpay round trip (postpaid payable)", async () => {
-      const before = await payable(Q.customer);
+    await scenario("case 3 — unpay round trip (the postpaid receivable)", async () => {
+      const before = await outstanding(Q.customer);
       const paid = await rpc(PAY_SQL, [Q.invoice, "cash", null, "DBCHK-REF", PERIOD_END, null]);
       ok("case 3 — pay leg SUCCEEDED", paid.err === null);
-      const mid = await payable(Q.customer);
-      check("case 3 — payable is 0.00 while paid", mid, 0);
+      const mid = await outstanding(Q.customer);
+      check("case 3 — outstanding is 0.00 while paid", mid, 0);
 
       const un = await rpc(UNPAY_SQL, [Q.invoice, "DBCHK reason", "DBCHK operator"]);
       ok("case 3 — unpay leg SUCCEEDED", un.err === null);
       if (un.err) return console.log(`          unexpected raise: ${un.err.message}`);
 
-      const after = await payable(Q.customer);
-      check("case 3 — payable returns to the pre-pay figure, to the halala", after, before);
+      const after = await outstanding(Q.customer);
+      check("case 3 — the claim returns to the open set at the pre-pay figure, to the halala", after, before);
       ok("case 3 — the round trip actually moved something in between", mid !== before);
 
       check("case 3 — status back to 'confirmed'", un.row!.status, "confirmed");
@@ -505,17 +521,17 @@ async function main(): Promise<void> {
     // =====================================================================
     // CASE 4 — the same round trip against the PREPAID pool.
     // =====================================================================
-    await scenario("case 4 — unpay round trip (prepaid pool)", async () => {
-      const before = await pool(P.customer);
+    await scenario("case 4 — unpay round trip (the prepaid ledger)", async () => {
+      const before = await ledgerBalance(P.customer);
       await rpc(PAY_SQL, [P.invoice, "balance", null, null, PERIOD_END, null]);
-      const mid = await pool(P.customer);
+      const mid = await ledgerBalance(P.customer);
       const un = await rpc(UNPAY_SQL, [P.invoice, "DBCHK reason", "DBCHK operator"]);
       ok("case 4 — unpay SUCCEEDED", un.err === null);
-      const after = await pool(P.customer);
-      check("case 4 — pool at baseline before", before, POOL_BASE);
-      check("case 4 — pool unchanged while paid", mid, POOL_BASE);
-      check("case 4 — pool unchanged after unpay", after, POOL_BASE);
-      check("case 4 — round trip is identity on the pool", after, before);
+      const after = await ledgerBalance(P.customer);
+      check("case 4 — ledger balance at baseline before", before, LEDGER_BASE);
+      check("case 4 — ledger balance unchanged while paid", mid, LEDGER_BASE);
+      check("case 4 — ledger balance unchanged after unpay", after, LEDGER_BASE);
+      check("case 4 — round trip is identity on the ledger", after, before);
       check("case 4 — status back to 'confirmed'", await invStatus(P.invoice), "confirmed");
     });
 
@@ -529,8 +545,10 @@ async function main(): Promise<void> {
       await rpc(PAY_SQL, [P.invoice, "balance", null, null, PERIOD_END, null]);
       await rpc(UNPAY_SQL, [P.invoice, "DBCHK", "DBCHK"]);
       check("case 5 — 3 trips reserved before the void", await reservedCount(P.invoice), 3);
-      const before = await pool(P.customer);
-      check("case 5 — pool at baseline before the void", before, POOL_BASE);
+      const ledgerBefore = await ledgerBalance(P.customer);
+      // With the trips reserved and the charge frozen on the confirmed
+      // document, NOTHING is uninvoiced — the release below is what changes it.
+      check("case 5 — Uninvoiced before the void: 0.00, everything is billed", await uninvoiced(P.customer), UNINV_CONFIRMED);
 
       const r = await rpc(VOID_SQL, [P.invoice, "DBCHK void reason"]);
       ok("case 5 — void_invoice SUCCEEDED", r.err === null);
@@ -552,8 +570,8 @@ async function main(): Promise<void> {
       );
       check("case 5 — all 3 trips are free for a later invoice", free, 3);
 
-      // Mechanism 2: the CHARGE row does not move. It is released by the
-      // pool's `status <> 'void'` filter instead.
+      // Mechanism 2: the CHARGE row does not move. It is released by
+      // v_customer_uninvoiced's `status <> 'void'` filter instead.
       const stillAttached = Number(
         (
           await c.query(`select count(*)::int n from public.invoice_special_charges where invoice_id = $1`, [
@@ -562,15 +580,17 @@ async function main(): Promise<void> {
         ).rows[0].n,
       );
       check("case 5 — the charge row still points at the void invoice (no FK move)", stillAttached, 1);
-      const after = await pool(P.customer);
-      check("case 5 — pool rises to 155.00 (the charge leaves consumption)", after, POOL_AFTER_VOID);
-      check("case 5 — the rise is exactly the charge's gross, 57.50", money(after - before), CHARGE_GROSS);
+      // The released trips come BACK into Uninvoiced (+345.00); the void
+      // invoice's charge enters nothing — its absence from this figure IS the
+      // second mechanism, measured.
+      check("case 5 — Uninvoiced after the void: the released trips alone (345.00, no charge)", await uninvoiced(P.customer), UNINV_AFTER_VOID);
+      check("case 5 — the LEDGER BALANCE moved by nothing throughout (void writes no ledger row)", await ledgerBalance(P.customer), ledgerBefore);
     });
 
     // =====================================================================
     // CASE 6 — void on the POSTPAID invoice.
     // =====================================================================
-    await scenario("case 6 — void (postpaid): trips released, payable unchanged", async () => {
+    await scenario("case 6 — void (postpaid): trips released, the claim leaves the open set", async () => {
       await rpc(PAY_SQL, [Q.invoice, "cash", null, "DBCHK-REF", PERIOD_END, null]);
       await rpc(UNPAY_SQL, [Q.invoice, "DBCHK", "DBCHK"]);
       check("case 6 — 2 trips reserved before the void", await reservedCount(Q.invoice), 2);
@@ -580,9 +600,11 @@ async function main(): Promise<void> {
       if (r.err) return console.log(`          unexpected raise: ${r.err.message}`);
       check("case 6 — status is 'void'", r.row!.status, "void");
       check("case 6 — both trips RELEASED", await reservedCount(Q.invoice), 0);
-      // The work was delivered and never paid for, so voiding the document
-      // does not make the money go away.
-      check("case 6 — payable is still −230.00: voiding a document unbills, it does not forgive", await payable(Q.customer), PAYABLE_BASE);
+      // A voided document is no claim: it leaves the open receivables. The
+      // work itself is not forgiven — the released trips are re-billable, and
+      // the app-side Amount Payable law that says so lives in
+      // scripts/invoice-flow-check.ts.
+      check("case 6 — the void claim leaves the open receivables: outstanding 0.00", await outstanding(Q.customer), 0);
     });
 
     // =====================================================================
@@ -648,7 +670,7 @@ async function main(): Promise<void> {
     await scenario("R8 void — a PAID invoice (0203: voids directly)", async () => {
       const paid = await rpc(PAY_SQL, [Q.invoice, "cash", null, "REF", PERIOD_END, null]);
       ok("R8 — the invoice really is paid before the void attempt", paid.err === null);
-      check("R8 — payable settled by the payment", await payable(Q.customer), 0);
+      check("R8 — the claim left the open receivables with the payment", await outstanding(Q.customer), 0);
       const r = await rpc(VOID_SQL, [Q.invoice, "DBCHK"]);
       ok("R8 — void ACCEPTED on a paid invoice (0203 rework)", r.err === null);
       if (r.err) {
@@ -657,7 +679,13 @@ async function main(): Promise<void> {
       }
       check("R8 — the invoice is 'void'", await invStatus(Q.invoice), "void");
       check("R8 — trips released", await reservedCount(Q.invoice), 0);
-      check("R8 — the debt is back on the books", await payable(Q.customer), PAYABLE_BASE);
+      // Void after pay: the claim does NOT return to the open set — a voided
+      // document is no claim, whatever it was before. The released trips are
+      // the re-billable record of the work.
+      check("R8 — the void claim stays out of the open receivables", await outstanding(Q.customer), 0);
+      check("R8 — the released trips are free to re-bill", Number(
+        (await c.query(`select count(*)::int n from public.trips where customer_id = $1 and invoice_id is null`, [Q.customer])).rows[0].n,
+      ), 2);
     });
 
     await scenario("R9 void — an ALREADY-VOID invoice", async () => {

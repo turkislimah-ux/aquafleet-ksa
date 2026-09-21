@@ -6,9 +6,11 @@ export type CustomerType = "construction" | "government_office" | "facility_mana
 // THERE IS NO `PaymentModel` TYPE ANY MORE, AND THERE MUST NOT BE ONE AGAIN.
 // `customers.payment_model` ("postpaid" | "pay_as_you_go") was a second,
 // unmaintained spelling of the payment arrangement, retired in migration 0121.
-// `PaymentMode` below ("postpaid" | "prepaid") on `projects` is the ONE source of
-// truth: it is what every finance RPC takes, what can_switch_payment_mode guards,
-// and what an invoice freezes at confirm.
+// `customers.payment_mode` ("postpaid" | "prepaid", NOT NULL since 0203) is
+// the ONE authority on a customer's arrangement (Turki's ruling, 0206 Group
+// C): every app read resolves the mode from the CUSTOMER. projects.payment_mode
+// is write-only until 0207 drops it, and invoices.payment_mode stays what it
+// always was — a frozen snapshot on issued documents.
 
 export type Customer = {
   id: string;
@@ -30,6 +32,9 @@ export type Customer = {
   cr_number: string | null;
   billing_address: string | null;
   email: string | null;
+  // THE authority on the customer's arrangement — see the note above
+  // PaymentMode. NOT NULL in the database since 0203.
+  payment_mode: PaymentMode;
 };
 
 export type CommissionMode = "fixed" | "scalable";
@@ -68,7 +73,8 @@ export type Project = {
   end_date: string | null;
   status: ProjectStatus;
   water_type: WaterType | null;
-  // Finance (0025). NULL = unset — do not default in app code either.
+  // Finance (0025). WRITE-ONLY since 0206 Group C — the app resolves every
+  // mode from customers.payment_mode; 0207 drops this column.
   payment_mode: PaymentMode | null;
   default_station: string | null;
   // Demo header fields (Path B).
@@ -732,7 +738,7 @@ export type Invoice = {
   // was actually confirmed under (prepaid = three-table/ledger layout,
   // postpaid = old v2 single-table layout — see lib/invoice.ts). Null for
   // invoices confirmed before this column existed (no backfill) — callers
-  // fall back to the customer's current project.payment_mode for those.
+  // fall back to the customer's current payment_mode for those.
   payment_mode: PaymentMode | null;
 
   // 0203 — FROZEN BY confirm_invoice(), never written by the app.
@@ -1513,6 +1519,9 @@ export type ArchiveCustomerRow = {
   active: boolean;
   archived_at: string | null;
   created_at: string;
+  // The customer's arrangement — the ONE authority (0206 Group C). The
+  // archived project record renders this, not a projects column.
+  payment_mode: PaymentMode | null;
 };
 
 // ARCHIVE FUNDS ROW — composed by app/archive/page.tsx from the LEDGER era's
@@ -1588,7 +1597,6 @@ export type ArchiveProjectRow = {
   // resolves the terms with commission_config_at(project, archived_at); this is
   // the date it passes.
   archived_at: string | null;
-  payment_mode: PaymentMode | null;
   water_type: WaterType | null;
   default_station: string | null;
   start_date: string | null;

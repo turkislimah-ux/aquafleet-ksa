@@ -378,7 +378,7 @@ export type InvoiceAssembly = {
 
 export type AssembleInvoiceInput = {
   customerId: string;
-  paymentMode: PaymentMode | null; // null = unset project.payment_mode — throws, see below
+  paymentMode: PaymentMode | null; // null = unset customer payment_mode — throws, see below
   periodStart: string; // inclusive, trip_date
   periodEnd: string; // inclusive, trip_date
   // ALL delivered trips for this customer/project, any date — NOT
@@ -440,7 +440,7 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
 
   if (paymentMode == null) {
     throw new Error(
-      "assembleInvoice: project.payment_mode is unset — cannot build an invoice until it's chosen.",
+      "assembleInvoice: the customer's payment_mode is unset — cannot build an invoice until it's chosen.",
     );
   }
 

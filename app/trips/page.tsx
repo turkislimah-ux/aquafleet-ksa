@@ -159,7 +159,7 @@ export default async function TripsPage() {
       supabase
         .from("projects")
         .select(
-          "id, name, customer_id, rate_per_trip_sar, status, water_type, payment_mode, initials, default_station, default_water_station, location, location_lat, location_lng, description"
+          "id, name, customer_id, rate_per_trip_sar, status, water_type, initials, default_station, default_water_station, location, location_lat, location_lng, description"
         )
         .is("archived_at", null)
         .order("name", { ascending: true }),
@@ -358,7 +358,21 @@ export default async function TripsPage() {
     stationsByKey[s.key] = s.name;
   }
 
-  const projects = (projectsRes.data ?? []) as ProjectHeader[];
+  // A PROJECT'S MODE IS ITS CUSTOMER'S MODE (Turki's ruling, 0206 Group C).
+  // The projects select above no longer reads payment_mode — the column is
+  // write-only until 0207 drops it — and every downstream consumer of
+  // `project.payment_mode` (FinanceTab, Breakdown, CustomersTab -> ProjectModal,
+  // ProjectsBoard) is fed the CUSTOMER's mode from this one boundary, so no
+  // second copy exists to drift.
+  const modeByCustomerId = new Map(
+    ((customersRes.data ?? []) as { id: string; payment_mode: PaymentMode }[]).map((c) => [
+      c.id,
+      c.payment_mode,
+    ]),
+  );
+  const projects = ((projectsRes.data ?? []) as Omit<ProjectHeader, "payment_mode">[]).map(
+    (p) => ({ ...p, payment_mode: modeByCustomerId.get(p.customer_id) ?? null }) as ProjectHeader,
+  );
 
   // The commission terms in force TODAY, keyed by project. Every commission
   // figure rendered under /trips — the customers table cell, the breakdown

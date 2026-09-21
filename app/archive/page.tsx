@@ -148,7 +148,7 @@ export default async function ArchivePage() {
     // so the Soft-deleted sub-tab needs no second query.
     supabase
       .from("customers")
-      .select("id, name, name_ar, email, phone, contact_name, active, archived_at, created_at")
+      .select("id, name, name_ar, email, phone, contact_name, active, archived_at, created_at, payment_mode")
       .order("name", { ascending: true }),
     // The invoice CARDS only. The full invoice is loaded by
     // InvoiceDetailModal itself when a card is opened — reusing that
@@ -169,7 +169,9 @@ export default async function ArchivePage() {
       // question about its archive date — so the date is what travels, and the
       // detail popup resolves the figures with commission_config_at(). See
       // ArchiveProjectRow.
-      .select("id, customer_id, name, initials, rate_per_trip_sar, archived_at, payment_mode, water_type, default_station, start_date, end_date, status, location, description, created_at"),
+      // payment_mode DROPPED from this select (0206 Group C): the mode is the
+      // CUSTOMER's — read above — and the projects column is write-only.
+      .select("id, customer_id, name, initials, rate_per_trip_sar, archived_at, water_type, default_station, start_date, end_date, status, location, description, created_at"),
     // THE ARCHIVE'S MONEY FIGURE IS AVAILABLE (0206 app cutover, Turki's
     // ruling) — v_customer_available.available_sar, the same figure the
     // record_refund RPC caps a payout at under the customer row lock. The
