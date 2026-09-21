@@ -187,9 +187,15 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
         <tr>
           <td colspan="4" class="lbl">${bl(s.foot.balanceLabel, "ar inline")}</td>
           <td class="num" colspan="2">${
-            "note" in s.foot.balance
-              ? `<span class="na">${bl(s.foot.balance.note, "ar inline")}</span>`
-              : num2(s.foot.balance.amount)
+            // null = NO DRAW YET, which is the ordinary state of a
+            // confirmed invoice under 0204: nothing has been taken off the
+            // balance for it, so there is no moment to report. An em-dash,
+            // never a 0 — a 0 here would state an empty balance.
+            s.foot.balance == null
+              ? DASH
+              : "note" in s.foot.balance
+                ? `<span class="na">${bl(s.foot.balance.note, "ar inline")}</span>`
+                : num2(s.foot.balance.amount)
           }</td>
         </tr>
         <tr class="grand">

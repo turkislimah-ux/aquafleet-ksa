@@ -48,7 +48,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildInvoicePdfHtml } from "../lib/invoicePdfTemplate";
 import { buildInvoicePrintHtml } from "../lib/invoicePrintTemplate";
-import type { PdfInvoiceData, PdfLine } from "../lib/invoiceViewModel";
+import { ledgerDrawFrom, type PdfInvoiceData, type PdfLine } from "../lib/invoiceViewModel";
 import { t } from "../lib/i18n";
 // The comment-aware lexer. NOT a hand-rolled grep — see CLAUDE.md §5 and case
 // 9's note. It self-tests at import, so a broken stripper turns this file red
@@ -302,7 +302,12 @@ const ledgerPrepaidSettled: PdfInvoiceData = {
   status: "paid",
   invoiceNumber: "026-000104",
   paidAt: "2026-07-09",
-  ledgerBalanceSar: 9000,
+  // THE DRAW BEHIND THIS INVOICE, as the ledger holds it. 9,000.00 on the
+  // books, 2,491.67 taken off for this invoice (the `applied` settlement event
+  // below is the same money), 6,508.33 left. Deliberately NOT derivable from
+  // any subtotal on the page: the balance is a property of the CUSTOMER, and
+  // no renderer may reconstruct it from the document's own rows.
+  ledgerDraw: { state: "drawn", balanceBefore: 9000, drawSar: 2491.67, balanceAfter: 6508.33 },
   // The three amounts sum to the frozen payable (5,825.00) and are chosen to
   // be UNLIKE every other figure on the page. Round numbers collide: 2,000.00
   // is also this fixture's special-charges subtotal, so a "the toggle removed
@@ -1152,6 +1157,144 @@ async function main() {
       notes.every((n) => (n.match(/VAT/g) ?? []).length === 1),
       notes.join(" | "),
     );
+  }
+
+  // =========================================================================
+  // 15. BALANCE AND REMAINING COME FROM THE LEDGER, NOT FROM A SUBTRACTION
+  // =========================================================================
+  // 0205 dropped the frozen pair 0036 wrote at confirm. The two rows under the
+  // ledger-era trips subtotal now report the `balance_applied` rows that
+  // actually moved the money: the customer's balance immediately BEFORE this
+  // invoice's draw and immediately AFTER it, the last draw winning.
+  //
+  // Three states, and each one is a different sentence the document can say —
+  // a figure, an em-dash, or words. The em-dash case is the important one:
+  // under 0204 confirm moves nothing, so an invoice with no draw yet is the
+  // ORDINARY confirmed invoice, and a 0 in that row would tell the customer
+  // their balance was empty.
+  //
+  // THE IDENTITY IS THE POINT. Balance − draw = Remaining is a statement about
+  // events that happened. The old Remaining was `balance − this table's
+  // subtotal`, which is a subtraction the renderer invented: a balance does
+  // not fall by a trips subtotal, it falls by whatever was drawn, and the two
+  // agree only when the balance covered the invoice exactly.
+  // =========================================================================
+  console.log("\n=== 15. Balance / Remaining are the ledger's, not a subtraction ===");
+  {
+    const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const d = ledgerPrepaidSettled.ledgerDraw;
+    if (d === undefined || d.state !== "drawn") {
+      check("15 PRECONDITION: the settled fixture carries a drawn ledger figure", false, JSON.stringify(d));
+    } else {
+      // THE IDENTITY, checked on the FIXTURE before anything is rendered. If
+      // these three numbers do not close, every assertion below is measuring
+      // a document built from an impossible ledger.
+      check(
+        `15a. the fixture's own arithmetic closes: ${money(d.balanceBefore)} − ${money(d.drawSar)} = ${money(d.balanceAfter)}`,
+        round2(d.balanceBefore - d.drawSar) === d.balanceAfter,
+      );
+
+      for (const [name, build] of [
+        ["sheet", buildInvoicePrintHtml],
+        ["PDF", buildInvoicePdfHtml],
+      ] as const) {
+        const shown = await build(ledgerPrepaidSettled);
+        check(`15b. ${name} — the Balance row prints the balance BEFORE the draw`, shown.includes(money(d.balanceBefore)));
+        check(`15c. ${name} — the Remaining row prints the balance AFTER it`, shown.includes(money(d.balanceAfter)));
+        // THE DELETED EXPRESSION, pinned as an absence. `balance − trips
+        // subtotal` is what the row used to hold; on this fixture that is
+        // 9,000.00 − 17,825.00 = −8,825.00, a figure with no event behind it.
+        const invented = round2(d.balanceBefore - ledgerPrepaidSettled.grand.total);
+        check(
+          `15d. ${name} — and NOT balance minus the trips subtotal (${money(invented)})`,
+          !shown.includes(money(invented)),
+        );
+
+        // NO DRAW YET — the ordinary confirmed invoice. Both rows go to an
+        // em-dash, and neither figure from the drawn case may survive.
+        const none = await build({ ...ledgerPrepaidSettled, ledgerDraw: { state: "none" } });
+        check(
+          `15e. ${name} — with no draw yet, neither balance figure prints`,
+          !none.includes(money(d.balanceBefore)) && !none.includes(money(d.balanceAfter)),
+        );
+        // …but the rows are still THERE, captioned, with the trips subtotal
+        // beside them. An absence check alone would pass on a document that
+        // dropped the whole foot.
+        check(
+          `15f. ${name} — the Balance and Remaining captions still print`,
+          /Balance/.test(none) && /Remaining/.test(none),
+        );
+        check(`15g. ${name} — and the trips subtotal is untouched`, none.includes(money(ledgerPrepaidSettled.grand.total)));
+
+        // UNREADABLE — words, never a numeral, so it cannot be skimmed as an
+        // amount. Distinct from the em-dash above: one is a fact about the
+        // invoice, the other is a doubt about the read.
+        const bad = await build({ ...ledgerPrepaidSettled, ledgerDraw: { state: "unreadable" } });
+        check(
+          `15h. ${name} — an unreadable ledger states words, not a figure`,
+          /Unavailable/i.test(bad) && !bad.includes(money(d.balanceBefore)),
+        );
+      }
+
+      // ── THE 0203 SUB-ERA: an invoice_draw, not a balance_applied ────────
+      // Confirm DREW the balance between 0203 and 0204, so an invoice from
+      // that window carries `invoice_draw` and no `balance_applied` at all.
+      // ledgerDrawFrom() matched only the latter and those invoices printed
+      // two em-dashes over a deduction that really happened — on prod that is
+      // 026-000022, -024 and -026, every one of them paid.
+      //
+      // Exercised through the REAL function over rows shaped like the ledger's,
+      // not by handing the view model a pre-made figure: the bug was in the
+      // matching, so a fixture that skips the match would not have caught it.
+      const drawRows = [
+        { id: "l1", amount_sar: 71215, entry_type: "topup", invoice_id: null, reversal_of: null },
+        { id: "l2", amount_sar: -60030, entry_type: "invoice_draw", invoice_id: "inv-22", reversal_of: null },
+      ];
+      const fromDraw = ledgerDrawFrom(drawRows, "inv-22");
+      check(
+        "15j. an invoice_draw settlement is found, and its arithmetic closes",
+        fromDraw.state === "drawn" &&
+          fromDraw.balanceBefore === 71215 &&
+          fromDraw.drawSar === 60030 &&
+          fromDraw.balanceAfter === 11185,
+        JSON.stringify(fromDraw),
+      );
+      const drawDoc = await buildInvoicePrintHtml({ ...ledgerPrepaidSettled, ledgerDraw: fromDraw });
+      check(
+        "15k. …and the document prints both of its figures",
+        drawDoc.includes(money(71215)) && drawDoc.includes(money(11185)),
+      );
+
+      // A VOIDED DRAW IS NOT A DRAW. void_invoice writes a `draw_reversal`
+      // pointing at the row it undoes and the money goes back, so an invoice
+      // whose only draw was reversed has nothing to report. Without the
+      // exclusion this reports a deduction the customer was refunded.
+      const reversedRows = [
+        ...drawRows,
+        { id: "l3", amount_sar: 60030, entry_type: "draw_reversal", invoice_id: "inv-22", reversal_of: "l2" },
+      ];
+      check(
+        "15l. CONTROL: a REVERSED draw reports nothing — the money came back",
+        ledgerDrawFrom(reversedRows, "inv-22").state === "none",
+        JSON.stringify(ledgerDrawFrom(reversedRows, "inv-22")),
+      );
+      // …and the control's control: the same rows WITHOUT the reversal still
+      // report the draw, so 15l is the exclusion firing and not the matcher
+      // failing to find anything at all.
+      check(
+        "15m. CONTROL: drop the reversal and the same draw is found again",
+        ledgerDrawFrom(drawRows, "inv-22").state === "drawn",
+      );
+
+      // HIDE-FROM-CUSTOMER TAKES THEM WITH THE TRIPS SECTION. Already shipped —
+      // the hidden document omits the trips table whole — so this is a
+      // regression pin, not a new rule.
+      const hidden = await buildInvoicePrintHtml({ ...ledgerPrepaidSettled, hideAmountDue: true });
+      check(
+        "15i. a hidden document prints neither figure",
+        !hidden.includes(money(d.balanceBefore)) && !hidden.includes(money(d.balanceAfter)),
+      );
+    }
   }
 
   console.log(failures === 0 ? "\nAll parity checks passed." : `\n${failures} FAILED.`);

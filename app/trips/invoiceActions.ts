@@ -28,6 +28,7 @@ import {
 import type { Invoice, CompanySettings, Customer, WaterType, PaymentMode } from "@/lib/db-types";
 import { generateInvoicePdf, PdfServiceNotConfiguredError } from "@/lib/pdf";
 import { buildInvoicePdfHtml, type PdfInvoiceData, type PdfIdentity } from "@/lib/invoicePdfTemplate";
+import { ledgerDrawFrom, type InvoiceLedgerDraw } from "@/lib/invoiceViewModel";
 import { buildInvoicePrintHtml } from "@/lib/invoicePrintTemplate";
 import {
   MAX_BANK_ACCOUNTS,
@@ -44,6 +45,7 @@ import {
   fetchCustomerAvailable,
   fetchInvoicePayments,
   fetchInvoiceSettlement,
+  fetchLedgerWalkRows,
   type InvoicePaymentRow,
   type InvoiceSettlementRow,
 } from "@/lib/customer-ledger";
@@ -122,7 +124,16 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // bytes of a hidden invoice still itemise every trip — priced, dated,
 // subtotalled — above a panel that merely named no figure as owed: half the
 // old disclosure, cached under the new law's name.
-const PDF_CACHE_VERSION = 8;
+//
+// v9: Balance and Remaining under the trips subtotal are derived from the
+// ledger (0205) instead of from a live balance minus the trips subtotal, and
+// an invoice confirmed between 0203 and 0204 now finds its `invoice_draw`
+// row where it used to find nothing and print two em-dashes. THIS IS THE
+// SECOND CAUSE OF THE DASHES, and it bites exactly the invoices the first one
+// did: getInvoicePdf caches bytes for PAID and VOID invoices, so every paid
+// invoice whose PDF was ever downloaded would keep serving the dashed
+// document no matter how correct the renderer became.
+const PDF_CACHE_VERSION = 9;
 // All four cache sites go through here — a read, a write and two invalidations.
 // They shared a hand-written `${invoiceId}.pdf` in four places, so a versioned
 // key that any one of them missed would silently stop invalidating instead of
@@ -807,17 +818,15 @@ export async function getInvoice(
       // remainder) computed inside the RPC under its lock, so this figure is a
       // preview and is never sent anywhere.
       availableSar: number | null;
-      // The same view row's `balance_sar` — the customer's ledger balance
-      // before Uninvoiced and unsettled confirmed invoices are held back from
-      // it. Feeds the Balance / Remaining pair under the ledger-era Trips
-      // subtotal, and nothing else.
+      // THE BALANCE EITHER SIDE OF THIS INVOICE'S DRAW. Feeds the Balance /
+      // Remaining pair under the ledger-era Trips subtotal, and nothing else.
       //
-      // NOT interchangeable with `availableSar` above. Available is what may be
-      // spent right now; Balance is what is in the pool. Showing Available in a
-      // row captioned "Balance" would quietly restate a smaller number under a
-      // bigger name, which is the class of mistake the whole ledger module
-      // exists to stop.
-      ledgerBalanceSar: number | null;
+      // THE POPUP AND THE DOCUMENT COMPUTE THIS THE SAME WAY, through
+      // ledgerDrawFrom(), because they print the same two rows. A live
+      // `balance_sar` stood here and the document now reads the ledger — two
+      // expressions for one pair is how an invoice and a statement came to
+      // report different balances, which is what 0205 exists to end.
+      ledgerDraw: InvoiceLedgerDraw;
       projectWaterType: WaterType | null;
       projectPaymentMode: PaymentMode;
       paidUpBalanceSar: number | null;
@@ -883,10 +892,13 @@ export async function getInvoice(
   // Availability is read for prepaid ONLY. A postpaid customer has no ledger,
   // so asking for their Available would return a row full of zeros that looks
   // like a real answer; the panel reads null and shows no apply affordance.
-  const [settlementRes, paymentsRes, availableRes] = await Promise.all([
+  const [settlementRes, paymentsRes, availableRes, ledgerRes] = await Promise.all([
     fetchInvoiceSettlement(supabase, invoiceId),
     fetchInvoicePayments(supabase, invoiceId),
     paymentMode === "prepaid" ? fetchCustomerAvailable(supabase, invoice.customer_id) : Promise.resolve(null),
+    // Prepaid only, for the same reason: a postpaid customer has no ledger to
+    // walk, and the foot that would read it never renders for them.
+    paymentMode === "prepaid" ? fetchLedgerWalkRows(supabase, invoice.customer_id) : Promise.resolve(null),
   ]);
 
   return {
@@ -900,7 +912,14 @@ export async function getInvoice(
       settlement: settlementRes.error ? null : (settlementRes.data ?? null),
       payments: paymentsRes.error ? [] : (paymentsRes.data ?? []),
       availableSar: availableRes && !availableRes.error ? (availableRes.data?.available_sar ?? null) : null,
-      ledgerBalanceSar: availableRes && !availableRes.error ? (availableRes.data?.balance_sar ?? null) : null,
+      // Postpaid gets "none", not "unreadable": there was no ledger to read,
+      // which is a different thing from failing to read one.
+      ledgerDraw:
+        ledgerRes == null
+          ? { state: "none" }
+          : ledgerRes.error
+            ? { state: "unreadable" }
+            : ledgerDrawFrom(ledgerRes.data ?? [], invoiceId),
       projectWaterType: (project?.water_type as WaterType | null) ?? null,
       projectPaymentMode: (project?.payment_mode as PaymentMode | null) ?? "postpaid",
       paidUpBalanceSar: paidUp.ok ? paidUp.amount : null,
@@ -1126,16 +1145,16 @@ export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ 
     // not a refactor, and every already-issued invoice reads through them.
     p_covered_ledger_subtotal: assembly.tripTotals?.covered ?? null,
     p_unpaid_ledger_subtotal: assembly.tripTotals?.unpaid ?? null,
-    // EXPLICIT NULL, and it is the point. These four columns held the
-    // per-invoice running balance and its remainder — the deleted mechanism.
-    // Nothing computes them any more and nothing renders them, so a future
-    // confirm writes no figure rather than a figure no surface reads. Already
-    // stored values are LEFT UNTOUCHED (0027's freeze law); this changes what
-    // is written from here on, never what is on disk.
-    p_covered_ledger_balance: null,
-    p_covered_ledger_remaining: null,
-    p_unpaid_ledger_balance: null,
-    p_unpaid_ledger_remaining: null,
+    // THE FOUR BALANCE/REMAINING PARAMETERS ARE GONE (0205), not nulled. They
+    // carried the pre-rebuild per-invoice running balance, a FIFO walk over a
+    // pool that 0203 replaced; this call wrote literal nulls into them for one
+    // release and 0205 drops the columns and the parameters together. A
+    // ledger-era invoice derives its Balance/Remaining from the customer_ledger
+    // rows that actually moved the money — see loadLedgerDraw below.
+    //
+    // THIS CALL REQUIRES 0205. Named arguments mean a missing parameter is a
+    // schema fault, not a silent default, so a deploy that runs this against
+    // the 25-argument function fails loudly on the first confirm.
     p_payment_mode: assembly.paymentMode,
     // 0203 — WHO confirmed. The prepaid draw this call performs writes a
     // customer_ledger row, and a money row with no author is an audit hole.
@@ -1731,14 +1750,18 @@ function toIdentity(opts: {
 // it anyway.
 type LedgerDocExtras = Pick<
   PdfInvoiceData,
-  "ledgerBalanceSar" | "settlementEvents" | "settlementRemainderSar"
+  "ledgerDraw" | "settlementEvents" | "settlementRemainderSar"
 >;
 
+// NOT "unreadable" — a legacy or postpaid document was never going to print
+// these rows, and calling that a failed read would put a worried sentence on a
+// document that is simply built under another law.
 const NO_LEDGER_EXTRAS: LedgerDocExtras = {
-  ledgerBalanceSar: null,
+  ledgerDraw: { state: "none" },
   settlementEvents: [],
   settlementRemainderSar: null,
 };
+
 
 async function loadLedgerDocExtras(
   supabase: ReturnType<typeof createClient>,
@@ -1753,26 +1776,24 @@ async function loadLedgerDocExtras(
   // foot prints on a draft too, and a draft is exactly where an operator is
   // deciding whether the pool covers the work.
   const issued = inv.status !== "draft" && inv.status !== "review";
-  const [availableRes, settlementRes, paymentsRes, appliedRes] = await Promise.all([
-    fetchCustomerAvailable(supabase, inv.customer_id),
+  // THE WHOLE CUSTOMER LEDGER, through lib/customer-ledger.ts's own reader —
+  // the raw query that used to sit here is gone, as its comment asked. It has
+  // to be the whole ledger and not this invoice's two rows, because the
+  // Balance figure is a WALK: the running total up to the draw, which is only
+  // knowable from everything before it.
+  //
+  // ONE READ SERVES BOTH. The settlement list wants this invoice's draws and
+  // the foot wants the balance around the last of them; filtering in memory
+  // is cheaper and more obviously consistent than asking twice.
+  const [ledgerRes, settlementRes, paymentsRes] = await Promise.all([
+    fetchLedgerWalkRows(supabase, inv.customer_id),
     issued ? fetchInvoiceSettlement(supabase, inv.id) : Promise.resolve(null),
     issued ? fetchInvoicePayments(supabase, inv.id) : Promise.resolve(null),
-    // THE ONE RAW LEDGER READ IN THIS FILE, and the header's rule above names
-    // the two tables it does not cover. lib/customer-ledger.ts has no
-    // per-invoice reader for balance draws — only `fetchLedgerEntries`, which
-    // returns every entry of every customer — and pulling the whole ledger to
-    // find two rows is not a reuse worth having. If a scoped reader is ever
-    // added there, this block is its first caller and should become a call.
-    issued
-      ? supabase
-          .from("customer_ledger")
-          .select("amount_sar, created_at")
-          .eq("invoice_id", inv.id)
-          .eq("entry_type", "balance_applied")
-          .order("created_at", { ascending: true })
-          .returns<{ amount_sar: number; created_at: string }[]>()
-      : Promise.resolve(null),
   ]);
+  const ledgerRows = ledgerRes.error ? null : (ledgerRes.data ?? []);
+  const appliedRows = (ledgerRows ?? []).filter(
+    (r) => r.invoice_id === inv.id && r.entry_type === "balance_applied",
+  );
 
   // A FAILED READ DROPS TO EMPTY, never to a zero: an invoice that lists no
   // settlements prints no section at all, whereas one listing "0.00 paid"
@@ -1792,7 +1813,7 @@ async function loadLedgerDocExtras(
   // does to the balance. On this list it is a positive settlement: the column
   // is "how much of this invoice this event settled", and a minus in it would
   // read as a reversal of one.
-  const applied = (appliedRes && !appliedRes.error ? (appliedRes.data ?? []) : []).map((r) => ({
+  const applied = appliedRows.map((r) => ({
     kind: "applied" as const,
     method: null,
     date: r.created_at,
@@ -1801,7 +1822,10 @@ async function loadLedgerDocExtras(
   }));
 
   return {
-    ledgerBalanceSar: availableRes.error ? null : (availableRes.data?.balance_sar ?? null),
+    // A FAILED LEDGER READ SAYS SO. It is the one case that must not fall
+    // through to "none": "nothing has been drawn" and "we could not find out"
+    // are opposite facts that would print the same em-dash.
+    ledgerDraw: ledgerRows == null ? { state: "unreadable" } : ledgerDrawFrom(ledgerRows, inv.id),
     // MERGED AND SORTED ON THE DAY, not the timestamp. The two sources stamp
     // differently — a payment carries a date, a ledger row a full instant — so
     // comparing them raw would order a whole day's payments after a draw that

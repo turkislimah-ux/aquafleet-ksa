@@ -193,6 +193,43 @@ export async function fetchLedgerEntries(supabase: Db) {
     .returns<LedgerEntryRow[]>();
 }
 
+// ONE customer's ledger rows, oldest-first, in the SAME total order the
+// statement walks: created_at then id. Just the four columns a walk needs.
+//
+// WHY A WALK NEEDS ROWS AND NOT A VIEW. The three views answer "what is the
+// balance NOW". The ledger-era invoice document has to answer "what was the
+// balance either side of THIS invoice's draw", which is a historical point
+// and has no view because it is presentation — 0203's sanctioned cumulative
+// display of amount_sar down the rows, the same device the statement and the
+// ledger popup already perform. The walk itself is NOT done here: this module
+// does no arithmetic (see the header). It hands over the rows; the caller
+// that needs the figure walks them (app/trips/invoiceActions.ts's
+// loadLedgerDraw).
+//
+// ORDERED BY (created_at, id) TO MATCH THE STATEMENT. Two rows can share a
+// timestamp, and if the invoice document and the statement broke that tie
+// differently they would report two different balances for one instant — the
+// exact class of disagreement the 0036 freeze was dropped for.
+export type LedgerWalkRow = {
+  id: string;
+  amount_sar: number;
+  entry_type: LedgerEntryType;
+  invoice_id: string | null;
+  /** The row this one reverses — set on `draw_reversal` rows only (0203). */
+  reversal_of: string | null;
+  created_at: string;
+};
+
+export async function fetchLedgerWalkRows(supabase: Db, customerId: string) {
+  return supabase
+    .from("customer_ledger")
+    .select("id, amount_sar, entry_type, invoice_id, reversal_of, created_at")
+    .eq("customer_id", customerId)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
+    .returns<LedgerWalkRow[]>();
+}
+
 // ONE invoice's settlement. Single-row read by id — the invoice detail is the
 // only surface that needs it, and it already knows which invoice it is.
 export async function fetchInvoiceSettlement(supabase: Db, invoiceId: string) {

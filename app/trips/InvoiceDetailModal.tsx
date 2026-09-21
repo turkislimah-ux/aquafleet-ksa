@@ -29,7 +29,7 @@ import { canEditSpecialCharges } from "@/lib/invoice";
 import { prepareUploadFiles } from "@/lib/upload-image";
 import { round2 } from "@/lib/vat";
 import { groupInvoiceLines } from "@/lib/invoiceDisplay";
-import { buildBankBlock, type VmBankBlock } from "@/lib/invoiceViewModel";
+import { buildBankBlock, type InvoiceLedgerDraw, type VmBankBlock } from "@/lib/invoiceViewModel";
 import TripRefLink from "@/components/TripRefLink";
 import { printHtml } from "@/lib/printHtml";
 import {
@@ -268,7 +268,7 @@ export default function InvoiceDetailModal({
         // remainder of confirmed invoices). The trips foot shows the balance
         // because that is the figure the customer recognises; the apply panel
         // shows available because that is what can actually move.
-        ledgerBalanceSar: number | null;
+        ledgerDraw: InvoiceLedgerDraw;
       })
     | null
   >(null);
@@ -1109,25 +1109,31 @@ export default function InvoiceDetailModal({
   // subtract from, and a lone "0" here would read as a real remainder.
   const remainingAfter = (subtotal: number) => (paidUpUnreadable ? null : round2((paidUp as number) - subtotal));
 
-  // --- LEDGER-ERA BALANCE ROW (0204, item 6) -------------------------------
-  // The same pair of rows, fed by the OTHER era's balance. A ledger-era prepaid
+  // --- LEDGER-ERA BALANCE ROW ----------------------------------------------
+  // The same pair of rows, fed by the OTHER era's money. A ledger-era prepaid
   // invoice has no paid-up figure — lib/prepaid's expression answers a question
-  // 0203 stopped asking — so it reads v_customer_available.balance_sar instead,
-  // carried on the payload as ledgerBalanceSar.
+  // 0203 stopped asking — so both figures come off the `balance_applied`
+  // ledger rows for THIS invoice: the balance immediately before the draw and
+  // immediately after it, the last draw winning when there were several.
   //
-  // THE TWO BALANCES ARE DIFFERENT NUMBERS ON THE SAME CUSTOMER and must never
-  // share a caption, which is why the ledger call site passes its own label.
-  // Paid-up is frozen at paid_at/voided_at; this one is live.
+  // THIS SCREEN DOES NOT COMPUTE THEM. `ledgerDraw` arrives already walked by
+  // invoiceActions' ledgerDrawFrom(), the same call the document makes, so the
+  // popup and the PDF cannot report different balances for one instant. It
+  // used to read a live `balance_sar` and subtract this table's subtotal —
+  // two inventions at once, since a balance does not fall by a subtotal, it
+  // falls by whatever was actually drawn.
   //
-  // Not chained, for the same reason the legacy pair is not: Remaining is this
-  // table's own subtotal taken off the balance, and nothing downstream reads it.
-  const ledgerBalance = raw?.ledgerBalanceSar ?? null;
-  const ledgerBalanceRow: { amount: number } | { note: string } =
-    ledgerBalance == null
-      ? { note: t("trips.invoiceSheet.paidUpUnavailable", lang) }
-      : { amount: ledgerBalance };
-  const ledgerRemainingAfter = (subtotal: number) =>
-    ledgerBalance == null ? null : round2(ledgerBalance - subtotal);
+  // THREE STATES, and the middle one is the common case under 0204: an invoice
+  // nothing has been drawn against yet prints an em-dash on both rows, because
+  // there is no moment to report rather than a zero to report.
+  const ledgerDraw: InvoiceLedgerDraw = raw?.ledgerDraw ?? { state: "unreadable" };
+  const ledgerBalanceRow: { amount: number } | { note: string } | null =
+    ledgerDraw.state === "drawn"
+      ? { amount: ledgerDraw.balanceBefore }
+      : ledgerDraw.state === "none"
+        ? null
+        : { note: t("trips.invoiceSheet.paidUpUnavailable", lang) };
+  const ledgerRemaining = ledgerDraw.state === "drawn" ? ledgerDraw.balanceAfter : null;
 
   // --- WHAT THE PAYMENT FORM IS STILL MISSING (0204, item 10) --------------
   // A bank transfer is a real transaction somewhere else, and the only thing
@@ -1482,7 +1488,7 @@ export default function InvoiceDetailModal({
                   // balance is NOT the paid-up balance the default names.
                   balanceLabel={t("trips.invoiceSheet.ledgerBalance", lang)}
                   balance={ledgerBalanceRow}
-                  remaining={ledgerRemainingAfter(ledgerTripsTotal)}
+                  remaining={ledgerRemaining}
                   //
                   // The hide-from-customer toggle stays HERE, on the one trips
                   // table, because it is still the same control governing the
@@ -2777,7 +2783,13 @@ function PrepaidTripTable({
   // invoice, these rows answer what the customer holds, and the two are not
   // the same question. What each era passes here IS different, though — see
   // balanceLabel.
-  balance?: { amount: number } | { note: string };
+  //
+  // THREE VALUES NOW, not two. `undefined` still means "no pair at all"
+  // (postpaid); `null` means "the pair renders, with an em-dash in both rows"
+  // — a ledger-era invoice nothing has been drawn against yet, which under
+  // 0204 is the ordinary state of a confirmed invoice. A 0 there would claim
+  // an empty balance.
+  balance?: { amount: number } | { note: string } | null;
   // The caption for that row, because the two eras put DIFFERENT NUMBERS in
   // it. Legacy passes lib/prepaid's paid-up balance, frozen at paid_at or
   // voided_at; the ledger era passes v_customer_available.balance_sar, read
@@ -2870,7 +2882,7 @@ function PrepaidTripTable({
               <span className="tabular-nums font-medium">{formatSar(subtotal)}</span>
             </span>
           </div>
-          {balance && (
+          {balance !== undefined && (
             <>
               <div className="flex items-center justify-between">
                 <span className="muted">{balanceLabel ?? t("trips.invoiceSheet.paidUpBalance", lang)}</span>
@@ -2879,7 +2891,9 @@ function PrepaidTripTable({
                     legacy pre-0036 case the chained balance had; the paid-up
                     balance has no such case, so the only reason this cell holds
                     no figure now is a failed read, and it says so. */}
-                {"note" in balance ? (
+                {balance === null ? (
+                  <span className="muted">—</span>
+                ) : "note" in balance ? (
                   <span className="text-xs italic text-amber-600 dark:text-amber-400">{balance.note}</span>
                 ) : (
                   <span className="tabular-nums">{formatSar(balance.amount)}</span>

@@ -111,6 +111,96 @@ export type PdfSettlementEvent = {
   amount: number;
 };
 
+/**
+ * THE BALANCE DRAW BEHIND A LEDGER-ERA INVOICE, as the document reports it.
+ *
+ * Built by the caller from `customer_ledger` (app/trips/invoiceActions.ts's
+ * loadLedgerDraw): the LAST `balance_applied` row for this invoice, plus the
+ * customer's running balance immediately before and after it. `drawSar` is
+ * POSITIVE — the ledger stores a draw negative, and no renderer should have to
+ * know that to see that `balanceBefore − drawSar === balanceAfter`.
+ *
+ * Three states, because there are three different things a document can
+ * truthfully say. A union rather than nullable numbers so none of them can be
+ * rendered as another — see `PdfInvoiceData.ledgerDraw`.
+ */
+export type InvoiceLedgerDraw =
+  | { state: "drawn"; balanceBefore: number; drawSar: number; balanceAfter: number }
+  | { state: "none" }
+  | { state: "unreadable" };
+
+/**
+ * THE DRAW BEHIND A LEDGER-ERA INVOICE, walked out of the customer's ledger.
+ *
+ * PURE, and exported so a harness can run it over real rows — the reason it
+ * does not live in app/trips/invoiceActions.ts, which is a `"use server"`
+ * module and may export only async functions. The document path and the popup
+ * both call it, so the two cannot report different balances for one instant;
+ * that divergence is why 0036's frozen pair was dropped (see 0205).
+ *
+ * WHICH ROW IS THE DRAW — and it is two entry types, not one:
+ *
+ *   invoice_draw     0203's deduction, taken AT CONFIRM.
+ *   balance_applied  0204's deduction, taken when Mark Paid runs.
+ *
+ * Both mean "the balance paid this much of this invoice"; which one exists
+ * depends only on when the invoice was confirmed. Matching `balance_applied`
+ * alone printed an em-dash on every invoice confirmed between 0203 and 0204 —
+ * on prod that is 026-000022, -024 and -026, all of them paid, all of them
+ * showing a dash where a real deduction had happened.
+ *
+ * A REVERSED DRAW IS NOT A DRAW. Voiding an invoice writes a `draw_reversal`
+ * pointing at the row it undoes (`reversal_of`), and the money came back. The
+ * reversed row is skipped, so a voided-then-reissued invoice reports the draw
+ * that stands rather than the one that was given back.
+ *
+ * THE LAST SURVIVING DRAW WINS. apply_balance_to_invoice can run more than
+ * once against one invoice — a partial draw, a top-up, then the rest — and
+ * what the document reports is where the settlement finally left the balance.
+ *
+ * Cash and transfer payments are not consulted. They settle through
+ * `invoice_payments` and never touch the held balance (0204's two doors are
+ * disjoint), so a shortfall paid in cash leaves both figures where the draw
+ * put them.
+ *
+ * `rows` must be the customer's WHOLE ledger in the statement's own total
+ * order — created_at then id — because Balance is a running total up to the
+ * draw, and any other tie-break would let one surface disagree with another on
+ * a day when two rows share a timestamp.
+ */
+export function ledgerDrawFrom(
+  rows: readonly {
+    id: string;
+    amount_sar: number;
+    entry_type: string;
+    invoice_id: string | null;
+    reversal_of: string | null;
+  }[],
+  invoiceId: string,
+): InvoiceLedgerDraw {
+  const reversed = new Set(
+    rows.filter((r) => r.entry_type === "draw_reversal" && r.reversal_of).map((r) => r.reversal_of as string),
+  );
+  let last = -1;
+  for (let i = 0; i < rows.length; i += 1) {
+    const r = rows[i];
+    const isDraw = r.entry_type === "invoice_draw" || r.entry_type === "balance_applied";
+    if (r.invoice_id === invoiceId && isDraw && !reversed.has(r.id)) last = i;
+  }
+  // No surviving draw is the ORDINARY state of a confirmed invoice under 0204,
+  // not a failure: confirm moves no money, so until Mark Paid runs there is
+  // nothing to report and the document prints an em-dash.
+  if (last < 0) return { state: "none" };
+
+  let balanceAfter = 0;
+  for (let i = 0; i <= last; i += 1) balanceAfter = round2(balanceAfter + rows[i].amount_sar);
+  // The ledger stores a draw NEGATIVE, because that is what it does to the
+  // balance. The document states it positive and says so in the caption, so
+  // `balanceBefore − drawSar === balanceAfter` reads as the subtraction it is.
+  const drawSar = round2(Math.abs(rows[last].amount_sar));
+  return { state: "drawn", balanceBefore: round2(balanceAfter + drawSar), drawSar, balanceAfter };
+}
+
 export type PdfIdentity = {
   name: string | null; // legal_name (seller) or name (buyer)
   name_ar?: string | null; // company name (Arabic) — populated for BOTH parties
@@ -209,25 +299,40 @@ export type PdfInvoiceData = {
    */
   amountPayableSar: number | null;
   /**
-   * THE CUSTOMER'S CURRENT LEDGER BALANCE, in riyals —
-   * `v_customer_available.balance_sar`, read through
-   * `fetchCustomerAvailable`. Ledger era only; `null` on a legacy row and
-   * whenever the read failed.
+   * THIS INVOICE'S BALANCE DRAW, and the customer's ledger balance either side
+   * of it. Feeds the Balance / Remaining pair under the ledger-era Trips
+   * subtotal and nothing else.
    *
-   * NOT `paidUpBalanceSar`. That is the pre-0203 expression with its own
-   * frozen-at-paid_at semantics, and the two numbers disagree on the same
-   * customer by design. They are carried side by side because each document era
-   * prints its own, and collapsing them would silently restate one era's figure
-   * under the other era's law.
+   * WHAT IT REPLACED, and why the shape changed. The pair used to be
+   * `ledgerBalanceSar` — the customer's balance RIGHT NOW — with Remaining
+   * derived as `balance − this table's subtotal`. Two things were wrong with
+   * that on an issued document: the figure moved every time the customer did
+   * anything (a document is not a live dashboard), and the subtraction was
+   * invented by the renderer rather than describing money that actually moved.
+   * Before that, 0036 froze a FIFO walk at confirm; 0205 dropped those columns.
    *
-   * Feeds the Balance / Remaining pair under the ledger-era Trips subtotal and
-   * nothing else. Display arithmetic only — see `VmTableFoot`.
+   * Now both figures come from the `balance_applied` ledger rows for this
+   * invoice — the rows that MOVED the money — so Balance − draw = Remaining is
+   * an identity about real events, not a rendering. With several draws it is
+   * the LAST one: that is where the invoice's settlement left the balance.
+   *
+   * Cash and transfer payments never appear here. They settle the invoice
+   * without touching the held balance (0204's two doors are disjoint), so a
+   * shortfall paid in cash leaves these two figures exactly where the draw did.
+   *
+   * THREE STATES, ALL DIFFERENT, none collapsible into a number:
+   *   "drawn"      — a draw happened; print both figures.
+   *   "none"       — no draw yet, which is the ordinary state of a confirmed
+   *                  invoice under 0204. Both rows print an em-dash, because
+   *                  there is no moment to report, not a zero to report.
+   *   "unreadable" — the ledger could not be read. Words, never a figure.
    *
    * OPTIONAL, like `tripTotals` beside it, so a caller that never reads the
    * ledger (the flow and page-proof harnesses) stays valid. Absent is treated
-   * as null: the row prints its unreadable note, never a fabricated 0.
+   * as "unreadable" — the conservative arm, which states a doubt rather than
+   * inventing a fact.
    */
-  ledgerBalanceSar?: number | null;
+  ledgerDraw?: InvoiceLedgerDraw;
   /**
    * SETTLEMENT ACTIVITY on this invoice, oldest first: every recorded payment
    * (`invoice_payments`) and every balance draw (`customer_ledger` rows with
@@ -342,7 +447,16 @@ export type VmTableFoot =
       vat: number;
       subtotal: number;
       balanceLabel: BiLabel;
-      balance: { amount: number } | { note: BiLabel };
+      /**
+       * THREE RENDERINGS, and a renderer must not fold two of them together:
+       *   { amount } — the figure.
+       *   null       — no draw has happened. An em-dash: there is no moment to
+       *                report. A 0 here would claim an empty balance.
+       *   { note }   — the read failed. WORDS, never a numeral, so it cannot be
+       *                skimmed as an amount.
+       */
+      balance: { amount: number } | { note: BiLabel } | null;
+      /** The balance after the draw. null whenever `balance` is not a figure. */
       remaining: number | null;
     }
   | { style: "subtotal"; preVat: number; vat: number; total: number };
@@ -791,23 +905,29 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
       totalsTotal = chargeT.total;
     } else {
       // The three-row foot (Subtotal / Balance / Remaining), UNGATED — every
-      // visible ledger document prints it. It is fed by the ledger, not the
-      // pre-0203 paid-up expression: `ledgerBalanceSar` is
-      // `v_customer_available.balance_sar`, the same column the Finance tab
-      // reads, so "what is left of the pool after this table" has one answer
-      // everywhere it is asked. `paidUpBalanceSar` is still carried for the
-      // legacy branch below and is deliberately unread here.
+      // visible ledger document prints it. Both figures come from the
+      // `balance_applied` ledger rows for THIS invoice: the balance
+      // immediately before the draw and immediately after it, the last draw
+      // winning when there were several. `paidUpBalanceSar` is still carried
+      // for the legacy branch below and is deliberately unread here.
       //
-      // Remaining is `balance − this table's own VAT-inclusive subtotal` and
-      // NOTHING ELSE — display arithmetic on two decided figures, never the
-      // deleted chained walk.
+      // NEITHER FIGURE IS COMPUTED HERE. Remaining used to be `balance −
+      // this table's subtotal`, a subtraction the renderer invented: a
+      // balance does not fall by the trips subtotal, it falls by whatever was
+      // drawn, and the two agree only when the balance covered the invoice
+      // exactly. Now both come off the ledger and `before − draw = after` is
+      // an identity about events that happened.
       //
-      // A failed read and a zero balance are different content, so the slot
-      // is a union and carries the explicit note rather than a fabricated 0.
-      const ledgerBalanceRow: { amount: number } | { note: BiLabel } =
-        data.ledgerBalanceSar != null
-          ? { amount: data.ledgerBalanceSar }
-          : { note: bi("trips.invoiceSheet.paidUpUnavailable") };
+      // THREE STATES, THREE RENDERINGS — a real draw, no draw yet, and a
+      // failed read are three different facts, so the slot is a union and
+      // none of them can be printed as a fabricated 0.
+      const draw: InvoiceLedgerDraw = data.ledgerDraw ?? { state: "unreadable" };
+      const ledgerBalanceRow: { amount: number } | { note: BiLabel } | null =
+        draw.state === "drawn"
+          ? { amount: draw.balanceBefore }
+          : draw.state === "none"
+            ? null
+            : { note: bi("trips.invoiceSheet.paidUpUnavailable") };
 
       sections.push({
         kind: "trips",
@@ -821,7 +941,7 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
           subtotal: tripT.total,
           balanceLabel: bi("trips.invoiceSheet.ledgerBalance"),
           balance: ledgerBalanceRow,
-          remaining: data.ledgerBalanceSar == null ? null : round2(data.ledgerBalanceSar - tripT.total),
+          remaining: draw.state === "drawn" ? draw.balanceAfter : null,
         },
       });
 

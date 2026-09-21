@@ -715,12 +715,14 @@ export type Invoice = {
   // balance/ledger concept — see lib/invoice.ts's POSTPAID note) and for
   // any invoice confirmed before this column existed (no backfill, same
   // precedent as invoice_number's format coexistence, 0034).
+  //
+  // THE FOUR BALANCE/REMAINING SIBLINGS ARE DROPPED (0205). They held a
+  // per-invoice running balance walked over the pre-0203 FIFO pool — a model
+  // that no longer exists, frozen at a moment (confirm) that no longer moves
+  // money. These two survive because the LEGACY document still reads them for
+  // its two trips-table feet, and they name a figure that is still true.
   covered_ledger_subtotal_sar: number | null;
-  covered_ledger_balance_sar: number | null;
-  covered_ledger_remaining_sar: number | null;
   unpaid_ledger_subtotal_sar: number | null;
-  unpaid_ledger_balance_sar: number | null;
-  unpaid_ledger_remaining_sar: number | null;
   // v3 (migration 0036) — customer-facing hide toggle for Amount Due
   // (print/PDF/email only; always visible on-screen to staff). Editable any
   // time regardless of status — a display preference, not frozen financial

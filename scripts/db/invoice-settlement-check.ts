@@ -218,7 +218,7 @@ const CONFIRM_SQL = `
     $9::numeric, $10::numeric, $11::numeric,
     $12::numeric, $13::numeric, $14::numeric,
     $15::numeric, $16::numeric, $17::numeric,
-    null, null, null, null, null, null,
+    null, null,
     $18::text, $19::text
   )`;
 
