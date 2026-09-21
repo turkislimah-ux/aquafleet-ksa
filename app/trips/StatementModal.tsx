@@ -403,10 +403,32 @@ export default function StatementModal({
   // -------------------------------------------------------------------------
   // Cell rendering — LOOK ONLY
   // -------------------------------------------------------------------------
+  // THE NOTE COLUMN IS THE ONLY TRUNCATING COLUMN (see tdCls), which meant a
+  // note longer than ~10rem was simply unreadable on this screen: clipped at
+  // an ellipsis with nowhere to go. The document prints it in full, so the
+  // information existed — it just could not be reached from the popup the
+  // operator is actually looking at.
+  //
+  // `title` is the whole fix: native, no layout shift, no state, and it cannot
+  // disagree with the cell beside it because it reads the SAME cell. Screen
+  // only by nature — nothing hovers a PDF.
+  function noteHoverText(cell: StatementCell): string {
+    return cell.kind === "text" ? cell.value : cell.kind === "bi" ? cell.value[lang] : "";
+  }
+
+  function renderCell(cell: StatementCell, row: StatementRow, colKey: StatementColumnKey) {
+    const body = renderCellBody(cell, row, colKey);
+    if (colKey !== "note") return body;
+    const full = noteHoverText(cell);
+    // No title on an empty note: an em-dash with a tooltip saying nothing is
+    // worse than an em-dash.
+    return full ? <span title={full}>{body}</span> : body;
+  }
+
   // Takes the cell the view-model decided on and dresses it. It never chooses
   // a word, a sign or a figure; the only judgement here is which ink and
   // whether the Ref column links.
-  function renderCell(cell: StatementCell, row: StatementRow, colKey: StatementColumnKey) {
+  function renderCellBody(cell: StatementCell, row: StatementRow, colKey: StatementColumnKey) {
     switch (cell.kind) {
       case "empty":
         return <span className="muted">—</span>;
@@ -577,9 +599,16 @@ export default function StatementModal({
                     key={row.key}
                     // DISPLAY COLOUR ONLY — a settlement row is tinted so
                     // management can pick the paid invoices out of a long
-                    // statement at a glance. It changes no figure: the row
-                    // still RECORDS rather than deducts, and the running
-                    // balance still holds flat across it (lib/prepaid.ts).
+                    // statement at a glance. It changes no figure.
+                    //
+                    // THE TINT DOES NOT MEAN "RECORD-ONLY", though it used to
+                    // sit on record-only rows alone. `balance_applied` wears
+                    // it too now, and that row DOES move the money held on
+                    // account. Whether a row deducted is said by the running-
+                    // balance column — which steps on a draw and holds flat on
+                    // a cash payment — not by this tint, which says only that
+                    // an invoice was settled here.
+                    //
                     // The tint is on the ROW while a top-up's green is on
                     // its TEXT, deliberately — both are green-family, but
                     // a top-up is money arriving and a settlement is not,

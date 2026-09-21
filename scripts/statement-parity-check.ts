@@ -37,7 +37,7 @@ import { fileURLToPath } from "node:url";
 
 import { round2, type ConsumingTrip } from "../lib/prepaid";
 import { num2 } from "../lib/docPrimitives";
-import { fill } from "../lib/i18n";
+import { fill, t, type TKey } from "../lib/i18n";
 import { formatSar } from "../lib/utils";
 import { buildStatementHtml } from "../lib/statementPdfTemplate";
 import { stripComments } from "./code-grep";
@@ -1081,6 +1081,311 @@ check(
     !documentText(htmlPrepaid).includes("TRF-88410"),
   "if the scan cannot go dark, 14a is decoration",
 );
+
+// ---------------------------------------------------------------------------
+// 15. WHO PAID THE INVOICE — the Type and Method columns, both languages
+// ---------------------------------------------------------------------------
+// Turki's ruling. One settlement can produce TWO rows — a balance draw and
+// the cash that covered what the balance could not — and until now both said
+// "Invoice paid". A customer reading a single settlement saw two invoices
+// paid, for more than the invoice was worth.
+//
+// The rule, per row kind:
+//   balance draw (customer_ledger, balance_applied)
+//        Type   "Invoice paid"      — this IS the invoice being settled
+//        Method "Prepaid balance"   — and this is what settled it
+//   shortfall payment (invoice_payments, cash or transfer)
+//        Type   "Shortfall payment" — it settles the gap, not the invoice
+//        Method the payment's own   — cash / bank transfer, never Balance
+//   legacy paid invoice (pre-0203, settled on its own row)
+//        UNCHANGED — "Invoice paid" plus whatever method the row carries.
+//
+// LABELS COME FROM THE DICTIONARY, NEVER TYPED HERE. A literal would pass
+// while the screen said something else — the failure this file exists to
+// catch. Both languages on every assertion: the Arabic statement is the same
+// document and gets no second chance at a word.
+// ---------------------------------------------------------------------------
+console.log("\n=== 15. Type and Method name WHO paid, per row kind ===");
+{
+  const L = (k: TKey) => ({ en: t(k, "en"), ar: t(k, "ar") });
+  const INVOICE_PAID = L("trips.statement.typeInvoicePayment");
+  const SHORTFALL = L("trips.statement.typeShortfallPayment");
+  const BALANCE = L("labels.payBalance");
+  const CASH = L("labels.payCash");
+  const TRANSFER = L("labels.payBankTransfer");
+
+  // The two labels must not be the same string, or every assertion below is
+  // satisfied by a renderer that never distinguished them.
+  check(
+    "15a. the two Type labels are actually different words, in both languages",
+    INVOICE_PAID.en !== SHORTFALL.en && INVOICE_PAID.ar !== SHORTFALL.ar,
+    `${INVOICE_PAID.en}/${SHORTFALL.en}, ${INVOICE_PAID.ar}/${SHORTFALL.ar}`,
+  );
+
+  // One statement carrying all three row kinds at once: the ledger's own
+  // balance_applied row (le-4), two shortfall payments, and the legacy paid
+  // invoice. Anything that collapses two of them shows up here as a count.
+  const vmAll = buildStatementVm({ ...basePrepaid, invoicePayments: partialPayments, payments });
+  const cellOf = (r: StatementVm["rows"][number], i: number) => {
+    const c = r.cells[i];
+    return c.kind === "bi" ? c.value : null;
+  };
+  const rowsBy = (prefix: string) => vmAll.rows.filter((r) => r.key.startsWith(prefix));
+
+  const drawRows = rowsBy("ledger-le-4");
+  check(
+    "15b. the balance draw says 'Invoice paid' in the Type column, both languages",
+    drawRows.length === 1 &&
+      cellOf(drawRows[0], 1)?.en === INVOICE_PAID.en &&
+      cellOf(drawRows[0], 1)?.ar === INVOICE_PAID.ar,
+    JSON.stringify(drawRows.map((r) => cellOf(r, 1))),
+  );
+  check(
+    "15c. …and names the balance as its Method, though the ledger row stores none",
+    drawRows.length === 1 &&
+      cellOf(drawRows[0], 3)?.en === BALANCE.en &&
+      cellOf(drawRows[0], 3)?.ar === BALANCE.ar,
+    JSON.stringify(drawRows.map((r) => cellOf(r, 3))),
+  );
+
+  const shortRows = rowsBy("invoice-payment-");
+  check(
+    "15d. every shortfall payment says 'Shortfall payment', both languages",
+    shortRows.length === 2 &&
+      shortRows.every((r) => cellOf(r, 1)?.en === SHORTFALL.en && cellOf(r, 1)?.ar === SHORTFALL.ar),
+    JSON.stringify(shortRows.map((r) => cellOf(r, 1))),
+  );
+  check(
+    "15e. …each with its OWN method, and never the balance",
+    shortRows.length === 2 &&
+      cellOf(shortRows[0], 3)?.en === TRANSFER.en &&
+      cellOf(shortRows[0], 3)?.ar === TRANSFER.ar &&
+      cellOf(shortRows[1], 3)?.en === CASH.en &&
+      cellOf(shortRows[1], 3)?.ar === CASH.ar,
+    JSON.stringify(shortRows.map((r) => cellOf(r, 3))),
+  );
+
+  // (c) OF THE RULING — the legacy row is untouched. It has no balance draw
+  // to hand its label to: a pre-0203 invoice was settled on its own row, so
+  // "Invoice paid" is still the only true thing to say about it.
+  const legacyRows = rowsBy("payment-inv-1");
+  check(
+    "15f. the LEGACY paid invoice still says 'Invoice paid' — unchanged",
+    legacyRows.length === 1 &&
+      cellOf(legacyRows[0], 1)?.en === INVOICE_PAID.en &&
+      cellOf(legacyRows[0], 1)?.ar === INVOICE_PAID.ar,
+    JSON.stringify(legacyRows.map((r) => cellOf(r, 1))),
+  );
+
+  // THE DOCUMENT SAYS IT TOO. The view model is only half the claim — these
+  // words have to survive onto the sheet the customer receives, in both
+  // languages, or the pins above guard a structure nobody reads.
+  const docAll = documentText(buildStatementHtml(vmAll));
+  check(
+    "15g. the document prints both Type labels, in both languages",
+    [INVOICE_PAID.en, INVOICE_PAID.ar, SHORTFALL.en, SHORTFALL.ar].every((w) => docAll.includes(w)),
+  );
+  check(
+    "15h. …and the balance Method beside the draw",
+    docAll.includes(BALANCE.en) && docAll.includes(BALANCE.ar),
+  );
+
+  // THE CONTROL. Every assertion above is an equality against a dictionary
+  // value, so all of them stay green if the row set is empty or the cells
+  // stop being bilingual. Require the three kinds to be present and distinct,
+  // and the one row that must NOT have moved to still be there.
+  check(
+    "15i. CONTROL: all three row kinds are on this one statement",
+    drawRows.length === 1 && shortRows.length === 2 && legacyRows.length === 1,
+    `draw ${drawRows.length}, shortfall ${shortRows.length}, legacy ${legacyRows.length}`,
+  );
+  check(
+    "15j. CONTROL: 'Shortfall payment' appears nowhere on a statement with no such payment",
+    !documentText(htmlPrepaid).includes(SHORTFALL.en) && !documentText(htmlPrepaid).includes(SHORTFALL.ar),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 16. ONE SETTLEMENT, TWO ROWS, SIDE BY SIDE
+// ---------------------------------------------------------------------------
+// Settling one invoice can produce two rows — the balance draw, then the cash
+// covering what the balance could not — and Mark Paid writes them seconds
+// apart. They must READ as a pair.
+//
+// THEY DID NOT. The two halves sat in separate rank classes (ledger 0,
+// payments 3) with every trip delivered that day ordered between them, so on
+// a busy day one settlement was dozens of rows apart while two UNRELATED
+// invoices' payments ended up adjacent at the bottom of the table, looking
+// like a pair with mismatched invoice numbers. That is a live report, not a
+// hypothetical: on a ~40-truck fleet a delivery day sits under nearly every
+// settlement.
+//
+// Both halves carry a real created_at, so the fix is chronology: rank 0 holds
+// every TIMED money row. This pins the outcome from both directions — the
+// halves of one settlement adjacent, AND the halves of DIFFERENT settlements
+// not adjacent, which is the failure that produced the report.
+// ---------------------------------------------------------------------------
+console.log("\n=== 16. A settlement's two halves sit together ===");
+{
+  const DAY = "2026-06-15";
+  const pairTrips: ConsumingTrip[] = Array.from({ length: 5 }, (_, i) => ({
+    id: `pt${i}`,
+    trip_date: DAY,
+    delivered_at: `${DAY}T09:00:00Z`,
+    rate_sar: RATE,
+    ref: `K1-026-090${i}`,
+    water_type: "potable",
+  }));
+  // Two settlements on ONE day, each a draw then its shortfall, written
+  // seconds apart the way Mark Paid writes them.
+  const vmPair = buildStatementVm({
+    ...basePrepaid,
+    trips: pairTrips,
+    ledger: [
+      { id: "ld-A", entry_type: "balance_applied", amount_sar: -400, doc_number: null,
+        invoice_number: "026-000111", method: null, reference: null, note: null,
+        created_at: `${DAY}T10:00:00Z` },
+      { id: "ld-B", entry_type: "balance_applied", amount_sar: -250, doc_number: null,
+        invoice_number: "026-000222", method: null, reference: null, note: null,
+        created_at: `${DAY}T14:00:00Z` },
+    ],
+    invoicePayments: [
+      { id: "ip-A", invoice_id: "iA", invoice_number: "026-000111", amount_sar: 100,
+        method: "cash", reference: null, paid_on: null, note: null,
+        created_at: `${DAY}T10:00:08Z` },
+      { id: "ip-B", invoice_id: "iB", invoice_number: "026-000222", amount_sar: 75,
+        method: "bank_transfer", reference: "TRF-7", paid_on: null, note: null,
+        created_at: `${DAY}T14:00:05Z` },
+    ],
+  });
+  const at = (k: string) => vmPair.rows.findIndex((r) => r.key === k);
+  const iDrawA = at("ledger-ld-A");
+  const iPayA = at("invoice-payment-ip-A");
+  const iDrawB = at("ledger-ld-B");
+  const iPayB = at("invoice-payment-ip-B");
+
+  check(
+    "16a. every row of both settlements is on the statement",
+    [iDrawA, iPayA, iDrawB, iPayB].every((i) => i >= 0),
+    `draw A ${iDrawA}, pay A ${iPayA}, draw B ${iDrawB}, pay B ${iPayB}`,
+  );
+  check(
+    "16b. invoice A's shortfall sits IMMEDIATELY under its balance draw",
+    iPayA === iDrawA + 1,
+    `draw at ${iDrawA}, payment at ${iPayA}`,
+  );
+  check(
+    "16c. …and invoice B's under its own",
+    iPayB === iDrawB + 1,
+    `draw at ${iDrawB}, payment at ${iPayB}`,
+  );
+  // THE REPORTED FAILURE, INVERTED. Two unrelated payments landing next to
+  // each other is what made one look like the other's pair.
+  check(
+    "16d. the two invoices' payments are NOT adjacent to each other",
+    Math.abs(iPayA - iPayB) > 1,
+    `A at ${iPayA}, B at ${iPayB}`,
+  );
+  check(
+    "16e. no delivered trip is ordered between a draw and its shortfall",
+    vmPair.rows.slice(iDrawA, iPayA + 1).every((r) => r.kind !== "trip") &&
+      vmPair.rows.slice(iDrawB, iPayB + 1).every((r) => r.kind !== "trip"),
+  );
+  // …while the trips are still on the statement, so "no trip between them" is
+  // not being satisfied by a statement that lost its trips.
+  check(
+    "16f. CONTROL: the day's trips are all still there, after the money rows",
+    vmPair.rows.filter((r) => r.kind === "trip").length === pairTrips.length &&
+      vmPair.rows.findIndex((r) => r.kind === "trip") > iPayB,
+  );
+  // CHRONOLOGY, not invoice grouping: the earlier settlement comes first.
+  check(
+    "16g. the two settlements are in the order they happened",
+    iDrawA < iDrawB,
+  );
+  // And the running balance still closes where the view says it does — the
+  // reorder moved rows, not money.
+  check(
+    "16h. reordering moved no money: the headline is still the view's figure",
+    vmPair.headline.value === LEDGER_BALANCE,
+    `${vmPair.headline.value} vs ${LEDGER_BALANCE}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 17. COLOUR FOLLOWS THE LABEL, and the note is readable
+// ---------------------------------------------------------------------------
+// `kind` is the view-model's one instruction to a renderer about INK, and the
+// screen turns "settlement" into a green tint plus green text — the treatment
+// management scans a long statement for. So every row that says an invoice was
+// paid has to carry it, and a row that says something else must not.
+//
+// This went wrong once already: moving the "Invoice paid" label onto the
+// balance draw left the label green on the cash rows and grey on the draw, so
+// one table had two rows saying "Invoice paid" in two different colours.
+// ---------------------------------------------------------------------------
+console.log("\n=== 17. Row kind matches the Type label it is inking ===");
+{
+  const DAY = "2026-06-15";
+  const vmInk = buildStatementVm({
+    ...basePrepaid,
+    trips: [],
+    payments,
+    ledger: [
+      { id: "ik-draw", entry_type: "invoice_draw", amount_sar: -400, doc_number: null,
+        invoice_number: "026-000111", method: null, reference: null, note: null,
+        created_at: `${DAY}T10:00:00Z` },
+      { id: "ik-appl", entry_type: "balance_applied", amount_sar: -250, doc_number: null,
+        invoice_number: "026-000222", method: null, reference: null,
+        note: "A note long enough that the statement's ten-rem Note column clips it",
+        created_at: `${DAY}T11:00:00Z` },
+    ],
+    invoicePayments: partialPayments,
+  });
+  const kindOfKey = (k: string) => vmInk.rows.find((r) => r.key === k)?.kind ?? "MISSING";
+
+  check(
+    "17a. the balance draw that says 'Invoice paid' is inked as a settlement",
+    kindOfKey("ledger-ik-appl") === "settlement",
+    kindOfKey("ledger-ik-appl"),
+  );
+  check(
+    "17b. so is the LEGACY paid invoice, which says the same words",
+    kindOfKey("payment-inv-1") === "settlement",
+    kindOfKey("payment-inv-1"),
+  );
+  check(
+    "17c. …and every shortfall payment",
+    vmInk.rows.filter((r) => r.key.startsWith("invoice-payment-")).every((r) => r.kind === "settlement"),
+  );
+  // THE OTHER SIDE. "Invoice draw" is the 0203 debit at confirm — reversible
+  // by a void, and not a claim that anything was settled — so it must NOT
+  // borrow the settled-invoice ink. Without this the check above is satisfied
+  // by tinting every ledger row green.
+  check(
+    "17d. CONTROL: 'Invoice draw' is NOT inked as a settlement",
+    kindOfKey("ledger-ik-draw") === "charge",
+    kindOfKey("ledger-ik-draw"),
+  );
+
+  // THE NOTE COLUMN TRUNCATES on screen (StatementModal's tdCls), so a long
+  // note is clipped at an ellipsis with nowhere to go. The popup carries the
+  // full text in a `title`, which is the only way to reach it there. Source
+  // scan, because there is no DOM here — same instrument, and same limits, as
+  // case 11's print-path checks.
+  const modalCode = stripComments(
+    readFileSync(path.join(repoRoot, "app/trips/StatementModal.tsx"), "utf8"),
+    "ts",
+  );
+  check(
+    "17e. the Note column still truncates (which is what makes the hover necessary)",
+    /case "note":\s*return "max-w-\[10rem\] truncate"/.test(modalCode),
+  );
+  check(
+    "17f. …and the full note is offered on hover, from the same cell",
+    /colKey !== "note"/.test(modalCode) && /<span title=\{full\}>/.test(modalCode),
+  );
+}
 
 console.log(failures === 0 ? "\nAll statement parity checks passed." : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

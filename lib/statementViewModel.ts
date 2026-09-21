@@ -550,29 +550,59 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
     const items = consumingItems(trips, chargeInputs);
 
     // ONE LIST, FIVE SOURCES. `rank` is the same-date tiebreak and it is
-    // ordered the way an account actually reads: the money movement first,
-    // then the work it paid for, then the charges, then what was settled
-    // against an invoice. `tie` is the last resort so the order is total and
-    // therefore stable run to run — a statement that reshuffles two same-day
-    // rows between renders is a statement nobody can reconcile.
+    // ordered the way an account reads: money movements first, then the work
+    // they paid for, then the charges, then a legacy whole-invoice settlement.
+    // `tie` is the last resort so the order is total and therefore stable run
+    // to run — a statement that reshuffles two same-day rows between renders
+    // is a statement nobody can reconcile.
     //
-    // THE TWO SETTLEMENT RANKS ARE SEPARATE (3 then 4) even though only one of
-    // them can be populated for any given invoice. They are ordered rather
-    // than merged so that the total order does not depend on comparing a
-    // payment id against an invoice id — two id spaces whose interleaving
-    // means nothing to a reader.
+    // A SETTLEMENT'S TWO HALVES SHARE RANK 0 AND SORT BY THE CLOCK, which is
+    // what keeps them next to each other on the page. Settling one invoice can
+    // produce two rows — the balance draw, then the cash or transfer covering
+    // what the balance could not — and Mark Paid writes them seconds apart.
+    // They used to sit in separate rank classes (0 and 3) with every trip
+    // delivered that day in between, so on a busy day the two halves of one
+    // settlement were dozens of rows apart while two unrelated invoices'
+    // payments ended up adjacent, looking like a pair. On a ~40-truck fleet
+    // that is the ordinary case, not an edge one.
+    //
+    // Both halves carry a real `created_at`, so the fix is chronology rather
+    // than grouping machinery: rank 0 holds every TIMED money row and orders
+    // them by the instant they happened. Nothing has to know which payment
+    // belongs to which draw — written seconds apart, they land together.
+    //
+    // TRIPS AND CHARGES KEEP THEIR OWN RANKS because they are dated but not
+    // timed (a delivery has a day, not a clock reading), so they cannot join a
+    // chronological class without inventing a time for them.
+    //
+    // LEGACY WHOLE-INVOICE ROWS STAY AT RANK 4. A pre-0203 invoice was settled
+    // on its own row and has no balance draw to sit beside, so moving it would
+    // buy no adjacency and would reorder statements that are already issued.
     type PrepaidEvent =
       | { date: string; rank: 0; tie: string; src: "ledger"; entry: StatementLedgerEntry }
       | { date: string; rank: 1 | 2; tie: string; src: "item"; item: ConsumedItem }
-      | { date: string; rank: 3; tie: string; src: "invoicePayment"; payment: StatementInvoicePaymentInput }
+      | { date: string; rank: 0; tie: string; src: "invoicePayment"; payment: StatementInvoicePaymentInput }
       | { date: string; rank: 4; tie: string; src: "payment"; payment: StatementPaymentInput };
+
+    // THE SORT KEY FOR A TIMED MONEY ROW. Two ISO-8601 strings from one column
+    // compare correctly as text, but these two reach this module through
+    // different readers and different queries — so the instant is normalised
+    // before it is compared. "+00:00" and "Z" on the same moment are different
+    // strings, and comparing them raw would interleave two rows by their
+    // punctuation. The id is appended so the order is TOTAL: two rows written
+    // in the same millisecond still have one stable order rather than relying
+    // on the input order surviving the sort.
+    const moneyTie = (iso: string, id: string): string => {
+      const ms = Date.parse(iso);
+      return `${Number.isNaN(ms) ? iso : new Date(ms).toISOString()}|${id}`;
+    };
 
     const events: PrepaidEvent[] = [
       ...ledger.map(
         (e): PrepaidEvent => ({
           date: e.created_at.slice(0, 10),
           rank: 0,
-          tie: e.created_at,
+          tie: moneyTie(e.created_at, e.id),
           src: "ledger",
           entry: e,
         }),
@@ -599,8 +629,13 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
       ...invoicePayments.map(
         (p): PrepaidEvent => ({
           date: invoicePaymentDateOf(p),
-          rank: 3,
-          tie: p.id,
+          rank: 0,
+          // THE ROW IS DATED BY `paid_on` AND ORDERED BY `created_at`, and the
+          // two can disagree: a transfer keyed in today for money that moved
+          // last week belongs on last week's date. It then sorts after that
+          // day's other money rows, which is both deterministic and honest —
+          // it is the last thing we learned about that day.
+          tie: moneyTie(p.created_at, p.id),
           src: "invoicePayment",
           payment: p,
         }),
@@ -648,25 +683,48 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
 
     // Entry type -> the row's STYLING kind. Reuses the union the renderers
     // already switch over exhaustively, so no renderer needs a new arm:
-    //   money in  (topup)                    -> "topup"    (green)
-    //   money back to customer (refund)      -> "return"   (amber)
-    //   money drawn (invoice_draw /
-    //                balance_applied)        -> "charge"   (muted)
-    //   money restored (draw_reversal)       -> "payment"  (green)
+    //   money in  (topup)                    -> "topup"      (green)
+    //   money back to customer (refund)      -> "return"     (amber)
+    //   an invoice settled from the balance
+    //            (balance_applied)           -> "settlement" (green)
+    //   money drawn at confirm (invoice_draw)-> "charge"      (muted)
+    //   money restored (draw_reversal)       -> "payment"     (green)
     //   correction                           -> by its sign
+    //
+    // COLOUR FOLLOWS THE LABEL. `balance_applied` reads "Invoice paid", and a
+    // settled invoice is the thing management scans a long statement for — the
+    // same reason the cash and transfer rows beside it are tinted. Leaving it
+    // in the muted charge ink meant two rows saying "Invoice paid" rendered
+    // differently, one grey and one green, on one table.
+    //
+    // `invoice_draw` STAYS MUTED, and the pair is deliberate: it reads
+    // "Invoice draw", which is what it is — the 0203 law's debit at confirm,
+    // taken before anything was settled and reversible by a void. Tinting it
+    // would promise a settlement the row does not claim.
     const kindOf = (e: StatementLedgerEntry): StatementRow["kind"] =>
       e.entry_type === "topup"
         ? "topup"
         : e.entry_type === "refund"
           ? "return"
-          : e.entry_type === "draw_reversal"
-            ? "payment"
-            : e.entry_type === "correction"
-              ? e.amount_sar > 0
-                ? "payment"
-                : "charge"
-              : "charge";
+          : e.entry_type === "balance_applied"
+            ? "settlement"
+            : e.entry_type === "draw_reversal"
+              ? "payment"
+              : e.entry_type === "correction"
+                ? e.amount_sar > 0
+                  ? "payment"
+                  : "charge"
+                : "charge";
 
+    // A BALANCE DRAW IS THE INVOICE BEING PAID, and the statement says so in
+    // those words (Turki's ruling). It used to read "Balance applied", which
+    // names the MECHANISM — true, and not what the customer is looking for:
+    // on a statement the event is that an invoice got settled, and the
+    // mechanism belongs in the Method column beside it, which now carries it.
+    //
+    // "Balance applied" survives where it is still the right words — the
+    // ledger drill-in (app/trips/CustomerLedgerModal.tsx), which lists ledger
+    // rows AS ledger rows and has no invoice-centred reading to offer.
     const typeKeyOf = (e: StatementLedgerEntry): TKey =>
       e.entry_type === "topup"
         ? "trips.finance.addBalance"
@@ -675,7 +733,7 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
           : e.entry_type === "invoice_draw"
             ? "trips.statement.typeInvoiceDraw"
             : e.entry_type === "balance_applied"
-              ? "trips.statement.typeBalanceApplied"
+              ? "trips.statement.typeInvoicePayment"
               : e.entry_type === "draw_reversal"
                 ? "trips.statement.typeDrawReversal"
                 : "trips.statement.typeCorrection";
@@ -703,16 +761,50 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
             ? { kind: "text", value: e.invoice_number }
             : EMPTY;
 
-        // METHOD — only rows where money physically changed hands carry one.
-        const methodCell: StatementCell = e.method
-          ? {
-              kind: "bi",
-              value: {
-                en: paymentMethodLabel(e.method as InvoicePaymentMethod, "en"),
-                ar: paymentMethodLabel(e.method as InvoicePaymentMethod, "ar"),
-              },
-            }
-          : EMPTY;
+        // METHOD — only rows where money physically changed hands carry one,
+        // PLUS the balance draw, whose Type says the invoice was PAID and so
+        // has to say what paid it.
+        //
+        // ITS METHOD IS NOT IN THE `method` COLUMN, and cannot be:
+        // apply_balance_to_invoice() writes customer_id, entry_type, amount,
+        // invoice_id, note and created_by, and nothing else (0204), so the
+        // column is null on every one of these rows. It is null because the
+        // route IS the balance — there was no cash and no bank to name. That
+        // makes the label a property of the ENTRY TYPE rather than of the
+        // row's data, which is why it is decided here instead of read.
+        //
+        // Same leaf the legacy flow prints for the same act (`payment_method`
+        // = 'balance' on a pre-0203 invoice), so one column cannot end up
+        // using two words for one thing as the old invoices age out.
+        //
+        // `invoice_draw` IS DELIBERATELY NOT INCLUDED, though it is the same
+        // act under the 0203 law. Its Type already reads "Invoice draw" — a
+        // draw is from the balance by definition, so the caption would repeat
+        // what the row has already said. It is not free repetition either:
+        // this label is a two-line bilingual cell in a narrow column, and a
+        // 0203-era statement is mostly draw rows. The page proof measured it
+        // at two extra A4 pages on a 140-draw statement, paid for a word the
+        // reader already had. `draw_reversal` is out for a different reason —
+        // it is an undo, not a payment, and a payment method beside it would
+        // read as a second draw.
+        const methodCell: StatementCell =
+          e.entry_type === "balance_applied"
+            ? {
+                kind: "bi",
+                value: {
+                  en: paymentMethodLabel("balance", "en"),
+                  ar: paymentMethodLabel("balance", "ar"),
+                },
+              }
+            : e.method
+              ? {
+                  kind: "bi",
+                  value: {
+                    en: paymentMethodLabel(e.method as InvoicePaymentMethod, "en"),
+                    ar: paymentMethodLabel(e.method as InvoicePaymentMethod, "ar"),
+                  },
+                }
+              : EMPTY;
 
         // NOTE — the row's note, else its bank reference, else blank.
         const noteCell: StatementCell = e.note
@@ -788,13 +880,25 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
         };
       }
 
-      // AN INVOICE PAYMENT — one `invoice_payments` row, which since 0204 is
-      // normally one instalment of several. Money arriving FOR an invoice
+      // A SHORTFALL PAYMENT — one `invoice_payments` row: cash or a transfer
+      // arriving for an invoice the balance could not cover, which since 0204
+      // is normally one instalment of several. Money arriving FOR an invoice
       // rather than INTO the balance: recorded, never deducted, which is
       // exactly why `recordOnly` is true and the running balance holds flat
       // across it. `runCell` carries the figure forward unchanged, so two
       // partial payments on one invoice can never move the closing balance
       // away from the headline the view publishes.
+      //
+      // IT IS NOT "INVOICE PAID", and the distinction is the customer's, not
+      // ours (Turki's ruling). This money settles what the balance left over;
+      // the invoice being paid is the balance draw above it, which now carries
+      // that label. Calling both rows the same thing told a customer reading
+      // one settlement that two invoices had been paid.
+      //
+      // The METHOD is the payment's own and always a real one — cash or bank
+      // transfer, the only two record_invoice_payment() accepts (a balance
+      // route goes through the other door entirely). The null arm below is
+      // defensive, not a case the RPC can produce.
       //
       // The AMOUNT is the payment's own, not the invoice's total — the
       // distinction this row exists to make.
@@ -806,7 +910,7 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
           recordOnly: true,
           cells: [
             { kind: "date", value: ev.date },
-            { kind: "bi", value: bi("trips.statement.typeInvoicePayment") },
+            { kind: "bi", value: bi("trips.statement.typeShortfallPayment") },
             // REF is the invoice this money settled — the document the
             // customer is reconciling against. Its own payment id is
             // machinery and appears nowhere.

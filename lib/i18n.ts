@@ -10374,11 +10374,24 @@ export const dict = {
       // before it says anything about the water. Wording borrowed from
       // `notifications.trip_delivered`, not coined.
       typeDelivery: { en: "Trip delivered", ar: "رحلة مسلَّمة" },
-      // The invoice-payment row's Type cell on the prepaid statement — money
-      // paid straight against an invoice rather than into the held balance.
-      // Distinct from `typeSettlement` above, which names the invoice DOCUMENT
-      // being recorded; this names the money arriving for it.
+      // THE INVOICE BEING SETTLED, on the prepaid statement. Two different
+      // rows can settle one invoice and they are NOT the same event to the
+      // customer reading them (Turki's ruling):
+      //
+      //   typeInvoicePayment  — the balance draw. This IS the invoice being
+      //                         paid, and the Method column beside it says
+      //                         what paid it. Also worn by a LEGACY pre-0203
+      //                         invoice, which was settled on its own row and
+      //                         has no draw to point at.
+      //   typeShortfallPayment — cash or a transfer covering what the balance
+      //                         could not. It settles a shortfall, not the
+      //                         invoice, and saying otherwise made one
+      //                         settlement read as two invoices paid.
+      //
+      // Sentence case, like every other Type leaf in this block — the column
+      // is a list of events, not a set of headings.
       typeInvoicePayment: { en: "Invoice paid", ar: "فاتورة مدفوعة" },
+      typeShortfallPayment: { en: "Shortfall payment", ar: "سداد الفرق" },
       // The settlement row's Note cell — says WHAT the invoice was settled
       // against, not the balance figure itself.
       noteBalance: { en: "Balance", ar: "الرصيد" },
