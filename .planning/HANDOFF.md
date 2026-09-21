@@ -1,12 +1,12 @@
 # SESSION HANDOFF
 
 ## State
-- **main = 757ad4a. DB at 0205** (prod + test). prepaid-adjustments merged
-  ff, branch kept. Gates green on main.
-- **0204 law:** confirm moves NO money — freezes amount_payable = grand_total.
+- **main = 5d5fa6d. DB at 0205** (prod + test). prepaid-adjustments merged
+  and deleted; work on prepaid-legacy-removal. Gates green.
+- **0204:** confirm moves NO money — freezes amount_payable = grand_total.
   record_refund SEVEN args (p_photo_path 5th); 6-arg DROPPED; its proof
   guard precedes the Available cap, so cap tests use cash.
-- **Mark Paid** is the ONE settlement action. Prepaid draw =
+- **Mark Paid** = the ONE settlement action. Prepaid draw =
   min(Available + remainder, remainder) — ADD-BACK load-bearing. Shortfall
   opens the cash form.
 - **0205:** four *_ledger_balance/remaining DROPPED, confirm_invoice 21 args
@@ -20,8 +20,8 @@
   walks it in SQL.
 - **Sources:** invoice_payments 5th; 0204 doors DISJOINT, no de-dup;
   `payments` LEGACY-ONLY; TIMED rows sort created_at, rank 0.
-- **Trip rows say paid/unpaid** (invoiceLocked). Label = stem + tail; screen
-  inks the TAIL only, paper carries it in words (monochrome by design).
+- **Trips say paid/unpaid** (invoiceLocked). Label = stem + tail; screen inks
+  the TAIL only, paper carries it in words (monochrome by design).
 - **ONE uninvoiced count** — fetchUninvoicedTripCounts; invoiceLocked is
   status='paid', never count with it.
 - **hide-from-customer** omits the trips section WHOLE on print/PDF.
@@ -31,7 +31,7 @@
 
 ## Rules
 - **NEVER build into .next while dev is up** — `npm run build` REFUSES via
-  scripts/safe-build.sh; use `npm run build:verify`.
-- CLAUDE.md + aquafleet-domain/SKILL.md = rules. NEVER append.
+  safe-build.sh; use `npm run build:verify`.
+- CLAUDE.md + domain SKILL.md = rules. NEVER append.
 - Migration gate: draft, STOP, review. Cap 15 turns.
-- This file stays under 2KB. If larger, Code is appending diary.
+- Stays under 2KB. If larger, Code is appending diary.
