@@ -4378,7 +4378,7 @@ export const dict = {
         meaning: { en: "What the customer still owes for work already provided: delivered trips and special charges not yet on a PAID invoice.", ar: "ما يزال العميل مدينًا به مقابل عمل تم تنفيذه بالفعل: الرحلات المسلَّمة والرسوم الخاصة التي لم تُدرَج بعد في فاتورة مدفوعة." },
         formula: { en: "computeAmountPayable in app/trips/amountPayable.ts: derivedBalanceItems run with an EMPTY credits side over the delivered trips and non-void special charges that are not on a paid invoice, VAT-inclusive at the project rate. Negative means owed to us, zero means settled; <= 0 by construction.", ar: "الدالة computeAmountPayable في app/trips/amountPayable.ts: تشغيل derivedBalanceItems بجانب دائن فارغ على الرحلات المسلَّمة والرسوم الخاصة غير الملغاة التي ليست على فاتورة مدفوعة، شاملة الضريبة بسعر المشروع. والسالب يعني مستحقًا لنا، والصفر يعني مسدَّدًا؛ وهو ≤ 0 بحكم تكوينه." },
         grain: { en: "one customer, at an instant", ar: "عميل واحد، في لحظة بعينها" },
-        caveat: { en: "One rule for BOTH payment modes. Only marking an invoice PAID reduces it — a prepaid top-up does not, because a deposit funds the work rather than settling it. That is true by construction: the credits side is passed empty. paid-up = running - payable, so a customer can hold pool credit and owe here at the same time; that is the model, not a discrepancy. DO NOT read this from v_customer_amount_payable: for a prepaid customer that view returns the RUNNING BALANCE, not this column, and the divergence is deliberate because return_customer_balance() gates a real cash refund on it. Not a period measure and not a view.", ar: "قاعدة واحدة لطريقتَي الدفع كلتيهما. ولا يقلّ هذا المبلغ إلا بتحديد الفاتورة كمدفوعة — أما إضافة رصيد مقدم فلا تقلّله، لأن الإيداع يموّل العمل ولا يسدده. وذلك صحيح بحكم التكوين: فالجانب الدائن يُمرَّر فارغًا. والمعادلة: الرصيد المسدَّد = الرصيد الجاري - المبلغ الواجب السداد، فقد يحمل العميل رصيدًا في الحوض ويكون مدينًا هنا في الوقت نفسه؛ وذلك هو النموذج لا تعارضًا فيه. ولا يُقرأ هذا الرقم من v_customer_amount_payable: فذلك العرض يُرجع لعميل الدفع المقدم الرصيد الجاري لا هذا العمود، والاختلاف مقصود لأن return_customer_balance() تعتمد عليه في ضبط استرداد نقدي حقيقي. وهو ليس مقياس فترة ولا عرضًا." },
+        caveat: { en: "Only marking an invoice PAID reduces it — a deposit funds work rather than settling it, so nothing else moves this figure. Since the ledger cutover it renders for POSTPAID (and unset) customers only: a prepaid row shows no Amount Payable, because Available answers that question. Not a period measure and not a view.", ar: "لا يقلّ هذا المبلغ إلا بتحديد الفاتورة كمدفوعة — فالإيداع يموّل العمل ولا يسدده، فلا شيء غير ذلك يحرّك هذا الرقم. ومنذ الانتقال إلى الدفتر يظهر لعملاء الدفع الآجل (وغير المحدد) فقط: فصف الدفع المقدم لا يعرض مبلغًا واجب السداد، لأن «المتاح» يجيب عن ذلك السؤال. وهو ليس مقياس فترة ولا عرضًا." },
       },
       collections: {
         meaning: { en: "Value of invoices settled in the month — marked paid, whatever settled them.", ar: "قيمة الفواتير التي سُدِّدت خلال الشهر — أي حُدِّدت مدفوعة، أيًّا كان ما سدَّدها." },
@@ -4512,10 +4512,10 @@ export const dict = {
       },
       paid_up_balance: {
         label: { en: "Paid-up balance", ar: "الرصيد المسدَّد" },
-        meaning: { en: "A prepaid customer's deposits minus what PAID invoices have settled, minus refunds. Not the spendable pool.", ar: "إيداعات عميل الدفع المقدم ناقص ما سدّدته الفواتير المدفوعة، ناقص المبالغ المستردة. وليس الرصيد القابل للإنفاق." },
-        formula: { en: "paidUpCore in lib/prepaid.ts: sum of customer_topups, minus the consumption settled by invoices whose status is paid, minus customer_balance_returns. Deducts at PAYMENT, not at delivery.", ar: "الدالة paidUpCore في lib/prepaid.ts: مجموع customer_topups، ناقص الاستهلاك الذي سدّدته الفواتير التي حالتها مدفوعة، ناقص customer_balance_returns. تُخصم عند الدفع لا عند التسليم." },
+        meaning: { en: "A prepaid customer's ledger balance: money put on account minus what settlements and refunds have taken out. Not the spendable figure — that is Available.", ar: "رصيد دفتر عميل الدفع المقدم: ما أُودع في الحساب ناقص ما أخذته التسويات والمبالغ المستردة. وليس الرقم القابل للإنفاق — فذلك هو المتاح." },
+        formula: { en: "v_customer_ledger_balance.balance_sar: the sum of the customer's customer_ledger rows — top-ups and corrections in; balance draws, applied balance and refunds out. Deducts at SETTLEMENT, not at delivery.", ar: "العمود balance_sar من العرض v_customer_ledger_balance: مجموع صفوف customer_ledger للعميل — الشحن والتصحيحات دخولًا؛ والسحوبات والرصيد المطبَّق والمبالغ المستردة خروجًا. تُخصم عند التسوية لا عند التسليم." },
         grain: { en: "one customer, at an instant", ar: "عميل واحد، في لحظة بعينها" },
-        caveat: { en: "Not a period measure and not a view: it is computed in the app, per customer, for the instant you are looking at. paid-up = running - payable, so this is the running balance with the not-yet-settled work added back. A customer can hold pool credit and still owe on Amount Payable at the same time; that is the model, not a discrepancy. Prepaid only — a postpaid customer has no pool. Never place it in a period column or on a monthly trend line.", ar: "ليس مقياس فترة ولا عرضًا: فهو يُحسب داخل التطبيق، لكل عميل، للحظة التي تنظر فيها. والمعادلة: الرصيد المسدَّد = الرصيد الجاري - المبلغ الواجب السداد، أي أنه الرصيد الجاري مضافًا إليه العمل الذي لم يُسدَّد بعد. وقد يحمل العميل رصيدًا في الحوض ويكون مدينًا بالمبلغ الواجب السداد في الوقت نفسه؛ وذلك هو النموذج لا تعارضًا فيه. وهو مقصور على الدفع المقدم — فعميل الدفع الآجل بلا حوض رصيد. ولا يوضع أبدًا في عمود فترة ولا على خط اتجاه شهري." },
+        caveat: { en: "Not a period measure and not app-computed: it is the ledger view's own column, per customer, for the instant you are looking at. The spendable figure is Available — balance minus uninvoiced work minus confirmed unsettled invoices — which is always at or below this. Prepaid only — a postpaid customer has no ledger. Never place it in a period column or on a monthly trend line.", ar: "ليس مقياس فترة ولا يُحسب داخل التطبيق: فهو عمود عرض الدفتر نفسه، لكل عميل، للحظة التي تنظر فيها. أما الرقم القابل للإنفاق فهو المتاح — الرصيد ناقص العمل غير المفوتر ناقص الفواتير المؤكَّدة غير المسوّاة — وهو دائمًا عند هذا الرقم أو دونه. وهو مقصور على الدفع المقدم — فعميل الدفع الآجل بلا دفتر. ولا يوضع أبدًا في عمود فترة ولا على خط اتجاه شهري." },
       },
       parts_cost_at_consumption: {
         meaning: { en: "The FIFO cost of parts that left stock for good — maintenance draws plus PERMANENT non-maintenance exits.", ar: "تكلفة FIFO للقطع التي خرجت من المخزون نهائيًا — مسحوبات الصيانة زائد الخروج الدائم لغير الصيانة." },
@@ -4545,14 +4545,14 @@ export const dict = {
       receivables_aging: {
         label: { en: "Receivables aging", ar: "أعمار الذمم المدينة" },
         meaning: { en: "How long outstanding invoices have been waiting, in 30-day bands.", ar: "منذ متى تنتظر الفواتير غير المسدَّدة، في شرائح من 30 يومًا." },
-        formula: { en: "v_receivables_open bucketed by days since confirmed_at into 0-30, 31-60, 61-90 and 90+.", ar: "v_receivables_open موزَّعًا حسب الأيام منذ confirmed_at إلى شرائح 0-30 و31-60 و61-90 و90+." },
+        formula: { en: "v_receivables_open — each open invoice's settlement remainder — bucketed by days since confirmed_at into 0-30, 31-60, 61-90 and 90+.", ar: "العرض v_receivables_open — متبقي التسوية لكل فاتورة مفتوحة — موزَّعًا حسب الأيام منذ confirmed_at إلى شرائح 0-30 و31-60 و61-90 و90+." },
         grain: { en: "one aging band", ar: "شريحة عمرية واحدة" },
         caveat: { en: "Ages from confirmation, because that is when the invoice became a claim. There are no payment-terms columns in this schema to age from a due date.", ar: "يُحسب العمر من التأكيد، لأن ذلك هو وقت نشوء المطالبة. ولا توجد أعمدة لشروط السداد في هذا المخطط ليُحسب العمر من تاريخ استحقاق." },
       },
       receivables_outstanding: {
         label: { en: "Outstanding receivables", ar: "الذمم المدينة القائمة" },
         meaning: { en: "Money invoiced and confirmed but not yet paid, as of right now.", ar: "أموال فوترت وأُكِّدت ولم تُدفع بعد، كما هي الآن." },
-        formula: { en: "Sum of amount_due_sar over invoices confirmed, unpaid, not voided, with amount_due_sar > 0.", ar: "مجموع amount_due_sar للفواتير المؤكَّدة غير المدفوعة وغير الملغاة التي amount_due_sar فيها > 0." },
+        formula: { en: "Sum of v_invoice_outstanding_live.outstanding_sar over open invoices — the settlement remainder (amount payable minus invoice payments minus applied balance) for ledger-era invoices, the frozen amount due for legacy ones.", ar: "مجموع outstanding_sar من العرض v_invoice_outstanding_live للفواتير المفتوحة — وهو متبقي التسوية (المبلغ الواجب السداد ناقص دفعات الفاتورة ناقص الرصيد المطبَّق) لفواتير عهد الدفتر، والمبلغ المستحق المجمَّد للفواتير القديمة." },
         grain: { en: "current state", ar: "المركز الحالي" },
         caveat: { en: "A statement about today, not about a period. It does not belong on a monthly trend line.", ar: "تصريح عن اليوم لا عن فترة. ولا مكان له على خط اتجاه شهري." },
       },
@@ -4579,7 +4579,7 @@ export const dict = {
       topups: {
         label: { en: "Prepaid top-ups", ar: "شحن الأرصدة المقدمة" },
         meaning: { en: "Money prepaid customers put on account, before any invoice consumes it.", ar: "أموال يودعها عملاء الدفع المقدم في حساباتهم، قبل أن تستهلكها أي فاتورة." },
-        formula: { en: "Sum of customer_topups.amount_sar by topup_date month.", ar: "مجموع customer_topups.amount_sar حسب شهر topup_date." },
+        formula: { en: "v_topups_monthly: sum of customer_ledger top-up entries (entry_type = 'topup') by Riyadh month of created_at.", ar: "العرض v_topups_monthly: مجموع قيود الشحن في customer_ledger (entry_type = 'topup') حسب الشهر بتوقيت الرياض من created_at." },
         grain: { en: "one month", ar: "شهر واحد" },
         caveat: { en: "Cash in, but neither revenue nor an invoice payment. Kept separate so it cannot be mistaken for either.", ar: "نقد داخل، لكنه ليس إيرادًا ولا سداد فاتورة. ويُحفظ منفصلًا كي لا يُخلط بأيٍّ منهما." },
       },
@@ -8534,8 +8534,8 @@ export const dict = {
       // The JSX writes `&apos;`, which RENDERS as a bare apostrophe — the
       // English here is the rendered form, not the source form.
       amountNote: {
-        en: "Taken from the customer's balance when this is saved. It is not editable here.",
-        ar: "يُؤخذ من رصيد العميل عند الحفظ. وهو غير قابل للتعديل هنا.",
+        en: "The customer's Available balance — the exact cap the refund is checked against when this is saved. It is not editable here.",
+        ar: "رصيد العميل المتاح — وهو الحد الذي يُتحقق منه الاسترداد عند الحفظ. وغير قابل للتعديل هنا.",
       },
 
       // WHOLE SENTENCES PER STATE, not a stem plus a "(required)" suffix. The
@@ -8556,8 +8556,8 @@ export const dict = {
       // CLIENT-SIDE validation, so it translates. The `res.error` string beside
       // it comes from the server action and stays English this batch.
       validation: {
-        en: "Pick a method and a return date. A bank transfer also needs an ETF ref. number and a photo.",
-        ar: "اختر الطريقة وتاريخ الإعادة. ويحتاج التحويل البنكي أيضًا إلى رقم مرجع وصورة.",
+        en: "Pick a method. A bank transfer also needs an ETF ref. number and a photo.",
+        ar: "اختر الطريقة. ويحتاج التحويل البنكي أيضًا إلى رقم مرجع وصورة.",
       },
       // "Record return" in English here and at `consumption.modals.recordReturn`
       // — and they are NOT one leaf. That one returns PARTS to a warehouse;
@@ -10646,6 +10646,12 @@ export const dict = {
       payableNoMode: {
         en: "No payment mode set — nothing can be claimed.",
         ar: "لم تُحدَّد طريقة الدفع — لا يمكن المطالبة بشيء.",
+      },
+      // The prepaid refusal (0206): the box is deliberately empty, and the
+      // hint says where the answer moved rather than implying a missing mode.
+      payablePrepaid: {
+        en: "Prepaid — Available on the Finance tab answers this.",
+        ar: "دفع مقدم — «المتاح» في تبويب المالية يجيب عن هذا.",
       },
       payableOwed: { en: "Owed to us", ar: "مستحق لنا" },
       payableCredit: { en: "Credit the customer holds", ar: "رصيد لدى العميل" },

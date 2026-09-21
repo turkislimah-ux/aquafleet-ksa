@@ -1515,49 +1515,36 @@ export type ArchiveCustomerRow = {
   created_at: string;
 };
 
-// One row per customer from v_customer_amount_payable (migration 0139) — the
-// single definition of "does this customer owe us, or do we owe them".
+// ARCHIVE FUNDS ROW — composed by app/archive/page.tsx from the LEDGER era's
+// three sources (0206 app cutover): v_customer_available (the money figure),
+// customer_ledger refunds (the Returned mark and its record), and
+// customer_write_offs (the forced-archive audit). It replaced
+// CustomerAmountPayableRow, which read v_customer_amount_payable — a view the
+// receivables stack no longer defines anything by and 0207 drops.
 //
-// SIGN CONVENTION, and it is the whole point of the view:
-//   amount_payable_sar <  0  money owed TO US        -> archiving is BLOCKED
-//   amount_payable_sar == 0  settled                 -> archivable
-//   amount_payable_sar >  0  credit we owe THEM      -> archivable AND returnable
+// SIGN CONVENTION:
+//   available_sar <  0  the customer owes us      -> archiving is BLOCKED
+//   available_sar == 0  settled                   -> archivable
+//   available_sar >  0  credit we owe THEM        -> archivable AND refundable
 //
-// DELIBERATELY NARROWER THAN THE VIEW. The view also publishes customer_name,
-// archived_at, payment_mode, prepaid_balance_sar, postpaid_unpaid_sar, owed_sar
-// and archive_blocked. None of them render on the Archive surface: the tab
-// already holds the customer row (name, archived_at) from its own fetch, a
-// positive amount_payable_sar can only come from the prepaid arm (the postpaid
-// arm is <= 0 by construction), and the block message ProjectModal shows is the
-// text the RPC RAISES, never a figure recomputed here. Carrying a figure nothing
-// renders is how two versions of one number start to drift, and noUnusedLocals
-// cannot catch an unused object FIELD. Widen it when a consumer needs a column.
-export type CustomerAmountPayableRow = {
+// Available, not Balance, on purpose (Turki's ruling): a refund is capped by
+// record_refund at exactly this figure — Balance less delivered-but-unsettled
+// work and the reservation held by confirmed invoices — so the Archive shows
+// the number the refund door will actually honour.
+export type ArchiveCustomerFundsRow = {
   customer_id: string;
-  amount_payable_sar: number;
-  // Balance return (customer_balance_returns). balance_returned is the MARK.
-  //
-  // IT DOES MOVE amount_payable_sar, AS OF 0142 — the note here used to say the
-  // opposite, and that was true only while a refunded customer stayed archived
-  // and inert. A recorded return is now a DEBIT against the prepaid pool in
-  // both the TS engine (lib/prepaid.ts) and v_customer_prepaid_balance, which
-  // this view's prepaid arm reads, so a fully refunded customer computes 0
-  // here. Before 0142 nothing subtracted it and the credit stayed spendable —
-  // the double-spend the netting closes.
-  //
-  // The mark therefore no longer disambiguates a standing figure; it says WHY
-  // the figure fell to zero. Consumers that want the amount handed back read
-  // returned_sar, which the RPC recorded, and never reconstruct it by adding
-  // the refund back onto the payable.
+  available_sar: number;
+  // LEDGER REFUNDS (entry_type = 'refund'). balance_returned marks that at
+  // least one refund exists; returned_sar is the TOTAL handed back (the
+  // ledger allows more than one), method and date are the newest refund's.
+  // Unlike the retired one-row customer_balance_returns model, a partially
+  // refunded customer can hold BOTH a Returned mark and a live available_sar.
   balance_returned: boolean;
-  // The amount the return RPC actually recorded. This is the figure the Archive
-  // tab renders once balance_returned is true (see BalanceWithMark) — a stored
-  // fact, not a derived one.
   returned_sar: number | null;
   returned_method: "cash" | "bank_transfer" | null;
   returned_on: string | null;
-  // Manager override write-off (customer_write_offs) — recorded when an archive
-  // was forced past the debt guard. Audit only; owed_sar is already 0 after it.
+  // Manager override write-off (customer_write_offs, ACTIVE row only) —
+  // recorded when an archive was forced past the debt guard. Audit only.
   is_written_off: boolean;
   written_off_sar: number | null;
   write_off_reason: string | null;

@@ -17,12 +17,9 @@ import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type Spec
 // header of lib/invoice-era.ts.
 import { invoiceEra } from "@/lib/invoice-era";
 import {
-  paidUpBalance,
-  paidUpBalanceAsOf,
   settlementGross,
   type BalanceReturnLite,
   type ConsumingTrip,
-  type PaidConsumedItem,
   type TopupLite,
 } from "@/lib/prepaid";
 import type { Invoice, CompanySettings, Customer, WaterType, PaymentMode } from "@/lib/db-types";
@@ -230,24 +227,33 @@ async function assembleForCustomerPeriod(params: {
     water_type: t.water_type,
   }));
 
-  const { data: topupRows, error: topupErr } = await supabase
-    .from("customer_topups")
-    .select("id, amount_sar, topup_date")
+  // THE POOL'S TWO SIDES COME FROM THE LEDGER (0206 app cutover). The
+  // customer_topups / customer_balance_returns reads are gone with their
+  // tables' readers: money in is a customer_ledger 'topup' row (a positive
+  // 'correction' counts with it), money handed back is a 'refund' (a negative
+  // 'correction' counts with it, as a positive figure — BalanceReturnLite
+  // stores refunds unsigned). invoice_draw / balance_applied / draw_reversal
+  // rows are SETTLEMENTS of the very work this assembly derives from the
+  // trips and charges themselves — feeding them in as well would count every
+  // settlement twice. Fails LOUD like every other fetch here: falling back to
+  // [] would assemble an invoice against a pool that never existed.
+  const { data: ledgerRows, error: ledgerErr } = await supabase
+    .from("customer_ledger")
+    .select("id, entry_type, amount_sar, created_at")
     .eq("customer_id", customerId);
-  if (topupErr) return { error: topupErr.message };
-  const topups: TopupLite[] = topupRows ?? [];
-
-  // Refunds of prepaid credit (0142) — customer-wide, any date, same shape as
-  // the top-up fetch above because they are the same pool's other side. Fails
-  // LOUD like every other fetch here: falling back to [] would assemble an
-  // invoice whose pool still holds money the customer has already been handed
-  // back, and that invoice would show work as Covered that nothing covers.
-  const { data: returnRows, error: returnErr } = await supabase
-    .from("customer_balance_returns")
-    .select("id, amount_sar, returned_on")
-    .eq("customer_id", customerId);
-  if (returnErr) return { error: returnErr.message };
-  const returns: BalanceReturnLite[] = returnRows ?? [];
+  if (ledgerErr) return { error: ledgerErr.message };
+  const topups: TopupLite[] = [];
+  const returns: BalanceReturnLite[] = [];
+  for (const row of ledgerRows ?? []) {
+    // created_at is timestamptz; the engine walks calendar days — same
+    // first-10-chars convention as the statement's date column.
+    const day = row.created_at.slice(0, 10);
+    if (row.entry_type === "topup" || (row.entry_type === "correction" && row.amount_sar > 0)) {
+      topups.push({ id: row.id, amount_sar: row.amount_sar, topup_date: day });
+    } else if (row.entry_type === "refund" || (row.entry_type === "correction" && row.amount_sar < 0)) {
+      returns.push({ id: row.id, amount_sar: Math.abs(row.amount_sar), returned_on: day });
+    }
+  }
 
   // v3: customer-wide, non-void-invoice charges only — see header note.
   // Two-step (no nested-join precedent elsewhere in this codebase, kept
@@ -618,61 +624,41 @@ export async function getSpecialChargeImageSignedUrl(chargeId: string): Promise<
 
 // ---------------------------------------------------------------------------
 // PAID-UP BALANCE — the ONE figure any invoice surface shows for a prepaid
-// customer's pool. deposits − paid-invoice consumption − returns.
+// customer's money on account. Since the 0206 app cutover it IS the ledger
+// balance: the sum of the customer's customer_ledger rows (deposits and
+// corrections in; draws, applied balance and refunds out). Nothing here
+// re-derives a pool from topups and consumption any more — the ledger is the
+// account, and this reads it.
 //
-// This is the ONLY call site of lib/prepaid.ts's paidUpBalance /
-// paidUpBalanceAsOf in the invoice path. Every surface — the popup, the
-// downloaded PDF, the printed sheet — reads the single number this returns;
-// none of them computes a balance of its own, and the trips tables no longer
-// carry one at all.
-//
-// WHICH figure, by status (locked):
-//   draft / review / confirmed  -> CURRENT. Nothing is frozen yet, so the
-//                                  document tracks reality and drops as the
-//                                  customer settles other invoices.
-//   paid                        -> FROZEN at this invoice's own `paid_at`.
-//                                  A paid document states the balance as it
-//                                  stood when it was paid. It never moves again.
+// WHICH figure, by status (locked, unchanged from the pool era):
+//   draft / review / confirmed  -> CURRENT: every ledger row. Tracks reality
+//                                  and moves as the customer's account moves.
+//   paid                        -> FROZEN at this invoice's own `paid_at`:
+//                                  rows created at or before that instant. A
+//                                  paid document states the balance as it
+//                                  stood when it was paid.
 //   void                        -> FROZEN at `voided_at`, the moment the
-//                                  document became terminal. `voided_at` is
-//                                  the timestamp used — a void invoice has no
-//                                  `paid_at` to freeze at, and its lines were
-//                                  released back to the pool at exactly that
-//                                  moment.
-//   postpaid, any status        -> null. There is no pool to report.
+//                                  document became terminal.
+//   postpaid, any status        -> null. There is no account to report.
 //
-// A paid/void row missing its timestamp (impossible via the RPCs, but the
-// columns are nullable) falls back to CURRENT rather than to a fabricated
-// instant — a live figure is honest, an invented freeze point is not.
+// The append-only ledger makes the freeze exact: rows are never edited, so
+// "the balance as of then" is literally "the rows that existed by then". A
+// paid/void row missing its timestamp falls back to CURRENT rather than to a
+// fabricated instant — a live figure is honest, an invented freeze point is
+// not.
 //
-// THREE OUTCOMES, NOT TWO. `{ ok: true, amount: null }` means there is no pool
-// to report (postpaid) and every surface prints nothing. `{ ok: false }` means
-// a read FAILED, which is a different thing entirely and must never collapse
-// into the first: a single `number | null` made a broken query indistinguishable
-// from a postpaid customer, so one failed sub-query silently produced a prepaid
-// invoice with no balance line and no complaint anywhere. The popup shows the
-// failure; the document paths refuse to render at all (see toPdfInvoiceData) —
-// a customer-facing invoice quietly missing its balance is worse than a
-// download that says it could not be produced.
+// THREE OUTCOMES, NOT TWO — unchanged and load-bearing. `{ ok: true,
+// amount: null }` means there is no account to report (postpaid) and every
+// surface prints nothing. `{ ok: false }` means a read FAILED: the popup
+// shows the failure, the document paths refuse to render at all (see
+// toPdfInvoiceData). A customer-facing invoice quietly missing its balance is
+// worse than a download that says it could not be produced.
 //
-// The consumption slice mirrors FinanceTab's paid-only slice exactly: trips
-// DELIVERED and sitting on a status='paid' invoice, plus charges on one. Same
-// rate rule as everywhere else — the trip's own frozen `rate_sar`, falling
-// back to the project's current rate only where the row predates it.
-//
-// IT ALSO RETURNS THIS INVOICE'S OWN DRAW-DOWN, from the SAME read. The
-// pay-with-balance panel has to preview the balance a payment will leave, and
-// the only figure that cannot be wrong is the one the payment itself will
-// subtract. Reading `grand_total_sar` for it was: invoices frozen by the
-// covered-only engine hold a total that EXCLUDES lines they list, so the panel
-// previewed 7,544.00 on 026-000017 where the payment moves the balance by
-// 8,694.00, and 0.00 on 026-000009 against a real 4,761.00.
-//
-// So this invoice's id joins the `in (…)` list and its rows are partitioned
-// out. One query, one rate rule, one gross-up (`settlementGross`, which is
-// literally paidUpCore's debit side) — the preview and the settlement are the
-// same expression over the same rows, not two expressions kept in step. Adding
-// a second query here would reopen exactly the gap it closes.
+// IT ALSO RETURNS THIS INVOICE'S OWN DRAW-DOWN (`settlementSar`): the
+// VAT-inclusive total of the invoice's delivered trips and charges, from the
+// invoice's own rows, priced frozen-first — the same expression as before,
+// now over the one invoice it describes instead of a partition of every paid
+// invoice the pool math used to need.
 // ---------------------------------------------------------------------------
 export type PaidUpRead =
   | {
@@ -698,81 +684,35 @@ async function loadPaidUpBalance(
 
   const asOf = inv.status === "paid" ? inv.paid_at : inv.status === "void" ? inv.voided_at : null;
 
-  const [topupsRes, returnsRes, paidInvRes, projectRes] = await Promise.all([
-    supabase.from("customer_topups").select("id, amount_sar, topup_date").eq("customer_id", inv.customer_id),
-    supabase.from("customer_balance_returns").select("id, amount_sar, returned_on").eq("customer_id", inv.customer_id),
-    supabase.from("invoices").select("id, paid_at").eq("customer_id", inv.customer_id).eq("status", "paid"),
+  const [ledgerRes, tripsRes, chargesRes, projectRes] = await Promise.all([
+    supabase.from("customer_ledger").select("amount_sar, created_at").eq("customer_id", inv.customer_id),
+    supabase.from("trips").select("id, rate_sar").eq("invoice_id", inv.id).not("delivered_at", "is", null),
+    supabase.from("invoice_special_charges").select("id, amount_sar").eq("invoice_id", inv.id),
     supabase.from("projects").select("rate_per_trip_sar").eq("customer_id", inv.customer_id).maybeSingle(),
   ]);
-  // Fails LOUD rather than returning a partial figure: a paid-up balance
-  // assembled from a half-read pool is a wrong number wearing a confident
-  // label, and every surface would print it.
-  //
-  // projectRes IS IN THIS GATE, and was the one read left out of it. Its row
-  // supplies the per-trip rate that a trip predating frozen `rate_sar` falls
-  // back to, so a failed project read did not blank the line — it silently set
-  // that rate to 0, UNDERSTATING consumption and OVERSTATING the balance. A
-  // wrong number is the one outcome worse than no number, and it was the only
-  // failure mode here that produced one. `.maybeSingle()` also errors on a
-  // customer holding more than one project row (none does today), which is
-  // exactly a case that must stop rather than guess a rate.
-  if (topupsRes.error || returnsRes.error || paidInvRes.error || projectRes.error) {
+  // Fails LOUD rather than returning a partial figure — a balance summed from
+  // a half-read ledger is a wrong number wearing a confident label. projectRes
+  // is in the gate for the same reason it always was: it supplies the rate a
+  // trip predating frozen `rate_sar` falls back to, and a failed read must
+  // stop the figure, not silently price that trip at 0.
+  if (ledgerRes.error || tripsRes.error || chargesRes.error || projectRes.error) {
     return { ok: false, error: PAID_UP_UNAVAILABLE };
   }
 
-  const topups: TopupLite[] = topupsRes.data ?? [];
-  const returns: BalanceReturnLite[] = returnsRes.data ?? [];
-  const paidAtByInvoice = new Map<string, string | null>((paidInvRes.data ?? []).map((i) => [i.id, i.paid_at]));
-  const paidInvoiceIds = [...paidAtByInvoice.keys()];
-
-  // Never empty — `inv.id` is always in it — so there is no "skip the read"
-  // arm any more. A customer with no paid invoices yet still has THIS invoice's
-  // draw-down to report, and the old length guard would have returned 0 for it.
-  const queryIds = paidAtByInvoice.has(inv.id) ? paidInvoiceIds : [...paidInvoiceIds, inv.id];
-
   const projectRate = (projectRes.data?.rate_per_trip_sar as number | undefined) ?? 0;
-  const [tripsRes, chargesRes] = await Promise.all([
-    supabase
-      .from("trips")
-      .select("id, rate_sar, invoice_id")
-      .in("invoice_id", queryIds)
-      .not("delivered_at", "is", null),
-    supabase.from("invoice_special_charges").select("id, amount_sar, invoice_id").in("invoice_id", queryIds),
+  const settlementSar = settlementGross([
+    ...(tripsRes.data ?? []).map((t) => ({ amount_sar: (t.rate_sar as number | null) ?? projectRate })),
+    ...(chargesRes.data ?? []).map((c) => ({ amount_sar: c.amount_sar as number })),
   ]);
-  if (tripsRes.error || chargesRes.error) return { ok: false, error: PAID_UP_UNAVAILABLE };
-  const rows: { id: string; amount_sar: number; invoice_id: string; paid_at: string | null }[] = [
-    ...(tripsRes.data ?? []).map((t) => ({
-      id: t.id as string,
-      amount_sar: (t.rate_sar as number | null) ?? projectRate,
-      invoice_id: t.invoice_id as string,
-      paid_at: paidAtByInvoice.get(t.invoice_id as string) ?? null,
-    })),
-    ...(chargesRes.data ?? []).map((c) => ({
-      id: c.id as string,
-      amount_sar: c.amount_sar as number,
-      invoice_id: c.invoice_id as string,
-      paid_at: paidAtByInvoice.get(c.invoice_id as string) ?? null,
-    })),
-  ];
-  // PARTITION, not a filter over two reads. The balance consumes PAID invoices
-  // only; the draw-down is this invoice's own rows, whatever its status. On an
-  // already-paid invoice both sets overlap, which is correct and unused — the
-  // panel that reads the draw-down renders on `confirmed` alone.
-  const items = rows.filter((r) => paidAtByInvoice.has(r.invoice_id));
-  const settlementSar = settlementGross(rows.filter((r) => r.invoice_id === inv.id));
 
-  if (asOf == null) {
-    return { ok: true, amount: paidUpBalance({ topups, paidItems: items, returns }), settlementSar };
-  }
-  // An item on a paid invoice with no `paid_at` cannot be placed on the
-  // timeline, so it is DROPPED from the as-of walk rather than dated to the
-  // epoch or to now — both of which would move a frozen figure by a real
-  // amount. `paid_at` is set by pay_invoice() on every row it touches; this
-  // arm exists because the column is nullable, not because it fires.
-  const dated: PaidConsumedItem[] = items
-    .filter((it): it is typeof it & { paid_at: string } => it.paid_at != null)
-    .map((it) => ({ id: it.id, amount_sar: it.amount_sar, paid_at: it.paid_at }));
-  return { ok: true, amount: paidUpBalanceAsOf({ topups, paidItems: dated, returns, asOf }), settlementSar };
+  // The freeze is a filter, not a second formula: as-of = the rows that
+  // existed by that instant. Timestamps compare as instants, not as strings —
+  // both are ISO but nothing guarantees one serialized offset format.
+  const rows = ledgerRes.data ?? [];
+  const counted =
+    asOf == null ? rows : rows.filter((r) => new Date(r.created_at).getTime() <= new Date(asOf).getTime());
+  const amount = round2(counted.reduce((sum, r) => sum + Number(r.amount_sar), 0));
+  return { ok: true, amount, settlementSar };
 }
 
 // Live preview for the UI (5c) — draft AND review both stay live-recomputed,

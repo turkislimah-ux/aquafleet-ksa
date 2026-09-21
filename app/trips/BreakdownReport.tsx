@@ -309,15 +309,22 @@ export default function BreakdownReport({
   // inputs in either mode: what is payable is delivered work not yet on a PAID
   // invoice, and a top-up funds that work rather than settling it. This report
   // computes no running balance of its own and now needs none.
+  // PREPAID SHOWS NO AMOUNT PAYABLE (0206 app cutover, Turki's ruling): the
+  // question this box answers for a prepaid customer is answered by Available
+  // on the Finance tab, and two figures for one question is the drift this
+  // codebase exists to prevent. The Finance tab's own column made the same
+  // cut first; this box follows it. Postpaid (and unset) keep the rule.
   const amountPayable = useMemo(
     () =>
-      computeAmountPayable({
-        mode: project?.payment_mode ?? null,
-        hasProject: project != null,
-        projectRate: rate,
-        trips: projectTrips,
-        charges: customerCharges,
-      }),
+      project?.payment_mode === "prepaid"
+        ? null
+        : computeAmountPayable({
+            mode: project?.payment_mode ?? null,
+            hasProject: project != null,
+            projectRate: rate,
+            trips: projectTrips,
+            charges: customerCharges,
+          }),
     [project, rate, projectTrips, customerCharges],
   );
 
@@ -913,9 +920,15 @@ export default function BreakdownReport({
                   {amountPayable == null ? "—" : formatSar(amountPayable)}
                 </div>
                 <div className="text-xs muted mt-1">
-                  {/* Discriminates on the SIGN of the number, never on a label. */}
+                  {/* Discriminates on the SIGN of the number, never on a label
+                      — except the two null reasons, told apart by the MODE. */}
                   {amountPayable == null
-                    ? t("trips.breakdown.payableNoMode", lang)
+                    ? t(
+                        project?.payment_mode === "prepaid"
+                          ? "trips.breakdown.payablePrepaid"
+                          : "trips.breakdown.payableNoMode",
+                        lang,
+                      )
                     : amountPayable < 0
                     ? t("trips.breakdown.payableOwed", lang)
                     : amountPayable > 0

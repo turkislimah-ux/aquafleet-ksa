@@ -96,20 +96,6 @@ type TripLite = {
   truckPlate?: string | null;
   truckCapacityM3?: number | null;
 };
-type TopupRow = {
-  id: string;
-  customer_id: string;
-  amount_sar: number;
-  topup_date: string;
-  note: string | null;
-  reference: string | null;
-  // Add Balance restructure (Batch B, migration 0040) — feeds the new
-  // history popup's Method/Ref columns. Not threaded into
-  // TopupStatementInput below — the statement itself only shows date/ref/
-  // amount (Batch 3), unchanged by this batch.
-  method: "cash" | "bank_transfer" | null;
-  photo_path: string | null;
-};
 
 // The engine-input adapters (toConsumingTrip / toConsumingCharge) and the
 // Amount Payable rule itself now live in ./amountPayable, because the project
@@ -120,10 +106,6 @@ export type FinanceTabProps = {
   customers: CustomerLite[];
   projects: ProjectLite[];
   trips: TripLite[];
-  // LEGACY top-ups (customer_topups) — history display only now. New top-ups
-  // land on customer_ledger via record_topup; these rows predate 0203 and are
-  // merged into the Add Balance history so old proof photos stay reachable.
-  topups: TopupRow[];
   specialCharges: SpecialChargeRow[];
   // Statement rebuild (Batch 3) — paid invoices, customer-tagged, feeding the
   // postpaid statement's Payment rows. See page.tsx's PaidInvoiceRow comment.
@@ -155,7 +137,6 @@ export default function FinanceTab({
   customers,
   projects,
   trips,
-  topups,
   specialCharges,
   paidInvoices,
   ledgerBalances,
@@ -222,14 +203,6 @@ export default function FinanceTab({
     }
     return m;
   }, [trips]);
-
-  const topupsByCustomer = useMemo(() => {
-    const m = new Map<string, TopupRow[]>();
-    for (const t of topups) {
-      (m.get(t.customer_id) ?? m.set(t.customer_id, []).get(t.customer_id)!).push(t);
-    }
-    return m;
-  }, [topups]);
 
   // ---- Ledger lookups (0203) — keyed views + grouped rows. No arithmetic:
   // every number in these maps is a view column or a stored row, verbatim.
@@ -446,26 +419,15 @@ export default function FinanceTab({
 
   const activeStatementRow = statementFor ? rows.find((r) => r.customer.id === statementFor.customerId) : null;
 
-  // Add Balance history — MERGED: legacy customer_topups rows (pre-0203,
-  // where the old proof photos live) + ledger topup entries (where every new
-  // top-up lands, each carrying its RCT number). Tagged by source so the
-  // photo link calls the right signed-URL action. Newest first, like the old
-  // single-source list.
+  // Add Balance history — LEDGER TOPUPS ONLY (0206 app cutover). The legacy
+  // customer_topups arm is gone with its table's readers: those rows were
+  // dummy data, and every real top-up is a customer_ledger row carrying its
+  // RCT number and its own proof photo. Newest first.
   const addBalanceHistory: AddBalanceHistoryRow[] = useMemo(() => {
     if (!topupTarget) return [];
-    const legacy: AddBalanceHistoryRow[] = (topupsByCustomer.get(topupTarget.id) ?? []).map((tp) => ({
-      id: tp.id,
-      amount_sar: tp.amount_sar,
-      topup_date: tp.topup_date,
-      method: tp.method,
-      reference: tp.reference,
-      photo_path: tp.photo_path,
-      source: "legacy",
-      doc_number: null,
-    }));
-    const fromLedger: AddBalanceHistoryRow[] = (entriesByCustomer.get(topupTarget.id) ?? [])
+    return (entriesByCustomer.get(topupTarget.id) ?? [])
       .filter((e) => e.entry_type === "topup")
-      .map((e) => ({
+      .map((e): AddBalanceHistoryRow => ({
         id: e.id,
         amount_sar: e.amount_sar,
         // created_at is timestamptz; the list shows the calendar day, same
@@ -474,13 +436,10 @@ export default function FinanceTab({
         method: e.method === "cash" || e.method === "bank_transfer" ? e.method : null,
         reference: e.reference,
         photo_path: e.photo_path,
-        source: "ledger",
         doc_number: e.doc_number,
-      }));
-    return [...legacy, ...fromLedger].sort((a, b) =>
-      a.topup_date < b.topup_date ? 1 : a.topup_date > b.topup_date ? -1 : 0,
-    );
-  }, [topupTarget, topupsByCustomer, entriesByCustomer]);
+      }))
+      .sort((a, b) => (a.topup_date < b.topup_date ? 1 : a.topup_date > b.topup_date ? -1 : 0));
+  }, [topupTarget, entriesByCustomer]);
 
   // Prepaid statement input — the customer's ledger rows mapped to the
   // view-model's shape, verbatim (signed amounts, doc numbers, the joined

@@ -22,7 +22,7 @@ import CustomersTab from "./CustomersTab";
 import FinanceTab from "./FinanceTab";
 import NewProjectModal from "./NewProjectModal";
 import WaterStationsModal from "./WaterStationsModal";
-import type { TopupRow, SpecialChargeRow, PaidInvoiceRow, InvoicePaymentStatementRow } from "./page";
+import type { SpecialChargeRow, PaidInvoiceRow, InvoicePaymentStatementRow } from "./page";
 import type { CompanySettings } from "@/lib/db-types";
 import type {
   CustomerLedgerBalanceRow,
@@ -64,7 +64,6 @@ function headerFor(tab: Tab, lang: Lang): { title: string; subtitle: string } {
 
 export default function TripsTabs({
   error,
-  topups,
   specialCharges,
   paidInvoices,
   ledgerBalances,
@@ -80,7 +79,6 @@ export default function TripsTabs({
   ...boardProps
 }: ProjectsBoardProps & {
   error: string | null;
-  topups: TopupRow[];
   specialCharges: SpecialChargeRow[];
   paidInvoices: PaidInvoiceRow[];
   // Prepaid ledger model (0203) — pass-through to FinanceTab, fetched in
@@ -221,7 +219,6 @@ export default function TripsTabs({
           customers={boardProps.customers}
           projects={boardProps.projects}
           trips={boardProps.trips}
-          topups={topups}
           specialCharges={specialCharges}
           paidInvoices={paidInvoices}
           ledgerBalances={ledgerBalances}

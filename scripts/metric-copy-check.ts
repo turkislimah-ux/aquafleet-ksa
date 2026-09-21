@@ -271,6 +271,20 @@ function literals(sql: string): string[] {
   return out;
 }
 
+// The four cells the 0206 app cutover rewrote — see the override note inside
+// the byte-fidelity loop below. Keyed `<metric>.<field>`; values are the
+// exact i18n `en` strings.
+const LEDGER_COPY_OVERRIDES: Record<string, string> = {
+  "paid_up_balance.meaning":
+    "A prepaid customer's ledger balance: money put on account minus what settlements and refunds have taken out. Not the spendable figure — that is Available.",
+  "paid_up_balance.formula":
+    "v_customer_ledger_balance.balance_sar: the sum of the customer's customer_ledger rows — top-ups and corrections in; balance draws, applied balance and refunds out. Deducts at SETTLEMENT, not at delivery.",
+  "paid_up_balance.caveat":
+    "Not a period measure and not app-computed: it is the ledger view's own column, per customer, for the instant you are looking at. The spendable figure is Available — balance minus uninvoiced work minus confirmed unsettled invoices — which is always at or below this. Prepaid only — a postpaid customer has no ledger. Never place it in a period column or on a monthly trend line.",
+  "amount_payable.caveat":
+    "Only marking an invoice PAID reduces it — a deposit funds work rather than settling it, so nothing else moves this figure. Since the ledger cutover it renders for POSTPAID (and unset) customers only: a prepaid row shows no Amount Payable, because Available answers that question. Not a period measure and not a view.",
+};
+
 const MIGRATION = join(__dirname, "..", "supabase", "migrations",
   "0187_report_metrics_balance_terms.sql");
 
@@ -297,7 +311,27 @@ for (let r = 0; r < 3; r++) {
   // terms have near-duplicate strings under trips.* on another route, and were
   // deliberately NOT pointed at them, since a Finance-tab column rename would
   // otherwise rewrite a dictionary definition).
+  //
+  // LEDGER-CUTOVER OVERRIDES (0206 app group A, Turki's ruling): four of the
+  // fifteen prose cells were rewritten in i18n because the 0187 text describes
+  // the retired pool model (paidUpCore over customer_topups; the
+  // v_customer_amount_payable divergence). For those cells the check pins the
+  // NEW text — still byte-exact, still a tripwire against silent edits — and
+  // asserts it DIFFERS from 0187's literal, so this override cannot silently
+  // become a no-op if the migration is ever edited to match. THE DB ROW STILL
+  // HOLDS 0187's TEXT: report_metrics is only the fall-through below the i18n
+  // key, so no reader sees it — but the row update is OWED, and the migration
+  // that drops the legacy objects must carry it, at which point these
+  // overrides come OUT and the plain equality returns.
   for (const field of ["label", "meaning", "formula", "grain", "caveat"] as const) {
+    const override = LEDGER_COPY_OVERRIDES[`${k}.${field}`];
+    if (override !== undefined) {
+      check(`${k}.${field}: i18n en == ledger-cutover text (override)`,
+        value(`reports.metricDef.${k}.${field}`, "en"), override);
+      check(`${k}.${field}: override actually diverges from 0187`,
+        override !== row[field], true);
+      continue;
+    }
     check(`${k}.${field}: i18n en == 0187 column`,
       value(`reports.metricDef.${k}.${field}`, "en"), row[field]);
   }

@@ -29,13 +29,6 @@ import {
 import { commissionForDelivery, commissionForNthTrip } from "@/lib/commission";
 import { lookupKey } from "@/lib/slug";
 import { toLatinDigits } from "@/lib/digits";
-import {
-  derivedBalanceItems,
-  type BalanceReturnLite,
-  type ConsumingTrip,
-  type ConsumingCharge,
-  type TopupLite,
-} from "@/lib/prepaid";
 
 export type ActionResult = { error: string | null };
 
@@ -1054,69 +1047,31 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
   return { error: null };
 }
 
-// Finance C3 (0035) — the project's derived prepaid balance, computed the
-// SAME way FinanceTab.tsx does: each trip priced FROZEN-FIRST from its own
-// trips.rate_sar, with the project's current rate_per_trip_sar only as the
-// not-yet-delivered fallback (see the mapping below). Feeds can_switch_payment_mode()'s
-// rule 3 (switching away from prepaid requires an exactly-zero balance) —
-// used by BOTH checkPaymentModeSwitch (client-proactive) and
+// THE SWITCH GUARD'S BALANCE IS THE LEDGER'S (0206 app cutover). This used
+// to re-derive the old pool app-side — trips, topups, charges and returns
+// through derivedBalanceItems — to feed can_switch_payment_mode()'s rule 3
+// (switching away from prepaid requires an exactly-zero balance). Under 0203
+// the balance is a VIEW COLUMN, never app-computed, so the guard reads
+// v_customer_ledger_balance.balance_sar: the same figure the Finance tab's
+// Balance column shows, which is exactly what "your balance must be zero
+// before switching" should be measured against. A missing row is a customer
+// with no ledger rows, which IS a zero balance — the view LEFT JOINs every
+// customer, so maybeSingle() returning null only happens for an id that is
+// not a customer at all, and the RPC refuses that on its own.
+//
+// Fed to BOTH checkPaymentModeSwitch (client-proactive) and
 // updateProjectWithCustomer (server-authoritative) below, so the two never
 // compute it differently.
-//
-// v3 cutover: balance is trips AND special charges combined (every charge
-// consumes balance the instant it's added — lib/prepaid.ts header). Charges
-// are fetched customer-wide across every non-void invoice, same rule as
-// assembleForCustomerPeriod (app/trips/invoiceActions.ts) — a void invoice's
-// charges never consumed balance, so they're excluded here too. Without this,
-// a customer with outstanding un-invoiced special charges could pass the
-// "balance is exactly zero" switch-guard while charges silently still owed
-// against the pool.
-async function fetchProjectBalance(
+async function fetchCustomerLedgerBalance(
   supabase: ReturnType<typeof createClient>,
-  projectId: string,
   customerId: string,
-  ratePerTrip: number,
 ): Promise<number> {
-  const [{ data: tripRows }, { data: topupRows }, { data: invoiceRows }, { data: returnRows }] = await Promise.all([
-    supabase.from("trips").select("id, trip_date, delivered_at, rate_sar").eq("project_id", projectId),
-    supabase.from("customer_topups").select("id, amount_sar, topup_date").eq("customer_id", customerId),
-    supabase.from("invoices").select("id, status").eq("customer_id", customerId),
-    // Refunds of prepaid credit (0142) — a DEBIT, so this guard has to see
-    // them. The rule it feeds is "switching away from prepaid requires an
-    // exactly-zero balance"; a fully-refunded customer nets to exactly zero,
-    // and omitting this fetch would leave them reading as still holding the
-    // credit and block a switch that should now be allowed.
-    supabase.from("customer_balance_returns").select("id, amount_sar, returned_on").eq("customer_id", customerId),
-  ]);
-  const trips: ConsumingTrip[] = (tripRows ?? []).map((t) => ({
-    id: t.id,
-    trip_date: t.trip_date,
-    delivered_at: t.delivered_at,
-    // FROZEN RATE FIRST. A delivered trip bills at what it was worth on the day,
-    // so a later rate change re-prices only NEW work. `ratePerTrip` (the
-    // project's CURRENT rate) survives purely as the not-yet-delivered fallback —
-    // and an undelivered trip is filtered out before any amount is computed, so
-    // it never reaches the money.
-    rate_sar: t.rate_sar ?? ratePerTrip,
-  }));
-  const topups: TopupLite[] = (topupRows ?? []) as TopupLite[];
-  const returns: BalanceReturnLite[] = (returnRows ?? []) as BalanceReturnLite[];
-
-  const nonVoidInvoiceIds = (invoiceRows ?? []).filter((i) => i.status !== "void").map((i) => i.id);
-  let charges: ConsumingCharge[] = [];
-  if (nonVoidInvoiceIds.length > 0) {
-    const { data: chargeRows } = await supabase
-      .from("invoice_special_charges")
-      .select("id, amount_sar, charge_date, created_at")
-      .in("invoice_id", nonVoidInvoiceIds);
-    charges = (chargeRows ?? []).map((c) => ({
-      id: c.id,
-      charge_date: c.charge_date ?? c.created_at.slice(0, 10),
-      amount_sar: c.amount_sar,
-    }));
-  }
-
-  return derivedBalanceItems(topups, trips, charges, undefined, returns);
+  const { data } = await supabase
+    .from("v_customer_ledger_balance")
+    .select("balance_sar")
+    .eq("customer_id", customerId)
+    .maybeSingle();
+  return Number(data?.balance_sar ?? 0);
 }
 
 // Finance C3 (0035) — proactive client-side check, called from ProjectModal
@@ -1138,12 +1093,12 @@ export async function checkPaymentModeSwitch(
   const supabase = createClient();
   const { data: project, error: projErr } = await supabase
     .from("projects")
-    .select("customer_id, rate_per_trip_sar")
+    .select("customer_id")
     .eq("id", id)
     .single();
   if (projErr || !project) return { error: projErr?.message ?? "Project not found." };
 
-  const balance = await fetchProjectBalance(supabase, id, project.customer_id, project.rate_per_trip_sar ?? 0);
+  const balance = await fetchCustomerLedgerBalance(supabase, project.customer_id);
 
   const { data, error } = await supabase.rpc("can_switch_payment_mode", {
     p_project_id: id,
@@ -1181,19 +1136,19 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
 
   const supabase = createClient();
 
-  // Finance C3 (0035): compute the settlement balance here (server-side,
+  // Finance C3 (0035): read the ledger balance here (server-side,
   // authoritative) so update_project_with_customer's guard is accurate
   // regardless of whether ProjectModal's proactive check ran or was
-  // bypassed. Looked up by the project's CURRENT customer_id/rate — cheap,
-  // and the RPC itself ignores this value unless it's actually needed
-  // (switching away from prepaid).
+  // bypassed. Looked up by the project's CURRENT customer — cheap, and the
+  // RPC itself ignores this value unless it's actually needed (switching
+  // away from prepaid).
   const { data: currentProject } = await supabase
     .from("projects")
-    .select("customer_id, rate_per_trip_sar")
+    .select("customer_id")
     .eq("id", projectId)
     .single();
   const currentBalance = currentProject
-    ? await fetchProjectBalance(supabase, projectId, currentProject.customer_id, currentProject.rate_per_trip_sar ?? 0)
+    ? await fetchCustomerLedgerBalance(supabase, currentProject.customer_id)
     : 0;
 
   const { error } = await supabase.rpc("update_project_with_customer", {

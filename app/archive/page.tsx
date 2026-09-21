@@ -23,7 +23,7 @@ import type {
   ArchiveCustomerRow,
   ArchiveInvoiceRow,
   ArchiveProjectRow,
-  CustomerAmountPayableRow,
+  ArchiveCustomerFundsRow,
   ArchiveDocument,
   ArchiveDocumentFile,
   ArchiveDocumentRenewal,
@@ -56,7 +56,7 @@ export default async function ArchivePage() {
     groupsRes, documentsRes, filesRes, renewalsRes, typesRes,
     driversRes, staffRes, payoutsRes,
     trucksRes, workOrdersRes, outsourcedJobsRes,
-    customersRes, invoicesRes, projectsRes, amountPayableRes,
+    customersRes, invoicesRes, projectsRes, availableRes, refundsRes, writeOffsRes,
     // --- Approvals Ledger ---
     consApprovalsRes, permitsRes, permitLinesRes,
     ledgerWorkOrdersRes, workOrderPartsRes, ledgerJobsRes, paymentsRes,
@@ -170,30 +170,29 @@ export default async function ArchivePage() {
       // detail popup resolves the figures with commission_config_at(). See
       // ArchiveProjectRow.
       .select("id, customer_id, name, initials, rate_per_trip_sar, archived_at, payment_mode, water_type, default_station, start_date, end_date, status, location, description, created_at"),
-    // v_customer_amount_payable (0139) — the ARCHIVE surface's definition of
-    // "does this customer owe us, or do we owe them", and for prepaid that is
-    // their RUNNING BALANCE.
+    // THE ARCHIVE'S MONEY FIGURE IS AVAILABLE (0206 app cutover, Turki's
+    // ruling) — v_customer_available.available_sar, the same figure the
+    // record_refund RPC caps a payout at under the customer row lock. The
+    // retired v_customer_amount_payable read is gone: for prepaid it returned
+    // the old pool's running balance, a number the refund door no longer
+    // honours.
     //
-    // **IT IS NOT THE SAME NUMBER AS the Trips page's Amount Payable column,
-    // and must not be reconciled with it.** That column asks a different
-    // question — what delivered work is not yet on a PAID invoice
-    // (app/trips/amountPayable.ts) — so a prepaid customer in credit can owe
-    // there and be owed here at the same time. The view stays balance-based
-    // because return_customer_balance() gates a cash refund on
-    // `amount_payable_sar > 0` and the archive guard reads the same row;
-    // flipping it to the column's rule would refund debtors.
-    //
-    // Columns are named explicitly and
-    // stop at the eleven CustomerAmountPayableRow declares: the view publishes
-    // seven more (customer_name, archived_at, payment_mode, the two component
-    // balances, owed_sar, archive_blocked) that nothing on this surface
-    // renders, and a figure carried but never shown is how two versions of one
-    // number start to drift.
+    // Three reads compose one ArchiveCustomerFundsRow per customer below:
+    // the figure (view), the refund record (ledger rows — the Returned mark,
+    // its total, and the newest method/date), and the write-off audit
+    // (customer_write_offs, active row only). Each is the narrowest read that
+    // serves what the tab renders.
+    supabase.from("v_customer_available").select("customer_id, available_sar"),
     supabase
-      .from("v_customer_amount_payable")
-      .select(
-        "customer_id, amount_payable_sar, balance_returned, returned_sar, returned_method, returned_on, is_written_off, written_off_sar, write_off_reason, written_off_by, written_off_at",
-      ),
+      .from("customer_ledger")
+      .select("customer_id, amount_sar, method, created_at")
+      .eq("entry_type", "refund")
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("customer_write_offs")
+      .select("customer_id, amount_sar, reason, written_off_by, created_at")
+      .is("reversed_at", null),
+
 
     // -----------------------------------------------------------------------
     // APPROVALS LEDGER — reads only. The ledger is DERIVED from these tables;
@@ -257,12 +256,46 @@ export default async function ArchivePage() {
   // render as plausible garbage instead of erroring. Nulls stay null: a
   // customer with no return on file has no returned amount, which is a
   // different fact from 0.00.
-  const amountPayable = ((amountPayableRes.data ?? []) as Record<string, unknown>[]).map((r) => ({
-    ...r,
-    amount_payable_sar: Number(r.amount_payable_sar ?? 0),
-    returned_sar: r.returned_sar == null ? null : Number(r.returned_sar),
-    written_off_sar: r.written_off_sar == null ? null : Number(r.written_off_sar),
-  })) as CustomerAmountPayableRow[];
+  const availableRows = (availableRes.data ?? []) as { customer_id: string; available_sar: number }[];
+  const refundRows = (refundsRes.data ?? []) as {
+    customer_id: string; amount_sar: number; method: string | null; created_at: string;
+  }[];
+  const writeOffRows = (writeOffsRes.data ?? []) as {
+    customer_id: string; amount_sar: number | null; reason: string | null;
+    written_off_by: string | null; created_at: string;
+  }[];
+
+  // One funds row per customer. Refund rows arrive oldest-first, so the last
+  // one seen per customer is the NEWEST — that row's method and date label the
+  // record while the total sums every refund (ledger refunds can repeat;
+  // amount_sar is stored negative, hence the sign flip).
+  const refundByCustomer = new Map<string, { total: number; method: string | null; on: string }>();
+  for (const r of refundRows) {
+    const prev = refundByCustomer.get(r.customer_id);
+    refundByCustomer.set(r.customer_id, {
+      total: Math.round(((prev?.total ?? 0) + Math.abs(Number(r.amount_sar))) * 100) / 100,
+      method: r.method,
+      on: r.created_at,
+    });
+  }
+  const writeOffByCustomer = new Map(writeOffRows.map((w) => [w.customer_id, w]));
+  const funds: ArchiveCustomerFundsRow[] = availableRows.map((a) => {
+    const ref = refundByCustomer.get(a.customer_id) ?? null;
+    const wo = writeOffByCustomer.get(a.customer_id) ?? null;
+    return {
+      customer_id: a.customer_id,
+      available_sar: Number(a.available_sar ?? 0),
+      balance_returned: ref != null,
+      returned_sar: ref ? ref.total : null,
+      returned_method: ref?.method === "cash" || ref?.method === "bank_transfer" ? ref.method : null,
+      returned_on: ref ? ref.on : null,
+      is_written_off: wo != null,
+      written_off_sar: wo?.amount_sar == null ? null : Number(wo.amount_sar),
+      write_off_reason: wo?.reason ?? null,
+      written_off_by: wo?.written_off_by ?? null,
+      written_off_at: wo?.created_at ?? null,
+    };
+  });
 
   // Scope documents to the fetched groups. Written tab-agnostically in Phase
   // 1 and it kept working unchanged when the group query widened — the only
@@ -285,7 +318,9 @@ export default async function ArchivePage() {
     customersRes.error?.message ??
     invoicesRes.error?.message ??
     projectsRes.error?.message ??
-    amountPayableRes.error?.message ??
+    availableRes.error?.message ??
+    refundsRes.error?.message ??
+    writeOffsRes.error?.message ??
     consApprovalsRes.error?.message ??
     permitsRes.error?.message ??
     permitLinesRes.error?.message ??
@@ -318,7 +353,7 @@ export default async function ArchivePage() {
       customers={customers}
       invoices={invoices}
       projects={projects}
-      amountPayable={amountPayable}
+      funds={funds}
       ledger={{
         approvals: (consApprovalsRes.data ?? []) as ConsumptionApproval[],
         permits: (permitsRes.data ?? []) as ExitPermit[],

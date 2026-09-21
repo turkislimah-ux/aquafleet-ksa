@@ -55,7 +55,7 @@ import type {
   ArchiveCustomerRow,
   ArchiveInvoiceRow,
   ArchiveProjectRow,
-  CustomerAmountPayableRow,
+  ArchiveCustomerFundsRow,
   ConsumptionApproval,
   ExitPermit,
   ExitPermitLine,
@@ -160,7 +160,7 @@ export default function ArchiveClient({
   customers,
   invoices,
   projects,
-  amountPayable,
+  funds,
   ledger,
   today,
   error,
@@ -182,7 +182,7 @@ export default function ArchiveClient({
   customers: ArchiveCustomerRow[];
   invoices: ArchiveInvoiceRow[];
   projects: ArchiveProjectRow[];
-  amountPayable: CustomerAmountPayableRow[];
+  funds: ArchiveCustomerFundsRow[];
   // Everything the Approvals Ledger tab needs, kept in one bag rather than
   // twelve more top-level props on a component that already has plenty.
   ledger: LedgerData;
@@ -501,7 +501,7 @@ export default function ArchiveClient({
   // four hand-written variants — there are two independent flags
   // (is_written_off, balance_returned) and a customer can carry both.
   //
-  // The payable row is looked up HERE, at click time, for the same reason
+  // The funds row is looked up HERE, at click time, for the same reason
   // ReturnBalanceModal does it: the tab captured its copy at render, and
   // quoting a figure from a stale capture is exactly how a confirm dialog
   // ends up promising the wrong number.
@@ -512,7 +512,7 @@ export default function ArchiveClient({
   // customer who is no longer archived is a worse version of the same thing,
   // because this one also quotes money that has just changed.
   async function onRestoreCustomer(c: ArchiveCustomerRow): Promise<boolean> {
-    const payable = amountPayable.find((r) => r.customer_id === c.id) ?? null;
+    const payable = funds.find((r) => r.customer_id === c.id) ?? null;
 
     const lines = [
       fill(t("archive.restoreCustomerAsk", lang), { name: c.name }),
@@ -798,7 +798,7 @@ export default function ArchiveClient({
             customers={customers}
             invoices={invoices}
             projects={projects}
-            amountPayable={amountPayable}
+            funds={funds}
             onOpenInvoice={(id, email) => setOpenInvoice({ id, email })}
             onReturnBalance={(c) => setReturningCustomer(c)}
             onRestoreCustomer={onRestoreCustomer}
@@ -1099,16 +1099,16 @@ export default function ArchiveClient({
         onMutated={() => {}}
       />
 
-      {/* The payable row is looked up HERE rather than passed up from the tab:
-          amountPayable is already in scope, and handing the popup a row the
+      {/* The funds row is looked up HERE rather than passed up from the tab:
+          `funds` is already in scope, and handing the popup a row the
           launcher had captured earlier would let it show a figure that has
           since been refreshed. One customer id in, the current row out. */}
       <ReturnBalanceModal
         open={!!returningCustomer}
         customer={returningCustomer}
-        payable={
+        funds={
           returningCustomer
-            ? amountPayable.find((r) => r.customer_id === returningCustomer.id) ?? null
+            ? funds.find((r) => r.customer_id === returningCustomer.id) ?? null
             : null
         }
         onClose={() => setReturningCustomer(null)}

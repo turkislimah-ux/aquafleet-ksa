@@ -27,7 +27,7 @@ import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatDate, formatDayKeyLang, formatSarExact, todayKey } from "@/lib/utils";
 import type { SubTabItem } from "./SubTabPicker";
 import type {
-  ArchiveCustomerRow, ArchiveInvoiceRow, ArchiveProjectRow, CustomerAmountPayableRow,
+  ArchiveCustomerRow, ArchiveInvoiceRow, ArchiveProjectRow, ArchiveCustomerFundsRow,
   CommissionMode, PaymentMode, ProjectStatus,
 } from "@/lib/db-types";
 import { getProjectCommissionAt } from "../trips/actions";
@@ -133,31 +133,32 @@ const PILL = "text-[11px] px-2 py-0.5 rounded-full ring-1 ring-inset font-medium
 // THE MARK RENDERS BESIDE THE FIGURE. NEVER IN ITS OWN COLUMN, NEVER A ROW
 // DOWN, NEVER BEHIND A CLICK.
 //
-// Recording a return now DOES move amount_payable_sar. Migration 0142 made a
-// balance return a debit against the pool in both the TS engine and
-// v_customer_prepaid_balance, which this view's prepaid arm reads — so a fully
-// refunded customer computes 0, not the figure they held before.
-//
-// WHAT THAT BREAKS, AND WHY THE FIX IS A DIFFERENT FIGURE RATHER THAN THE OLD
-// ONE. The pre-0142 rule was "the number stands still, the mark disambiguates
-// it", and this component existed to keep the two together. With the number now
-// netting to zero, `amount_payable_sar <= 0` would take the early return and the
-// Returned mark would disappear from a customer whose whole story is that they
-// were refunded. So the returned case is answered FIRST, and it renders
-// `returned_sar` — the amount the RPC actually recorded when it wrote the
-// refund. That is a stored fact about this customer, not the stale payable and
-// not a figure reconstructed to look like it: nothing is added back to any
-// balance to produce it.
-//
-// The mark still renders beside the figure. NEVER in its own column, never a
-// row down, never behind a click — the number alone cannot say whether it is
-// owed or already handed back.
-function BalanceWithMark({ row }: { row: CustomerAmountPayableRow | null }) {
+// The figure is AVAILABLE (0206 app cutover): the number record_refund will
+// actually honour. Precedence, and why it inverted from the 0142 ordering:
+//   1. available_sar > 0  -> the live figure + "To return". Under the ledger a
+//      partially refunded customer can hold BOTH a refund record and money
+//      still to return, and the money still to return is what this column is
+//      for — the refund record lives in the ledger and on the statement.
+//   2. balance_returned   -> the TOTAL refunded + "Returned". A fully refunded
+//      customer's Available reads 0, so without this arm the refund would
+//      leave no trace on the one screen that answers "did their money go
+//      back". returned_sar is the ledger's own record, summed — a stored
+//      fact, never the payable reconstructed.
+//   3. neither            -> a dash.
+function BalanceWithMark({ row }: { row: ArchiveCustomerFundsRow | null }) {
   // Before the early return — a hook cannot sit behind a conditional.
   const { lang } = useApp();
   if (!row) return <span className="muted">—</span>;
-  // REFUNDED — checked before the zero test, because netting is exactly what
-  // drives this row's payable to zero.
+  if (row.available_sar > 0) {
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="tabular-nums font-medium">{money(row.available_sar)}</span>
+        <span className={cn(PILL, "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/25")}>
+          {t("archive.customer.toReturnMark", lang)}
+        </span>
+      </div>
+    );
+  }
   if (row.balance_returned) {
     return (
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -175,15 +176,7 @@ function BalanceWithMark({ row }: { row: CustomerAmountPayableRow | null }) {
       </div>
     );
   }
-  if (row.amount_payable_sar <= 0) return <span className="muted">—</span>;
-  return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="tabular-nums font-medium">{money(row.amount_payable_sar)}</span>
-      <span className={cn(PILL, "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/25")}>
-        {t("archive.customer.toReturnMark", lang)}
-      </span>
-    </div>
-  );
+  return <span className="muted">—</span>;
 }
 
 export default function ArchiveCustomerTab({
@@ -191,7 +184,7 @@ export default function ArchiveCustomerTab({
   customers,
   invoices,
   projects,
-  amountPayable,
+  funds,
   onOpenInvoice,
   onReturnBalance,
   onRestoreCustomer,
@@ -203,16 +196,11 @@ export default function ArchiveCustomerTab({
   // effect of archiving its project (0019), so the project is the rest of
   // that record — shown in the archived-customer view.
   projects: ArchiveProjectRow[];
-  // v_customer_amount_payable (0139) — what we owe the customer, plus the
-  // return MARK and the write-off audit. Read, never recomputed here: the
-  // figure is the database's, and a second opinion about it is exactly what
-  // the return RPC refuses to accept as a form field.
-  //
-  // For prepaid this is the RUNNING BALANCE, which is deliberately NOT the
-  // Trips page's Amount Payable column any more — that one counts delivered
-  // work not yet on a paid invoice. Refunds are about the pool, so the pool is
-  // what this surface reads. See app/archive/page.tsx's note on the view.
-  amountPayable: CustomerAmountPayableRow[];
+  // Composed by app/archive/page.tsx (0206): Available — the figure
+  // record_refund caps a payout at — plus the ledger-refund record and the
+  // write-off audit. Read, never recomputed here: the figure is the view's,
+  // and the RPC re-reads it under the customer row lock at save time.
+  funds: ArchiveCustomerFundsRow[];
   onOpenInvoice: (invoiceId: string, customerEmail: string | null) => void;
   // LEAF contract: the return popup is owned by ArchiveClient, same as the
   // invoice popup above. This tab asks; it does not reach for a modal.
@@ -231,8 +219,8 @@ export default function ArchiveCustomerTab({
     [projects],
   );
   const payableByCustomer = useMemo(
-    () => new Map(amountPayable.map((r) => [r.customer_id, r])),
-    [amountPayable],
+    () => new Map(funds.map((r) => [r.customer_id, r])),
+    [funds],
   );
 
   const activeCustomers = useMemo(
@@ -433,11 +421,11 @@ export default function ArchiveCustomerTab({
             <tbody>
               {archivedCustomers.map((c) => {
                 const payable = payableByCustomer.get(c.id) ?? null;
-                // The launcher's gate is the whole rule in one line: money is
-                // owed, and it has not gone back yet. A returned customer keeps
-                // the figure and the mark, and loses the button — there is no
-                // second return to record.
-                const canReturn = !!payable && payable.amount_payable_sar > 0 && !payable.balance_returned;
+                // The launcher's gate is one line: there is money to return.
+                // No "already returned" leg any more — the ledger allows a
+                // second refund, and a fully refunded customer's Available is
+                // 0, which retires the button by itself.
+                const canReturn = !!payable && payable.available_sar > 0;
                 // See the block comment above the table: archived_at is what
                 // the RPC un-sets, so a row that reached this list on the
                 // `!active` leg alone has nothing for it to do.
@@ -548,7 +536,7 @@ function ArchivedCustomerDetail({
   customer: ArchiveCustomerRow;
   project: ArchiveProjectRow | null;
   invoices: ArchiveInvoiceRow[];
-  payable: CustomerAmountPayableRow | null;
+  payable: ArchiveCustomerFundsRow | null;
   onOpenInvoice: (invoiceId: string, customerEmail: string | null) => void;
   onReturnBalance: (customer: ArchiveCustomerRow) => void;
   // Already bound to this customer by the caller, and already closes this
@@ -667,13 +655,12 @@ function ArchivedCustomerDetail({
               liability sitting in a row of receipts reads as more revenue.
               The mark travels with the figure (see BalanceWithMark).
 
-              THE `balance_returned` LEG OF THE GATE IS LOAD-BEARING AFTER 0142.
-              Netting drives a refunded customer's amount_payable_sar to zero,
-              so the payable test alone would take this whole block away — and
-              with it the Returned / Method / Returned-on record below, which is
-              the only place the refund's method and date are ever shown. The
-              block has to survive the very event it documents. */}
-          {payable && (payable.amount_payable_sar > 0 || payable.balance_returned) && (
+              THE `balance_returned` LEG OF THE GATE IS LOAD-BEARING: a fully
+              refunded customer's Available reads 0, so the figure test alone
+              would take this whole block away — and with it the Returned /
+              Method / Returned-on record below. The block has to survive the
+              very event it documents. */}
+          {payable && (payable.available_sar > 0 || payable.balance_returned) && (
             <div className="rounded-xl border p-3" style={{ borderColor: "rgb(var(--border))" }}>
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
@@ -682,12 +669,14 @@ function ArchivedCustomerDetail({
                     <BalanceWithMark row={payable} />
                   </div>
                   <div className="text-[11px] muted mt-0.5">
-                    {payable.balance_returned
-                      ? t("archive.customer.balanceReturnedNote", lang)
-                      : t("archive.customer.balanceOwedNote", lang)}
+                    {/* Keyed on which arm BalanceWithMark rendered: money still
+                        to return outranks the refund record, same precedence. */}
+                    {payable.available_sar > 0
+                      ? t("archive.customer.balanceOwedNote", lang)
+                      : t("archive.customer.balanceReturnedNote", lang)}
                   </div>
                 </div>
-                {!payable.balance_returned && (
+                {payable.available_sar > 0 && (
                   <Btn variant="primary" onClick={() => onReturnBalance(customer)}>
                     <Undo2 className="h-3.5 w-3.5" />{t("archive.customer.returnBalance", lang)}
                   </Btn>

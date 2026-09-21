@@ -58,21 +58,6 @@ type ProjectHeader = {
   description: string | null;
 };
 
-// customer_topups row (Finance tab) — see lib/prepaid.ts for the derived
-// balance/statement math built on top.
-export type TopupRow = {
-  id: string;
-  customer_id: string;
-  amount_sar: number;
-  topup_date: string;
-  note: string | null;
-  reference: string | null; // surfaced in the UI as "ETF Ref. number"
-  // Add Balance restructure (Batch B, migration 0040) — cash/bank_transfer +
-  // proof photo. Nullable: legacy rows predate this batch.
-  method: "cash" | "bank_transfer" | null;
-  photo_path: string | null;
-};
-
 // `BalanceReturnRow` + the customer_balance_returns fetch are GONE from this
 // page (prepaid rebuild, 0203): the Finance tab's prepaid figures now come from
 // the ledger views, which already carry refunds as signed rows. The table and
@@ -159,7 +144,7 @@ export default async function TripsPage() {
   const [
     tripsRes, projectsRes, commissionNowRes, customersRes, trucksRes, driversRes,
     assignmentsRes, stationsRes, allStationsRes, leavePeriodsRes,
-    terminatedDriversRes, topupsRes, paidInvoicesRes, specialChargesRes,
+    terminatedDriversRes, paidInvoicesRes, specialChargesRes,
     ledgerBalancesRes, ledgerUninvoicedRes, ledgerAvailableRes, ledgerEntriesRes,
     ledgerCorrectionsRes, ledgerVotesRes, uninvoicedCountsRes, legacyInvoicesRes,
     invoicePaymentsRes, companyRes, authRes,
@@ -263,12 +248,6 @@ export default async function TripsPage() {
         .from("drivers")
         .select("id, termination_date")
         .not("terminated_at", "is", null),
-      // Finance tab ledger source — see lib/prepaid.ts for derived balance/
-      // statement math built on top of this + trips.
-      supabase
-        .from("customer_topups")
-        .select("id, customer_id, amount_sar, topup_date, note, reference, method, photo_path")
-        .order("topup_date", { ascending: false }),
       // Finance bug fix — invoice-lock (§3, two independent locks: payout_id
       // commission-lock OR paid-invoice lock). status='paid' scoped in SQL —
       // RESERVED (draft/confirmed, not yet paid) invoices are deliberately
@@ -437,7 +416,6 @@ export default async function TripsPage() {
     last_service_date: string | null;
   }[];
   const drivers = (driversRes.data ?? []) as { id: string; name: string; name_ar: string | null; status: DriverStatus; active: boolean }[];
-  const topups = (topupsRes.data ?? []) as TopupRow[];
 
   // ---- Prepaid ledger model (0203) ----------------------------------------
   // Already typed by lib/customer-ledger.ts's .returns<…>() — no casts here.
@@ -550,7 +528,6 @@ export default async function TripsPage() {
     allStationsRes.error ||
     leavePeriodsRes.error ||
     terminatedDriversRes.error ||
-    topupsRes.error ||
     // A failed paid-invoice read must NOT degrade silently: (paidInvoicesRes.data
     // ?? []) would drop every payment row from the statement AND unlock every
     // paid-invoice trip, i.e. show false data rather than an error. Same rule as
@@ -589,7 +566,6 @@ export default async function TripsPage() {
       driverStateById={driverStateById}
       leavePeriods={leavePeriods}
       leaveLoadFailed={leaveLoadFailed}
-      topups={topups}
       specialCharges={specialCharges}
       paidInvoices={paidInvoices}
       ledgerBalances={ledgerBalances}

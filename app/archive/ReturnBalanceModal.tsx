@@ -1,32 +1,31 @@
 "use client";
 
-// BALANCE RETURN — the OUTBOUND counterpart of app/trips/AddBalanceModal.tsx,
-// and deliberately its mirror image: same two methods, same "a transfer carries
-// an ETF reference AND a photo of it" rule, same shell, same footer. Money
-// leaving is held to the standard money arriving is held to.
+// BALANCE RETURN — the Archive's refund door, and since the 0206 app cutover
+// it IS the ledger's refund door: recordRefund -> record_refund (0204), the
+// same RPC the Finance tab's ledger popup drives. The refund writes a
+// customer_ledger row with a credit-note number and shows up on the ledger and
+// the statement like any refund — no separate returns table, no mark that has
+// to be reconciled with a balance it did not move.
 //
-// **THERE IS NO AMOUNT FIELD, AND ONE MUST NEVER BE ADDED.** The figure is read
-// by return_customer_balance() from v_customer_amount_payable and frozen into
-// the row (0139). A number typed here would be a second opinion about a figure
-// the database already holds, and the only outcomes of a disagreement are paying
-// back the wrong sum or recording a return that does not match what was paid.
-// The amount is therefore SHOWN — read-only, from the same view row the table
-// behind this popup renders — so the person confirming can see what they are
-// about to hand over, without being able to change it.
+// **THERE IS STILL NO AMOUNT FIELD.** The figure shown is the customer's
+// Available — the exact cap record_refund enforces under the customer row
+// lock — and the whole of it is what this popup submits. A number typed here
+// would be a second opinion about a figure the database owns; if Available
+// moves between render and save, the RPC refuses and its message is shown
+// VERBATIM (Turki's ruling), which is the correct outcome of the race.
 //
-// RECORDING IS NOT DEDUCTING: this writes the MARK that the credit went back.
-// The balance figure is deliberately unchanged afterwards (lib/actions/finance.ts
-// says the same on the action itself), which is exactly why the "Returned" mark
-// has to travel beside the figure everywhere it is shown.
+// Proof rule is the RPC's, mirrored client-side so the button is never
+// enabled into a refusal: a bank transfer requires an ETF reference AND a
+// photo; cash carries both optionally.
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { formatSar, todayKey } from "@/lib/utils";
-import { returnCustomerBalance } from "@/lib/actions/finance";
+import { formatSar } from "@/lib/utils";
+import { recordRefund } from "@/lib/actions/finance";
 import { prepareUploadFiles } from "@/lib/upload-image";
-import type { ArchiveCustomerRow, CustomerAmountPayableRow } from "@/lib/db-types";
+import type { ArchiveCustomerRow, ArchiveCustomerFundsRow } from "@/lib/db-types";
 import { useApp } from "@/components/AppShell";
 import { t, fill } from "@/lib/i18n";
 import ScrollLock from "@/components/ScrollLock";
@@ -38,20 +37,20 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 export default function ReturnBalanceModal({
   open,
   customer,
-  payable,
+  funds,
   onClose,
 }: {
   open: boolean;
   customer: ArchiveCustomerRow | null;
-  // The view row for THIS customer. Its amount is displayed, never submitted —
-  // the RPC re-reads it server-side and freezes its own copy.
-  payable: CustomerAmountPayableRow | null;
+  // The funds row for THIS customer. Its Available is displayed AND submitted
+  // as the refund amount — the RPC re-checks the cap under the row lock, so a
+  // stale figure is refused, never silently honoured.
+  funds: ArchiveCustomerFundsRow | null;
   onClose: () => void;
 }) {
   const router = useRouter();
   const { lang } = useApp();
   const [method, setMethod] = useState<"" | "cash" | "bank_transfer">("");
-  const [returnedOn, setReturnedOn] = useState(todayKey());
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
   // The PREPARED file (image → WebP, compressed; PDF/other untouched), not the
@@ -68,7 +67,6 @@ export default function ReturnBalanceModal({
   useEffect(() => {
     if (!open) return;
     setMethod("");
-    setReturnedOn(todayKey());
     setReference("");
     setNote("");
     setPhoto(null);
@@ -77,13 +75,13 @@ export default function ReturnBalanceModal({
     setError(null);
   }, [open, customer]);
 
-  // Byte-equivalent to AddBalanceModal's rule, minus the amount: cash needs
-  // neither reference nor photo, a transfer needs both. The server action and
-  // the table's own CHECK constraint enforce the same thing — this is the
-  // client half, so the button is never enabled into a refusal.
+  // The RPC's own proof rule, client half: cash needs neither reference nor
+  // photo, a transfer needs both. There must also be something to refund —
+  // record_refund refuses a non-positive amount before it checks anything
+  // else, so a 0-Available row never reaches the server from here.
   const canSubmit =
     method !== "" &&
-    returnedOn !== "" &&
+    (funds?.available_sar ?? 0) > 0 &&
     (method === "cash" || (reference.trim() !== "" && photo !== null));
 
   function close() {
@@ -102,7 +100,11 @@ export default function ReturnBalanceModal({
     setError(null);
     const form = new FormData(e.currentTarget);
     form.set("customerId", customer.id);
-    form.set("returnedOn", returnedOn);
+    // THE WHOLE AVAILABLE, from the same row the figure above renders. The
+    // RPC re-reads Available under the customer row lock and refuses anything
+    // over it, so a figure gone stale between render and save is an error
+    // shown verbatim below — never a wrong payout.
+    form.set("amountSar", String(funds?.available_sar ?? 0));
     form.set("reference", reference);
     // The PREPARED file replaces the input's own raw-bytes entry — what
     // uploads is exactly what the state (and the gates) saw.
@@ -111,7 +113,7 @@ export default function ReturnBalanceModal({
     // try/catch: a network drop mid-await otherwise leaves the button stuck
     // on busy with no message — the finally owns the busy flag now.
     try {
-      const res = await returnCustomerBalance(form);
+      const res = await recordRefund(form);
       if (res.error) {
         setError(res.error);
         return;
@@ -156,7 +158,7 @@ export default function ReturnBalanceModal({
             {t("archive.ret.amountToReturn", lang)}
           </div>
           <div className="text-2xl font-semibold tabular-nums mt-0.5">
-            {payable ? formatSar(payable.amount_payable_sar) : "—"}
+            {funds ? formatSar(funds.available_sar) : "—"}
           </div>
           <div className="text-[11px] muted mt-1">
             {t("archive.ret.amountNote", lang)}
@@ -186,20 +188,6 @@ export default function ReturnBalanceModal({
               {t("archive.ret.method.bank_transfer", lang)}
             </label>
           </div>
-
-          <label className="flex flex-col gap-1.5 text-sm">
-            {/* The required asterisk stays a bare literal beside the label, the
-                way every other converted form in the app marks one. */}
-            <span className="font-medium">{t("archive.ret.fReturnedOn", lang)} *</span>
-            <input
-              value={returnedOn}
-              onChange={(e) => setReturnedOn(e.target.value)}
-              type="date"
-              required
-              className={INPUT}
-              style={INPUT_STYLE}
-            />
-          </label>
 
           <label className="flex flex-col gap-1.5 text-sm">
             {/* Keyed off the FORM STATE, not off the rendered label — the same

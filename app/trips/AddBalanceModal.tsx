@@ -18,7 +18,7 @@
 // cash too: cash can still be bank-deposited and carry an ETF ref + slip.
 // Calls the restructured recordTopup server action (lib/actions/finance.ts,
 // migration 0040) — same FormData-with-file convention as markInvoicePaid.
-// Photo viewing (history rows) uses getTopupProofSignedUrl, mirroring
+// Photo viewing (history rows) uses getLedgerPhotoSignedUrl, mirroring
 // InvoiceDetailModal's getProofSignedUrl.
 
 import { useEffect, useState } from "react";
@@ -26,12 +26,7 @@ import { useRouter } from "next/navigation";
 import { X, Plus, Printer, Image as ImageIcon } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar, todayKey } from "@/lib/utils";
-import {
-  recordTopup,
-  getTopupProofSignedUrl,
-  getLedgerPhotoSignedUrl,
-  type LedgerDocResult,
-} from "@/lib/actions/finance";
+import { recordTopup, getLedgerPhotoSignedUrl, type LedgerDocResult } from "@/lib/actions/finance";
 import { prepareUploadFiles } from "@/lib/upload-image";
 // The printable RCT sheet (0203) — view-model decides the words, docs kit the
 // look, printHtml the iframe. Same trio every other document print uses.
@@ -52,11 +47,9 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 
 export type AddBalanceCustomerOption = { id: string; name: string };
 
-// One history row from EITHER era, tagged by source: "legacy" rows are
-// customer_topups (pre-0203, photos behind getTopupProofSignedUrl, no receipt
-// number); "ledger" rows are customer_ledger topups (photos behind
-// getLedgerPhotoSignedUrl, RCT number in doc_number). FinanceTab merges the
-// two lists — this modal only routes by the tag.
+// One history row — a customer_ledger topup (0206 app cutover: the legacy
+// customer_topups arm and its era tag are gone with the table's readers).
+// Photos live behind getLedgerPhotoSignedUrl; the RCT number is doc_number.
 export type AddBalanceHistoryRow = {
   id: string;
   amount_sar: number;
@@ -64,7 +57,6 @@ export type AddBalanceHistoryRow = {
   method: "cash" | "bank_transfer" | null;
   reference: string | null;
   photo_path: string | null;
-  source: "legacy" | "ledger";
   doc_number: string | null;
 };
 
@@ -142,14 +134,10 @@ export default function AddBalanceModal({
   }
 
   // Mirrors InvoiceDetailModal's onViewProof — short-lived signed URL, never
-  // a public link (topup-proofs is a private bucket). Routed by the row's
-  // era tag: legacy rows are customer_topups ids, ledger rows are
-  // customer_ledger ids — same bucket, different table naming the file.
+  // a public link (topup-proofs is a private bucket). Every row is a
+  // customer_ledger id now; the legacy customer_topups routing is gone.
   async function onViewPhoto(row: AddBalanceHistoryRow) {
-    const r =
-      row.source === "ledger"
-        ? await getLedgerPhotoSignedUrl(row.id)
-        : await getTopupProofSignedUrl(row.id);
+    const r = await getLedgerPhotoSignedUrl(row.id);
     if (r.error || !r.data) {
       // `r.error` is the server action's own string and stays ENGLISH — only
       // OUR fallback translates.
