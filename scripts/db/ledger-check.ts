@@ -330,6 +330,99 @@ async function main(): Promise<void> {
     await refuses("refund of zero", REFUND_SQL, [customer, 0, "cash", null, null, ACTOR, null], "greater than zero");
     await refuses("anon denied record_topup", TOPUP_SQL, [customer, 100, "cash", null, null, ACTOR, null], "permission denied", "anon");
     await refuses("anon denied record_refund", REFUND_SQL, [customer, 100, "cash", null, null, ACTOR, null], "permission denied", "anon");
+
+    // =====================================================================
+    // THE STATEMENT'S AVAILABLE WALK, AGAINST LIVE ROWS (Turki's ruling).
+    //
+    // lib/statementViewModel.ts walks every prepaid customer's statement and
+    // the closing figure must equal v_customer_available.available_sar to the
+    // halala. scripts/statement-parity-check.ts pins that on fixtures; only a
+    // database can say whether it holds over REAL data, where the shapes are
+    // the ones nobody invented — a voided invoice, a 0203-era draw, a charge
+    // on a legacy document, a customer with no rows at all.
+    //
+    // THE WALK IS RESTATED IN SQL, not imported. Importing the TypeScript
+    // would prove the view-model agrees with itself; stating the same law in
+    // the other language and requiring the two to meet is what makes this an
+    // independent check. If they disagree, one of them is wrong and this says
+    // so without deciding which.
+    //
+    // EVERY PREPAID CUSTOMER, including the ones seeded by earlier scenarios
+    // in this same transaction — so the assertion runs over whatever state the
+    // harness has built, not a hand-picked row.
+    // =====================================================================
+    console.log("\n-- the statement's Available walk === v_customer_available");
+    {
+      const walk = await c.query(`
+        with prepaid as (
+          select distinct cu.id, cu.name
+            from public.customers cu
+            join public.projects p on p.customer_id = cu.id
+           where p.payment_mode = 'prepaid'
+        ),
+        -- Ledger: a draw, 0203's confirm-time draw and a reversal move Balance
+        -- and the reservation together, so they are worth nothing here.
+        led as (
+          select l.customer_id,
+                 coalesce(sum(l.amount_sar) filter (
+                   where l.entry_type not in ('invoice_draw','balance_applied','draw_reversal')), 0) as v
+            from public.customer_ledger l group by l.customer_id
+        ),
+        -- A delivered trip lowers Available the day it happens, at the view's
+        -- own per-item expression. Excluded when its invoice is LEGACY issued.
+        trp as (
+          select p.customer_id,
+                 coalesce(sum(round(coalesce(t.rate_sar, p.rate_per_trip_sar) * (1 + public.vat_rate()), 2)), 0) as v
+            from public.trips t
+            join public.projects p on p.id = t.project_id
+            left join public.invoices i on i.id = t.invoice_id
+           where t.delivered_at is not null
+             and not (i.id is not null
+                      and i.status not in ('draft','review')
+                      and i.amount_payable_sar is null)
+           group by p.customer_id
+        ),
+        -- Charges, same rule, void invoices excluded exactly as the app excludes them.
+        chg as (
+          select i.customer_id,
+                 coalesce(sum(round(sc.amount_sar * (1 + public.vat_rate()), 2)), 0) as v
+            from public.invoice_special_charges sc
+            join public.invoices i on i.id = sc.invoice_id
+           where i.status <> 'void'
+             and not (i.status not in ('draft','review') and i.amount_payable_sar is null)
+           group by i.customer_id
+        ),
+        -- Cash or transfer against an invoice raises it.
+        pay as (
+          select i.customer_id, coalesce(sum(ip.amount_sar), 0) as v
+            from public.invoice_payments ip
+            join public.invoices i on i.id = ip.invoice_id
+           where i.status <> 'void'
+           group by i.customer_id
+        )
+        select pr.name,
+               round(coalesce(led.v,0) - coalesce(trp.v,0) - coalesce(chg.v,0) + coalesce(pay.v,0), 2) as walked,
+               round(a.available_sar, 2) as view_says
+          from prepaid pr
+          join public.v_customer_available a on a.customer_id = pr.id
+          left join led on led.customer_id = pr.id
+          left join trp on trp.customer_id = pr.id
+          left join chg on chg.customer_id = pr.id
+          left join pay on pay.customer_id = pr.id
+         order by pr.name`);
+
+      const rows = walk.rows as { name: string; walked: string; view_says: string }[];
+      // A PASS ON ZERO CUSTOMERS IS NOT A PASS. The seed above creates one, so
+      // an empty result means the query stopped matching and every assertion
+      // below would be vacuously green.
+      check("the walk ran over at least one prepaid customer", rows.length > 0, true);
+      const off = rows.filter((r) => money(r.walked) !== money(r.view_says));
+      check(
+        `the walk closes on available_sar for all ${rows.length} prepaid customer(s)`,
+        off.map((r) => `${r.name}: walked ${r.walked} vs view ${r.view_says}`),
+        [],
+      );
+    }
   } finally {
     await c.query("rollback");
     await c.end();

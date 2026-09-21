@@ -85,6 +85,9 @@ type TripLite = {
   // wasn't declared on this narrower type until now. This is the "does this
   // trip belong to a PAID invoice" signal the paid-up balance filters on.
   invoiceLocked?: boolean;
+  // On a LEGACY issued invoice — computed in app/trips/page.tsx. Excluded from
+  // the statement's Available walk; see lib/statementViewModel.ts.
+  legacyInvoice?: boolean;
   // Statement rebuild (Batch 3) — already computed in app/trips/page.tsx
   // (trips.truck_id -> trucks.plate/capacity_m3 join) and flows straight
   // through boardProps.trips, same as invoiceLocked above. Display-only,
@@ -293,6 +296,7 @@ export default function FinanceTab({
         truckPlate: t.truckPlate ?? null,
         truckCapacityM3: t.truckCapacityM3 ?? null,
         invoiceLocked: t.invoiceLocked ?? false,
+        legacyInvoice: t.legacyInvoice ?? false,
       });
     }
     return m;
@@ -768,6 +772,10 @@ export default function FinanceTab({
         // passes [] / 0 / 0 / 0; its arm never reads them.
         ledger={statementLedger}
         balance={activeStatementRow?.balance ?? 0}
+        // THE HEADLINE AND THE RUNNING COLUMN. v_customer_available's own
+        // column, passed through — the same figure the Available cell on this
+        // row shows, so the table and the statement cannot disagree.
+        available={activeStatementRow?.available ?? 0}
         uninvoicedCount={statementFor ? (uninvoicedTripCounts[statementFor.customerId] ?? 0) : 0}
         uninvoicedSar={activeStatementRow?.uninvoiced ?? 0}
         trips={activeStatementRow?.consuming ?? []}

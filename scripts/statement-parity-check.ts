@@ -91,6 +91,31 @@ const ledgerRows: StatementLedgerEntry[] = [
 // SQL. This test does the arithmetic the VIEW owns in production — the app
 // never does — so the fixture can be self-consistent the way prod is.
 const LEDGER_BALANCE = round2(ledgerRows.reduce((s, e) => s + e.amount_sar, 0));
+// AVAILABLE OVER THE SAME ROWS, stated as a literal and re-derived below.
+//
+// Available is Balance − Uninvoiced − the confirmed-unsettled remainder, and
+// the three ledger types that move Balance WITHOUT moving Available — a draw,
+// 0203's confirm-time draw, and a reversal — cancel out of it. Over these rows
+// that leaves the top-ups, the refund and the two corrections:
+//
+//     20,000.00 + 5,000.00 − 1,500.00 + 250.25 − 100.10 = 23,650.15
+//
+// A LITERAL, not a reduce, so a fixture edit has to be acknowledged here
+// rather than silently followed — the same reason the DB harness re-derives
+// its figures offline before a socket opens. The check below is what keeps the
+// literal honest.
+const LEDGER_AVAILABLE = 23650.15;
+const AVAILABLE_TYPES = new Set(["topup", "refund", "correction"]);
+check(
+  "fixture — LEDGER_AVAILABLE is the non-draw ledger rows, to the halala",
+  LEDGER_AVAILABLE ===
+    round2(ledgerRows.filter((e) => AVAILABLE_TYPES.has(e.entry_type)).reduce((s, e) => s + e.amount_sar, 0)),
+);
+check(
+  "fixture — and it DIFFERS from Balance, or the two laws are indistinguishable",
+  LEDGER_AVAILABLE !== LEDGER_BALANCE,
+  `${LEDGER_AVAILABLE} vs ${LEDGER_BALANCE}`,
+);
 // The uninvoiced pair the footer renders: two delivered trips awaiting an
 // invoice, at the view's own uninvoiced_sar figure (2 × the VAT-inc rate).
 const UNINV_COUNT = 2;
@@ -145,9 +170,11 @@ const payments: StatementPaymentInput[] = [
 ];
 
 const tripMetaById = new Map<string, StatementTripMeta>([
-  ["tr-1", { truckPlate: "ABC 1234", truckCapacityM3: 30, invoiceLocked: true }],
-  ["tr-2", { truckPlate: "XYZ 9911", truckCapacityM3: 20, invoiceLocked: false }],
-  ["tr-3", { truckPlate: null, truckCapacityM3: null, invoiceLocked: false }],
+  // invoiceLocked drives the Type label's paid/unpaid half AND the ink, so the
+  // three trips deliberately split: one on a paid invoice, two not.
+  ["tr-1", { truckPlate: "ABC 1234", truckCapacityM3: 30, invoiceLocked: true, legacyInvoice: false }],
+  ["tr-2", { truckPlate: "XYZ 9911", truckCapacityM3: 20, invoiceLocked: false, legacyInvoice: false }],
+  ["tr-3", { truckPlate: null, truckCapacityM3: null, invoiceLocked: false, legacyInvoice: false }],
 ]);
 
 const basePrepaid: StatementVmInput = {
@@ -156,6 +183,10 @@ const basePrepaid: StatementVmInput = {
   mode: "prepaid",
   ledger: ledgerRows,
   balance: LEDGER_BALANCE,
+  // THE VIEW'S FIGURE. basePrepaid carries no trips, no charges and no
+  // payments, so on this fixture Available is the ledger sum itself — every
+  // case that adds rows states its own.
+  available: LEDGER_AVAILABLE,
   uninvoicedCount: UNINV_COUNT,
   uninvoicedSar: UNINV_SAR,
   // The postpaid-arm inputs, empty: the prepaid arm never reads them, and
@@ -341,28 +372,85 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// 3. THE MONEY LAW — the headline is the VIEW's figure, PASSED THROUGH
+// 3. THE MONEY LAW — the headline is the VIEW's figure, and the walk closes
+//    on it
 // ---------------------------------------------------------------------------
-// 0203's rule: Balance is v_customer_ledger_balance's column, and the app
-// does NO arithmetic on it. So the guard has two halves: the headline must be
-// the input balance UNTOUCHED (3a), and the running-balance walk down the
-// rows must land on the same sum the view computes over the same rows (3b) —
-// together they mean the page cannot contradict itself between its last row
-// and its headline. The test does the reduce; the view-model must not.
-
+// Turki's ruling: the running column is AVAILABLE, not Balance.
+// v_customer_available computes it as
+//
+//     Balance − Uninvoiced − confirmed-unsettled remainder
+//
+// and the walk states that same arithmetic event by event. So the guard has
+// two halves: the headline is the input `available` UNTOUCHED (3a), and the
+// walk's closing figure equals it to the halala (3b). Together they mean the
+// page cannot contradict itself between its last row and its headline, and
+// neither can contradict the database.
+//
+// THIS PAIR USED TO PIN BALANCE, and 3b used to read "the sum of the ledger
+// rows". Both were true under the old law and are false under this one — a
+// delivered trip lowers Available the day it happens and appears in no ledger
+// row at all. The assertions are restated, not relaxed: the closing figure is
+// still an equality against a figure the view owns.
 check(
-  "3a. prepaid headline === the input balance, untouched",
-  vmPrepaid.headline.value === basePrepaid.balance,
-  `headline ${vmPrepaid.headline.value} vs input ${basePrepaid.balance}`,
+  "3a. prepaid headline === the input available, untouched",
+  vmPrepaid.headline.value === basePrepaid.available,
+  `headline ${vmPrepaid.headline.value} vs input ${basePrepaid.available}`,
 );
 
 const lastRunningCell = vmPrepaid.rows[vmPrepaid.rows.length - 1].cells[6];
-const rawSum = ledgerRows.reduce((s, e) => s + e.amount_sar, 0);
 check(
-  "3b. the walk's last running balance === the sum of the rows (the view's own sum)",
-  lastRunningCell.kind === "num" && lastRunningCell.value === rawSum && round2(rawSum) === LEDGER_BALANCE,
-  `last running ${lastRunningCell.kind === "num" ? lastRunningCell.value : "(not num)"} vs sum ${rawSum} vs balance ${LEDGER_BALANCE}`,
+  "3b. the walk's closing figure === the headline Available",
+  lastRunningCell.kind === "num" && lastRunningCell.value === basePrepaid.available,
+  `last running ${lastRunningCell.kind === "num" ? lastRunningCell.value : "(not num)"} vs available ${basePrepaid.available}`,
 );
+
+// THE SAME CLOSE, ON A STATEMENT THAT ACTUALLY EXERCISES EVERY DELTA. basePrepaid
+// carries ledger rows alone, so 3b above would pass on a walk that had simply
+// kept the old Balance behaviour. This one adds the three row kinds that make
+// Available differ from Balance — a delivered trip, a special charge and a
+// shortfall payment — and states the arithmetic independently:
+//
+//     Available = ledger sum − trips − charges + payments
+//
+// with the draw/reversal rows contributing nothing. If the view-model's deltas
+// drift, this equality breaks even though 3b still holds.
+{
+  const trips = [
+    { id: "tr-1", trip_date: "2026-02-10", delivered_at: "2026-02-10T08:00:00Z", rate_sar: RATE, ref: "K1-0001", water_type: "potable" as const },
+  ];
+  const charges = [
+    { id: "sc-1", label: "Standby", amount_sar: 400, charge_date: "2026-02-12", created_at: "2026-02-12T09:00:00Z", legacyInvoice: false },
+  ];
+  const pays = [
+    { id: "ip-1", invoice_id: "i1", invoice_number: "026-000900", amount_sar: 250, method: "cash" as const,
+      reference: null, paid_on: "2026-02-20", note: null, created_at: "2026-02-20T10:00:00Z" },
+  ];
+  const tripGross = round2(RATE * 1.15);
+  const chargeGross = round2(400 * 1.15);
+  const expected = round2(LEDGER_AVAILABLE - tripGross - chargeGross + 250);
+  const vmAll = buildStatementVm({
+    ...basePrepaid,
+    available: expected,
+    trips,
+    charges,
+    invoicePayments: pays,
+    tripMetaById,
+  });
+  const close = vmAll.rows[vmAll.rows.length - 1].cells[6];
+  check(
+    `3c. a walk over EVERY delta closes on Available (${expected})`,
+    close.kind === "num" && close.value === expected && vmAll.headline.value === expected,
+    `closed on ${close.kind === "num" ? close.value : "(not num)"}, expected ${expected}`,
+  );
+  // THE CONTROL — the three new deltas are actually doing something. If trips,
+  // charges and payments all contributed 0 the walk would close on the ledger
+  // sum and 3c would have to be written against that instead.
+  check(
+    "3d. CONTROL: those rows really move it — the close is NOT the ledger-only figure",
+    expected !== LEDGER_AVAILABLE,
+    `${expected} vs ${LEDGER_AVAILABLE}`,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 4. THE PERIOD FILTER MOVES ROWS, NEVER THE HEADLINE
@@ -899,7 +987,17 @@ const partialPayments: StatementInvoicePaymentInput[] = [
   },
 ];
 
-const basePartial: StatementVmInput = { ...basePrepaid, invoicePayments: partialPayments };
+// THE VIEW'S FIGURE FOR THIS FIXTURE. Two shortfall payments settle part of a
+// confirmed invoice without touching Balance, so Available is the ledger-only
+// figure plus both of them. Stated here rather than left at basePrepaid's
+// value, which would put a headline on the page that its own last row
+// contradicts — the one thing case 3 exists to forbid.
+const PARTIAL_AVAILABLE = round2(LEDGER_AVAILABLE + PARTIAL_1 + PARTIAL_2);
+const basePartial: StatementVmInput = {
+  ...basePrepaid,
+  available: PARTIAL_AVAILABLE,
+  invoicePayments: partialPayments,
+};
 const vmPartial = buildStatementVm(basePartial);
 const htmlPartial = buildStatementHtml(vmPartial);
 const textPartialEn = documentText(htmlPartial);
@@ -965,48 +1063,56 @@ check(
   })(),
   "a settlement row the customer cannot read in his own language is not on the statement",
 );
-// THE CARRY-FORWARD IS A PER-ROW PROPERTY, NOT A GLOBAL ONE. An earlier
-// version of this case asserted the two settlement rows carried the SAME
-// figure — and went red on a correct statement, because a top-up landed
-// between 12 March and 22 March and legitimately moved the balance in the gap.
-// What must hold is narrower and stronger: the balance does not move ACROSS
-// each settlement row, i.e. each one repeats the row above it. An assertion
-// that forbids the ledger from moving at all is not the money law; it is a
-// misreading of it that happens to be green on a statement with no top-ups.
+// A SHORTFALL PAYMENT RAISES AVAILABLE, BY EXACTLY ITS OWN AMOUNT.
+//
+// THIS CASE PREVIOUSLY ASSERTED THE OPPOSITE — "neither payment moves the
+// running balance" — and it was right under the old law: cash settles an
+// invoice without touching the held Balance. Under Turki's ruling the column
+// is AVAILABLE, and cash against a confirmed invoice lowers that invoice's
+// unsettled remainder without lowering Balance, so Available rises. Same
+// money, different column, opposite assertion.
+//
+// Pinned per row rather than only on the close, because a walk that added the
+// two payments in the wrong PLACE would still close on the right total.
 check(
-  "14b. neither payment moves the running balance — closing still equals the headline",
+  "14b. each shortfall payment raises the running figure by its own amount",
   (() => {
     if (partialRows.length !== 2) return false;
-    if (!partialRows.every((r) => r.recordOnly)) return false;
-    if (!partialRows.every((r) => r.cells[5].kind === "num" && r.cells[5].sign === "none")) return false;
+    // Not record-only any more: these rows move the column.
+    if (partialRows.some((r) => r.recordOnly)) return false;
 
     const runAt = (vm: StatementVm, i: number) => {
       const c = vm.rows[i]?.cells[6];
       return c && c.kind === "num" ? c.value : null;
     };
-    // Each settlement row repeats the run figure of the row above it.
-    const carried = vmPartial.rows.every((r, i) =>
-      !r.key.startsWith("invoice-payment-") ? true : i > 0 && runAt(vmPartial, i) === runAt(vmPartial, i - 1),
-    );
-    // The LEDGER's own sequence is untouched: strip the record-only rows and
-    // what is left must be byte-for-byte the payment-free statement. This is
-    // the double-count check — a payment counted into the walk would shift
-    // every ledger run figure after it.
-    const ledgerRunsOf = (vm: StatementVm) =>
-      vm.rows.filter((r) => !r.recordOnly).map((r) => (r.cells[6]?.kind === "num" ? r.cells[6].value : null));
-    const sameWalk = JSON.stringify(ledgerRunsOf(vmPartial)) === JSON.stringify(ledgerRunsOf(vmPrepaid));
+    const amountAt = (vm: StatementVm, i: number) => {
+      const c = vm.rows[i]?.cells[5];
+      return c && c.kind === "num" ? c.value : null;
+    };
+    // Each payment row's run = the row above it PLUS the payment's own amount.
+    const stepped = vmPartial.rows.every((r, i) => {
+      if (!r.key.startsWith("invoice-payment-")) return true;
+      if (i === 0) return false;
+      const before = runAt(vmPartial, i - 1);
+      const amt = amountAt(vmPartial, i);
+      return before != null && amt != null && runAt(vmPartial, i) === round2(before + amt);
+    });
+    // AND THE CLOSE MOVES BY THE TWO TOGETHER. Adding the payments to the
+    // payment-free statement must raise its closing figure by exactly their
+    // sum — the double-count check from the other side.
+    const closeOf = (vm: StatementVm) => runAt(vm, vm.rows.length - 1);
+    const lifted = round2((closeOf(vmPrepaid) ?? 0) + PARTIAL_1 + PARTIAL_2);
 
+    // The close, the lift and the headline must all be the same number: the
+    // page cannot contradict itself between its last row and its headline.
     return (
-      carried &&
-      sameWalk &&
-      vmPartial.headline.value === vmPrepaid.headline.value &&
-      vmPartial.headline.value === LEDGER_BALANCE &&
-      runAt(vmPartial, vmPartial.rows.length - 1) === LEDGER_BALANCE
+      stepped &&
+      closeOf(vmPartial) === lifted &&
+      vmPartial.headline.value === PARTIAL_AVAILABLE &&
+      closeOf(vmPartial) === PARTIAL_AVAILABLE
     );
   })(),
-  `headline ${vmPartial.headline.value}, expected ${LEDGER_BALANCE}; runs ${JSON.stringify(
-    vmPartial.rows.map((r) => [r.key, r.cells[6]?.kind === "num" ? r.cells[6].value : null]),
-  )}`,
+  `runs ${JSON.stringify(vmPartial.rows.map((r) => [r.key, r.cells[6]?.kind === "num" ? r.cells[6].value : null]))}`,
 );
 check(
   "14c. a LEGACY paid invoice still prints its whole-invoice row, and a modern one prints once",
@@ -1307,8 +1413,8 @@ console.log("\n=== 16. A settlement's two halves sit together ===");
   // reorder moved rows, not money.
   check(
     "16h. reordering moved no money: the headline is still the view's figure",
-    vmPair.headline.value === LEDGER_BALANCE,
-    `${vmPair.headline.value} vs ${LEDGER_BALANCE}`,
+    vmPair.headline.value === LEDGER_AVAILABLE,
+    `${vmPair.headline.value} vs ${LEDGER_AVAILABLE}`,
   );
 }
 
@@ -1384,6 +1490,125 @@ console.log("\n=== 17. Row kind matches the Type label it is inking ===");
   check(
     "17f. …and the full note is offered on hover, from the same cell",
     /colKey !== "note"/.test(modalCode) && /<span title=\{full\}>/.test(modalCode),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 18. A DELIVERED TRIP SAYS WHETHER IT IS PAID
+// ---------------------------------------------------------------------------
+// Turki's ruling. "Paid" = on an invoice whose status is 'paid', which is
+// tripMetaById's `invoiceLocked`; everything else delivered is unpaid.
+//
+// THE WORDS ARE THE WHOLE MECHANISM ON PAPER. The screen inks the two green
+// and amber, but the printed statement and the PDF are monochrome by
+// construction, so a colour-only distinction would vanish on the document the
+// customer actually receives. That is why the Type cell carries the state in
+// text, in both languages, and why this case checks the DOCUMENT and not only
+// the view model.
+// ---------------------------------------------------------------------------
+console.log("\n=== 18. Trip rows say paid or unpaid ===");
+{
+  const L = (k: TKey) => ({ en: t(k, "en"), ar: t(k, "ar") });
+  // The stem and the qualifier are stored apart so the SCREEN can ink the
+  // qualifier alone; the label a reader sees — and the one the document
+  // prints — is the join. This restates the join independently of the view
+  // model, so a change to how the view model composes it fails HERE.
+  const STEM = L("trips.statement.typeDeliveryStem");
+  const join = (tail: { en: string; ar: string }) => ({
+    en: `${STEM.en} ${tail.en}`,
+    ar: `${STEM.ar} ${tail.ar}`,
+  });
+  const PAID = join(L("trips.statement.typePaidTail"));
+  const UNPAID = join(L("trips.statement.typeUnpaidTail"));
+  check(
+    "18a. the two labels are different words in BOTH languages",
+    PAID.en !== UNPAID.en && PAID.ar !== UNPAID.ar,
+    `${PAID.en}/${UNPAID.en}, ${PAID.ar}/${UNPAID.ar}`,
+  );
+
+  // tr-1 is on a paid invoice, tr-2 and tr-3 are not (see tripMetaById).
+  const vmTrips = buildStatementVm({ ...basePrepaid, trips, tripMetaById, available: 0 });
+  const typeOf = (key: string) => {
+    const c = vmTrips.rows.find((r) => r.key === key)?.cells[1];
+    return c && c.kind === "bi" ? c.value : null;
+  };
+  const toneOf = (key: string) => vmTrips.rows.find((r) => r.key === key)?.tone;
+
+  check(
+    "18b. a trip on a PAID invoice reads 'paid', both languages",
+    typeOf("trip-tr-1")?.en === PAID.en && typeOf("trip-tr-1")?.ar === PAID.ar,
+    JSON.stringify(typeOf("trip-tr-1")),
+  );
+  check(
+    "18c. every other delivered trip reads 'unpaid', both languages",
+    ["trip-tr-2", "trip-tr-3"].every((k) => typeOf(k)?.en === UNPAID.en && typeOf(k)?.ar === UNPAID.ar),
+    JSON.stringify(["trip-tr-2", "trip-tr-3"].map(typeOf)),
+  );
+  check(
+    "18d. …and the tone a colour surface inks by agrees with the words",
+    toneOf("trip-tr-1") === "paid" && toneOf("trip-tr-2") === "unpaid" && toneOf("trip-tr-3") === "unpaid",
+    JSON.stringify(["trip-tr-1", "trip-tr-2", "trip-tr-3"].map(toneOf)),
+  );
+  // A CHARGE IS UNTOUCHED — it is raised, not delivered, and has no paid
+  // reading of its own. Without this the rule could be applied to every item.
+  const vmCharged = buildStatementVm({
+    ...basePrepaid,
+    available: 0,
+    charges: [
+      { id: "sc-x", label: "Standby", amount_sar: 100, charge_date: "2026-02-01", created_at: "2026-02-01T08:00:00Z", legacyInvoice: false },
+    ],
+  });
+  const chargeRow = vmCharged.rows.find((r) => r.key === "charge-sc-x");
+  check(
+    "18e. CONTROL: a special charge carries neither label and no tone",
+    chargeRow != null &&
+      chargeRow.tone === undefined &&
+      chargeRow.cells[1].kind === "bi" &&
+      chargeRow.cells[1].value.en !== PAID.en &&
+      chargeRow.cells[1].value.en !== UNPAID.en,
+  );
+
+  // THE SPLIT IS A RENDERING AID, NOT A SECOND LABEL. If the halves ever stop
+  // reconstructing `value`, the screen and the document would say different
+  // things — the one failure this whole view-model exists to prevent.
+  const splitOf = (key: string) => {
+    const c = vmTrips.rows.find((r) => r.key === key)?.cells[1];
+    return c && c.kind === "bi" ? c.inkSplit : undefined;
+  };
+  check(
+    "18g. stem + tail reconstructs the whole label exactly, both languages",
+    ["trip-tr-1", "trip-tr-2", "trip-tr-3"].every((k) => {
+      const sp = splitOf(k);
+      const full = typeOf(k);
+      return (
+        sp != null &&
+        full != null &&
+        `${sp.stem.en} ${sp.tail.en}` === full.en &&
+        `${sp.stem.ar} ${sp.tail.ar}` === full.ar
+      );
+    }),
+    JSON.stringify(splitOf("trip-tr-1")),
+  );
+  check(
+    "18h. the INKED half is the qualifier alone — the stem carries no state",
+    splitOf("trip-tr-1")?.stem.en === splitOf("trip-tr-2")?.stem.en &&
+      splitOf("trip-tr-1")?.stem.ar === splitOf("trip-tr-2")?.stem.ar &&
+      splitOf("trip-tr-1")?.tail.en !== splitOf("trip-tr-2")?.tail.en,
+    `${splitOf("trip-tr-1")?.tail.en} vs ${splitOf("trip-tr-2")?.tail.en}`,
+  );
+  // A CHARGE GETS NO SPLIT — nothing on its row may be inked paid or unpaid.
+  const chargeCell = chargeRow?.cells[1];
+  check(
+    "18i. CONTROL: a special charge carries no split to ink",
+    chargeCell != null && chargeCell.kind === "bi" && chargeCell.inkSplit === undefined,
+  );
+
+  // THE DOCUMENT CARRIES IT TOO, in both languages — the half a colour could
+  // never deliver.
+  const doc = documentText(buildStatementHtml(vmTrips));
+  check(
+    "18f. the printed statement prints both labels, both languages",
+    [PAID.en, PAID.ar, UNPAID.en, UNPAID.ar].every((w) => doc.includes(w)),
   );
 }
 

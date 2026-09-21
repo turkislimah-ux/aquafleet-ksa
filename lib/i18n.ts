@@ -10317,8 +10317,8 @@ export const dict = {
       // caption above, on BOTH surfaces, because it is a note about how to
       // read the figures rather than a figure of its own.
       balanceNote: {
-        en: "The running balance is the money held on account. Delivered trips, special charges and payments made directly against an invoice are shown for the record and do not change it.",
-        ar: "الرصيد الجاري هو المبلغ المحتفظ به في الحساب. الرحلات المسلَّمة والرسوم الخاصة والمدفوعات المسدَّدة مباشرة على فاتورة تُعرض للسجل ولا تُغيّره.",
+        en: "The running figure is Available — the balance on account less delivered work not yet settled. Balance added raises it; a delivered trip or a special charge lowers it the day it happens; a payment against an invoice raises it. Balance applied to an invoice does not move it: it settles work already counted here.",
+        ar: "الرقم الجاري هو المتاح — الرصيد في الحساب ناقص العمل المسلَّم غير المسدَّد بعد. الرصيد المضاف يرفعه، والرحلة المسلَّمة أو الرسوم الخاصة تخفضه يوم حدوثها، والسداد على فاتورة يرفعه. أما الرصيد المطبَّق على فاتورة فلا يحركه: فهو يسدّد عملاً محسوباً هنا أصلاً.",
       },
       subPostpaid: {
         en: "Delivered trips and recorded payments, oldest first.",
@@ -10373,7 +10373,29 @@ export const dict = {
       // movements, so the Type cell has to say which kind of event this is
       // before it says anything about the water. Wording borrowed from
       // `notifications.trip_delivered`, not coined.
-      typeDelivery: { en: "Trip delivered", ar: "رحلة مسلَّمة" },
+      // A DELIVERED TRIP SAYS WHETHER IT IS PAID (Turki's ruling). Paid = on an
+      // invoice whose status is 'paid'; everything else delivered — no invoice,
+      // a draft one, a confirmed one still outstanding — is unpaid.
+      //
+      // STEM AND QUALIFIER, stored apart so the SCREEN can ink the qualifier
+      // alone (Turki's ruling): "Trip delivered —" stays in the table's own
+      // colour and only "paid" / "unpaid" carries the green or the amber. The
+      // view model joins them with a single space into one label, and that
+      // joined string is what the printed statement and the PDF render — both
+      // are monochrome by construction, which is exactly why the distinction
+      // has to live in the WORDS there.
+      //
+      // THE ARABIC QUALIFIERS ARE AUTHORED FOR THIS NOUN, not bolted on. رحلة
+      // is feminine, so مدفوعة / غير مدفوعة, never مدفوع. Splitting is safe
+      // HERE because there is one stem and both halves were written together
+      // for it; do not reuse these tails on another noun, whose gender would
+      // demand different agreement.
+      //
+      // `typeDelivery` stood here alone and is gone: a trip row is now always
+      // one of the two states.
+      typeDeliveryStem: { en: "Trip delivered —", ar: "رحلة مسلَّمة —" },
+      typePaidTail: { en: "paid", ar: "مدفوعة" },
+      typeUnpaidTail: { en: "unpaid", ar: "غير مدفوعة" },
       // THE INVOICE BEING SETTLED, on the prepaid statement. Two different
       // rows can settle one invoice and they are NOT the same event to the
       // customer reading them (Turki's ruling):

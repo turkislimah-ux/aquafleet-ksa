@@ -131,7 +131,16 @@ function bi(key: TKey): BiLabel {
 export type StatementTripMeta = {
   truckPlate: string | null;
   truckCapacityM3: number | null;
+  /** On an invoice whose status is 'paid'. Drives the Type label's paid/unpaid
+   *  half and, on the postpaid arm, the Settled-Balance filter. */
   invoiceLocked: boolean;
+  /** On a LEGACY issued invoice — confirmed or paid with a null
+   *  `amount_payable_sar`. Such a trip is in NEITHER term of
+   *  v_customer_available (its invoice is not draft/review, so it is not
+   *  Uninvoiced; its payable is null, so it is not confirmed-unsettled) and
+   *  its money is already inside the 0203 seeded opening balance. Deducting
+   *  it would take it off Available twice. */
+  legacyInvoice: boolean;
 };
 
 // One `invoice_payments` row — money arriving against an invoice, which since
@@ -226,6 +235,9 @@ export type StatementChargeInput = {
   amount_sar: number;
   charge_date: string | null;
   created_at: string;
+  /** On a LEGACY issued invoice — same test and same reason as
+   *  StatementTripMeta.legacyInvoice. Excluded from the Available walk. */
+  legacyInvoice: boolean;
 };
 
 export type StatementVmInput = {
@@ -235,9 +247,18 @@ export type StatementVmInput = {
   // ---- Prepaid inputs (0203 ledger model) --------------------------------
   /** The customer's ledger rows, oldest first. Prepaid only; ignored postpaid. */
   ledger: StatementLedgerEntry[];
-  /** v_customer_ledger_balance.balance_sar — THE headline figure, passed
-   *  through. Never derived from the rows here. */
+  /** v_customer_ledger_balance.balance_sar — the money ON THE LEDGER, passed
+   *  through. No longer the headline (see `available`); still the figure the
+   *  Finance tab's Balance column shows, carried so the two agree. */
   balance: number;
+  /** v_customer_available.available_sar — THE headline figure, and the figure
+   *  the running column closes on.
+   *
+   *  Balance − Uninvoiced − the unsettled remainder of confirmed ledger-era
+   *  invoices, computed IN THE VIEW. Passed through, never derived here: the
+   *  walk below is presentation of the same arithmetic row by row, and the
+   *  view is the authority it must agree with. */
+  available: number;
   /** Count of delivered-but-uninvoiced trips (lib/customer-ledger.ts's count
    *  query) and v_customer_uninvoiced.uninvoiced_sar, for the footer line. */
   uninvoicedCount: number;
@@ -312,7 +333,18 @@ export type StatementCell =
   | { kind: "empty" }
   | { kind: "date"; value: string }
   | { kind: "text"; value: string }
-  | { kind: "bi"; value: BiLabel }
+  | {
+      kind: "bi";
+      value: BiLabel;
+      // SCREEN-ONLY SPLIT of the SAME label. `value` is always the whole
+      // thing, so every renderer that ignores this field prints it complete —
+      // the document and the PDF do exactly that, and must, being monochrome.
+      // The screen uses it to ink the qualifier ALONE: on a trip row "Trip
+      // delivered —" keeps the table's own colour and only "paid"/"unpaid"
+      // carries the green or the amber. `stem + " " + tail` reconstructs
+      // `value` exactly, and a parity check holds it to that.
+      inkSplit?: { stem: BiLabel; tail: BiLabel };
+    }
   // A trip reference that links on screen (TripRefLink) and prints as plain
   // text in the document. `tripId` is carried so the modal can build the link
   // without re-deriving which rows are trips.
@@ -350,6 +382,18 @@ export type StatementRow = {
   // false on postpaid, which has no held balance for a row to move or not
   // move.
   recordOnly: boolean;
+  /**
+   * A TRIP ROW'S PAID STATE, for ink only. "paid" and "unpaid" appear on trip
+   * rows; every other row leaves it undefined.
+   *
+   * Carried BESIDE `kind` rather than folded into it because it is not a kind
+   * of event — it is the same event (a delivery) in two settlement states, and
+   * widening the kind union would make every renderer that switches on kind
+   * grow two arms for one thing. The WORDS are in the Type cell already, which
+   * is what carries the distinction onto the monochrome printed surfaces; this
+   * only tells a colour surface which colour.
+   */
+  tone?: "paid" | "unpaid";
   cells: StatementCell[];
 };
 
@@ -535,6 +579,11 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
     // requires a resolved charge_date and holds no opinion about where it came
     // from; invoice_special_charges.charge_date is nullable, so the row's own
     // created_at date is the fallback. Resolved here and nowhere else.
+    // Charges on a LEGACY issued invoice, by id. Same exclusion as a trip's
+    // `legacyInvoice` flag and for the same reason — the view counts them in
+    // neither term. A Set because the walk asks per row.
+    const legacyChargeIds = new Set(charges.filter((c) => c.legacyInvoice).map((c) => c.id));
+
     const chargeInputs: ConsumingCharge[] = charges.map((c) => ({
       id: c.id,
       charge_date: c.charge_date ?? c.created_at.slice(0, 10),
@@ -657,17 +706,75 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
               : 0,
     );
 
-    // FULL (unfiltered) walk — the running balance must reflect true
-    // cumulative history even when the visible rows are period-filtered.
-    // The walk is PRESENTATION: it shows the LEDGER rows' own signed amounts
-    // accumulating down the page. Every other row is stamped with the figure
-    // as it stands when that row happens, unchanged — that is what makes the
-    // column readable beside a delivered trip. The headline is NOT taken from
-    // the walk: that is the view's balance, passed in.
+    // THE RUNNING COLUMN IS AVAILABLE (Turki's ruling), not the ledger balance.
+    //
+    // Available is what the customer can actually spend:
+    //
+    //     Available = Balance − Uninvoiced − confirmed-unsettled remainder
+    //
+    // and v_customer_available computes it that way. This walk states the same
+    // arithmetic event by event, so the closing figure equals available_sar to
+    // the halala — pinned on fixtures by the parity check and against live rows
+    // by scripts/db/ledger-check.ts.
+    //
+    // WHY A DELIVERED TRIP NOW MOVES IT, when under the old law it did not.
+    // The column used to be Balance, which a trip genuinely does not touch —
+    // work is performed, money moves later. But a delivered trip DOES reduce
+    // Available the moment it happens, because it enters Uninvoiced; and when
+    // it is later invoiced and settled it leaves Uninvoiced and reduces Balance
+    // by the same figure. One deduction, at delivery, covers every stage.
+    //
+    // WHY A BALANCE DRAW DOES NOT. `balance_applied` and `invoice_draw` lower
+    // Balance by X and lower the invoice's unsettled remainder by X at the same
+    // instant, so Available is unmoved: (B−X) − U − (S−X) = B − U − S. A
+    // `draw_reversal` unwinds both halves for the same reason. The Amount cell
+    // still prints the figure — money really moved — but the column holds, and
+    // that is the arithmetic, not a display convention.
+    //
+    // WHY A SHORTFALL PAYMENT RAISES IT. Cash settles part of a confirmed
+    // invoice without touching Balance, so the unsettled remainder falls and
+    // Available rises by the amount paid.
+    //
+    // LEGACY-INVOICE WORK IS EXCLUDED. A trip or charge on a confirmed or paid
+    // invoice with a null payable sits in NEITHER term of the view — not
+    // Uninvoiced, not confirmed-unsettled — and its money is already inside the
+    // 0203 seeded opening balance. Deducting it here would take it off twice.
+    //
+    // FULL, UNFILTERED walk: the column must show true cumulative history even
+    // when the visible rows are period-filtered, which is why the filter is
+    // applied after it.
+    const availableDelta = (ev: PrepaidEvent): number => {
+      if (ev.src === "ledger") {
+        const e = ev.entry;
+        // A draw, its reversal and 0203's confirm-time draw all move Balance
+        // and the reservation together. See above.
+        return e.entry_type === "invoice_draw" ||
+          e.entry_type === "balance_applied" ||
+          e.entry_type === "draw_reversal"
+          ? 0
+          : e.amount_sar;
+      }
+      if (ev.src === "item") {
+        const it = ev.item;
+        const legacy =
+          it.kind === "trip" ? (tripMetaById.get(it.id)?.legacyInvoice ?? false) : legacyChargeIds.has(it.id);
+        // consumedAmount IS the view's own per-item expression —
+        // round2(rate × (1 + vat_rate)) with the same rate fallback — so the
+        // walk and v_customer_uninvoiced cannot round differently.
+        return legacy ? 0 : -it.consumedAmount;
+      }
+      // Cash or transfer against an invoice: the remainder falls, Balance does
+      // not, so Available rises.
+      if (ev.src === "invoicePayment") return ev.payment.amount_sar;
+      // A LEGACY whole-paid invoice is outside both terms entirely.
+      return 0;
+    };
+
     let run = 0;
     const walked = events.map((ev) => {
-      if (ev.src === "ledger") run += ev.entry.amount_sar;
-      return { ev, running: run };
+      const delta = availableDelta(ev);
+      run = round2(run + delta);
+      return { ev, running: run, delta };
     });
     const visible = walked.filter(({ ev }) => inPeriod(ev.date));
 
@@ -738,7 +845,7 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
                 ? "trips.statement.typeDrawReversal"
                 : "trips.statement.typeCorrection";
 
-    const rows: StatementRow[] = visible.map(({ ev, running }) => {
+    const rows: StatementRow[] = visible.map(({ ev, running, delta }) => {
       // The running-balance cell, identical on every row — a MOVING row shows
       // the figure it produced, a record-only row shows the figure it left
       // alone. One expression, so the two can never diverge in format.
@@ -828,7 +935,12 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
         return {
           key: `ledger-${e.id}`,
           kind: kindOf(e),
-          recordOnly: false,
+          // RECORD-ONLY NOW MEANS "DID NOT MOVE AVAILABLE", which on a ledger
+          // row is true of exactly the three that move Balance and the
+          // reservation together — a draw, 0203's confirm-time draw, and a
+          // reversal. Derived from the walk's own delta so the flag and the
+          // column can never disagree about the same row.
+          recordOnly: delta === 0,
           cells: [
             { kind: "date", value: ev.date },
             { kind: "bi", value: bi(typeKeyOf(e)) },
@@ -854,12 +966,41 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
         return {
           key: `${it.kind}-${it.id}`,
           kind: isTrip ? ("trip" as const) : ("charge" as const),
-          recordOnly: true,
+          ...(isTrip
+            ? { tone: (tripMetaById.get(it.id)?.invoiceLocked ? "paid" : "unpaid") as "paid" | "unpaid" }
+            : {}),
+          recordOnly: delta === 0,
           cells: [
             { kind: "date", value: ev.date },
             {
               kind: "bi",
-              value: bi(isTrip ? "trips.statement.typeDelivery" : "trips.statement.typeCharge"),
+              // A DELIVERED TRIP SAYS WHETHER IT IS PAID (Turki's ruling).
+              // Paid = on an invoice whose status is 'paid', which is
+              // tripMetaById's `invoiceLocked` — already computed in
+              // app/trips/page.tsx and already the flag the Settled-Balance
+              // filter trusts. Everything else delivered is unpaid: no
+              // invoice, a draft one, or a confirmed one still outstanding.
+              //
+              // STEM AND QUALIFIER ARE JOINED HERE, once, and the halves are
+              // carried alongside so the screen can ink the qualifier alone.
+              // Whoever renders `value` gets the whole label either way.
+              //
+              // Charges are untouched — a charge is raised, not delivered,
+              // and has no paid/unpaid reading of its own.
+              ...(isTrip
+                ? (() => {
+                    const stem = bi("trips.statement.typeDeliveryStem");
+                    const tail = bi(
+                      tripMetaById.get(it.id)?.invoiceLocked
+                        ? "trips.statement.typePaidTail"
+                        : "trips.statement.typeUnpaidTail",
+                    );
+                    return {
+                      value: { en: `${stem.en} ${tail.en}`, ar: `${stem.ar} ${tail.ar}` },
+                      inkSplit: { stem, tail },
+                    };
+                  })()
+                : { value: bi("trips.statement.typeCharge") }),
             },
             // Ref is the trip's own reference, through formatTripRef so the
             // "No ref" wording matches every other surface. A charge has none.
@@ -907,7 +1048,7 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
         return {
           key: `invoice-payment-${ip.id}`,
           kind: "settlement" as const,
-          recordOnly: true,
+          recordOnly: delta === 0,
           cells: [
             { kind: "date", value: ev.date },
             { kind: "bi", value: bi("trips.statement.typeShortfallPayment") },
@@ -946,7 +1087,7 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
       return {
         key: `payment-${p.id}`,
         kind: "settlement" as const,
-        recordOnly: true,
+        recordOnly: delta === 0,
         cells: [
           { kind: "date", value: ev.date },
           { kind: "bi", value: bi("trips.statement.typeInvoicePayment") },
@@ -976,13 +1117,13 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
       // account — is the one reader who does not get it.
       balanceNote: bi("trips.statement.balanceNote"),
       headline: {
-        // THE VIEW'S FIGURE, passed through — v_customer_ledger_balance. The
-        // walk above agrees with it by construction (the same ledger rows in
-        // the same order with the same signs; the merged record-only rows add
-        // nothing to it), but the view is the authority.
-        label: bi("trips.statement.footBalance"),
-        value: input.balance,
-        negative: input.balance < 0,
+        // THE VIEW'S FIGURE, passed through — v_customer_available.
+        // available_sar. The walk above reaches the same number by stating its
+        // arithmetic row by row, and the parity check and the DB harness both
+        // pin that; the VIEW remains the authority, and this is it.
+        label: bi("trips.finance.colAvailable"),
+        value: input.available,
+        negative: input.available < 0,
       },
       columns,
       rows,

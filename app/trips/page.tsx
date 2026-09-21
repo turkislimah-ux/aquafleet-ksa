@@ -96,6 +96,9 @@ export type SpecialChargeRow = {
   // second query — `invoice.status` is already joined below, just wasn't
   // surfaced past the mapping until now.
   paid: boolean;
+  /** On a LEGACY issued invoice (confirmed/paid, null payable). Excluded from
+   *  the statement's Available walk — see lib/statementViewModel.ts. */
+  legacyInvoice: boolean;
 };
 
 // Statement rebuild (Batch 3) — every PAID invoice, customer-tagged, feeding
@@ -158,8 +161,8 @@ export default async function TripsPage() {
     assignmentsRes, stationsRes, allStationsRes, leavePeriodsRes,
     terminatedDriversRes, topupsRes, paidInvoicesRes, specialChargesRes,
     ledgerBalancesRes, ledgerUninvoicedRes, ledgerAvailableRes, ledgerEntriesRes,
-    ledgerCorrectionsRes, ledgerVotesRes, uninvoicedCountsRes, invoicePaymentsRes,
-    companyRes, authRes,
+    ledgerCorrectionsRes, ledgerVotesRes, uninvoicedCountsRes, legacyInvoicesRes,
+    invoicePaymentsRes, companyRes, authRes,
   ] =
     await Promise.all([
       supabase
@@ -284,7 +287,9 @@ export default async function TripsPage() {
       // balance) — same rule as assembleForCustomerPeriod.
       supabase
         .from("invoice_special_charges")
-        .select("id, label, amount_sar, charge_date, created_at, invoice:invoices(customer_id, status)"),
+        .select(
+          "id, label, amount_sar, charge_date, created_at, invoice:invoices(customer_id, status, amount_payable_sar)",
+        ),
       // ---- Prepaid rebuild (0203): the ledger model, read ONLY through ----
       // ---- lib/customer-ledger.ts. Three view figures + the raw ledger ----
       // ---- rows + the correction gate's state. No arithmetic anywhere. ----
@@ -297,6 +302,24 @@ export default async function TripsPage() {
       // COUNT of uninvoiced deliveries per customer (the statement footer's
       // "{n} deliveries"); the AMOUNT beside it is always the view's.
       fetchUninvoicedTripCounts(supabase),
+      // ISSUED LEGACY INVOICES — confirmed or paid with a NULL payable, i.e.
+      // invoiceEra()'s "legacy" for a row that is no longer draft/review.
+      //
+      // The statement's Available walk must NOT deduct work on these. Such a
+      // trip or charge sits in neither term of v_customer_available — its
+      // invoice is not draft/review so it is not Uninvoiced, and its payable is
+      // null so it is not confirmed-unsettled — because its money is already
+      // inside the 0203 seeded opening balance. Deducting it would take it off
+      // Available a second time and the walk would never close on the view.
+      //
+      // ITS OWN QUERY rather than widening the paid-invoice read above: that
+      // one is status='paid' BY CONTRACT (it is what `invoiceLocked` means),
+      // and widening it to catch confirmed rows would silently relock trips.
+      supabase
+        .from("invoices")
+        .select("id")
+        .in("status", ["confirmed", "paid"])
+        .is("amount_payable_sar", null),
       // EVERY customer's invoice payments — the statement's settlement rows.
       // Since 0204 confirm moves no money, so a partly-settled invoice is the
       // NORMAL case and the whole-paid-invoice row alone understates the
@@ -320,6 +343,13 @@ export default async function TripsPage() {
   // fetched above, so ProjectsBoard never has to re-derive it per trip.
   const paidInvoices = (paidInvoicesRes.data ?? []) as PaidInvoiceRow[];
   const paidInvoiceIds = new Set(paidInvoices.map((i) => i.id));
+  // ISSUED LEGACY invoices. A trip on one of these is excluded from the
+  // statement's Available walk — the view counts it in neither term and its
+  // money is inside the 0203 opening balance, so deducting it would take it
+  // off twice. See the query above.
+  const legacyInvoiceIds = new Set(
+    ((legacyInvoicesRes.data ?? []) as { id: string }[]).map((i) => i.id),
+  );
 
   const trips = ((tripsRes.data ?? []) as JoinedTrip[]).map((t) => ({
     ...t,
@@ -329,6 +359,7 @@ export default async function TripsPage() {
     driverName: t.driver?.name ?? null,
     driverNameAr: t.driver?.name_ar ?? null,
     invoiceLocked: t.invoice_id != null && paidInvoiceIds.has(t.invoice_id),
+    legacyInvoice: t.invoice_id != null && legacyInvoiceIds.has(t.invoice_id),
   }));
 
   // Water stations lookup. `stations` (active-only) feeds every SELECTION picker
@@ -433,7 +464,10 @@ export default async function TripsPage() {
     amount_sar: number;
     charge_date: string | null;
     created_at: string;
-    invoice: { customer_id: string; status: string } | { customer_id: string; status: string }[] | null;
+    invoice:
+      | { customer_id: string; status: string; amount_payable_sar: number | null }
+      | { customer_id: string; status: string; amount_payable_sar: number | null }[]
+      | null;
   };
   const specialCharges: SpecialChargeRow[] = ((specialChargesRes.data ?? []) as RawSpecialCharge[])
     .map((c) => ({ ...c, invoice: Array.isArray(c.invoice) ? c.invoice[0] ?? null : c.invoice }))
@@ -446,6 +480,13 @@ export default async function TripsPage() {
       charge_date: c.charge_date,
       created_at: c.created_at,
       paid: c.invoice!.status === "paid",
+      // invoiceEra()'s test, applied to the charge's parent: issued AND no
+      // frozen payable. A draft/review invoice is NOT legacy — its charges are
+      // still Uninvoiced and the walk must keep deducting them.
+      legacyInvoice:
+        c.invoice!.status !== "draft" &&
+        c.invoice!.status !== "review" &&
+        c.invoice!.amount_payable_sar == null,
     }));
 
   // Same flatten-and-filter shape as the charges above, and for the same two
@@ -529,6 +570,7 @@ export default async function TripsPage() {
     ledgerCorrectionsRes.error ||
     ledgerVotesRes.error ||
     uninvoicedCountsRes.error ||
+    legacyInvoicesRes.error ||
     invoicePaymentsRes.error;
 
   return (

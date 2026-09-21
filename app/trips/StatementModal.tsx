@@ -3,12 +3,11 @@
 // Transaction-statement drill-in (Finance tab). Two modes:
 //   - prepaid: EVERYTHING that happened on the account, in one date-ordered
 //     list — balance added, work delivered, special charges raised, invoices
-//     paid, balance applied, refunds. The running balance walks on the rows
-//     that MOVE the money held on account and holds flat across the rows that
-//     merely record an event (a delivered trip, a direct invoice payment);
-//     vm.balanceNote says so in words, under the caption. The headline Balance
-//     is v_customer_ledger_balance's figure passed through, and the footer
-//     notes what is delivered but not yet invoiced.
+//     paid, balance applied, refunds. The running column is AVAILABLE
+//     (v_customer_available), so a delivered trip lowers it the day it happens
+//     and a balance draw does not move it at all; vm.balanceNote says so in
+//     words, under the caption. The headline is available_sar passed through,
+//     and the footer notes what is delivered but not yet invoiced.
 //   - postpaid: itemized delivered trips + Payment rows (paid invoices) — no
 //     balance/ledger concept (spec §8/§10: postpaid has no prepaid balance).
 //
@@ -199,8 +198,21 @@ function tdCls(colKey: StatementColumnKey): string {
 
 // A row's ink, applied to the cell CONTENT. Says what KIND of event the row
 // is, which is the one thing colour carries on this screen.
-function rowInk(kind: StatementRow["kind"]): string {
-  switch (kind) {
+// `useTone` off falls back to the KIND, which is what a trip row's Note cell
+// wants: the paid/unpaid colour belongs to the two words that say it and to
+// nothing else on the row (Turki's ruling).
+function rowInk(row: StatementRow, useTone = true): string {
+  // A TRIP ROW IS INKED BY ITS SETTLEMENT, not by being a trip. Green when the
+  // invoice behind it is paid, amber while it is not — the same two colours
+  // the rest of this screen already uses for "money settled" and "money still
+  // owed", so a reader does not learn a third vocabulary.
+  //
+  // SCREEN ONLY, and the words carry it everywhere else: the printed statement
+  // and the PDF are monochrome by construction, which is why the Type cell
+  // says "— paid" / "— unpaid" rather than relying on this.
+  if (useTone && row.tone === "paid") return `${CREDIT_INK_CLS} font-medium`;
+  if (useTone && row.tone === "unpaid") return RETURN_INK_CLS;
+  switch (row.kind) {
     case "topup":
     case "payment":
       return `${CREDIT_INK_CLS} font-medium`;
@@ -221,6 +233,7 @@ export default function StatementModal({
   mode,
   ledger,
   balance,
+  available,
   uninvoicedCount,
   uninvoicedSar,
   trips,
@@ -242,6 +255,9 @@ export default function StatementModal({
   // postpaid arm never reads them.
   ledger: StatementLedgerEntry[];
   balance: number;
+  /** v_customer_available.available_sar — the headline, and what the running
+   *  column closes on. Passed through; this screen derives no money. */
+  available: number;
   uninvoicedCount: number;
   uninvoicedSar: number;
   trips: ConsumingTrip[];
@@ -315,6 +331,7 @@ export default function StatementModal({
     mode,
     ledger,
     balance,
+    available,
     uninvoicedCount,
     uninvoicedSar,
     trips,
@@ -368,6 +385,7 @@ export default function StatementModal({
       mode,
       ledger,
       balance,
+      available,
       uninvoicedCount,
       uninvoicedSar,
       trips,
@@ -437,10 +455,22 @@ export default function StatementModal({
       case "text":
         return cell.value;
       case "bi":
-        // Type and Note are the ink-carrying text cells; everything else
-        // renders in the table's own colour.
+        // A SPLIT TYPE CELL INKS ITS QUALIFIER ONLY. "Trip delivered —" reads
+        // in the table's own colour and the green or amber lands on "paid" /
+        // "unpaid" alone, which is the whole of what the colour claims.
+        if (colKey === "type" && cell.inkSplit) {
+          return (
+            <>
+              {cell.inkSplit.stem[lang]} <span className={rowInk(row)}>{cell.inkSplit.tail[lang]}</span>
+            </>
+          );
+        }
+        // Type and Note are the other ink-carrying text cells; everything else
+        // renders in the table's own colour. Note takes its ink from the row
+        // KIND, never the tone: a trip's note is not the thing that says the
+        // trip is paid.
         return colKey === "type" || colKey === "note" ? (
-          <span className={rowInk(row.kind)}>{cell.value[lang]}</span>
+          <span className={rowInk(row, colKey === "type")}>{cell.value[lang]}</span>
         ) : (
           cell.value[lang]
         );
@@ -492,7 +522,7 @@ export default function StatementModal({
         // preserved from before this render was rewritten: the debit beside it
         // is plain weight, so bolding the credit would make a statement read as
         // if the money coming in mattered more than the work going out.
-        const ink = row.kind === "topup" ? CREDIT_INK_CLS : rowInk(row.kind);
+        const ink = row.kind === "topup" ? CREDIT_INK_CLS : rowInk(row);
         return <span className={ink}>{figure}</span>;
       }
     }

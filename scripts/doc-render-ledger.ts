@@ -194,6 +194,16 @@ const sixTypes: StatementLedgerEntry[] = [
 /** The view's arithmetic, restated so the FIXTURE is self-consistent the way
  *  prod is — v_customer_ledger_balance owns this sum in production, the app
  *  never does. A corpus script is the parity check's side of the line. */
+/** Available over the same rows: the three types that move Balance and the
+ *  invoice reservation together cancel out of it. This corpus has no trips,
+ *  charges or payments, so the ledger is the whole of it. */
+const availOf = (rows: StatementLedgerEntry[]) =>
+  round2(
+    rows
+      .filter((e) => !["invoice_draw", "balance_applied", "draw_reversal"].includes(e.entry_type))
+      .reduce((s, e) => s + e.amount_sar, 0),
+  );
+
 const sumOf = (rows: StatementLedgerEntry[]) =>
   round2(rows.reduce((s, e) => s + e.amount_sar, 0));
 
@@ -201,6 +211,10 @@ const baseStatement: Omit<StatementVmInput, "ledger" | "balance"> = {
   customerName: "شركة سدر لإدارة المرافق",
   projectName: "Riyadh North Compound",
   mode: "prepaid",
+  // The running column is AVAILABLE now, and this corpus's ledger rows are
+  // its only source — no trips, no charges, no payments — so Available here is
+  // simply the ledger's own sum. Stated as the view would, not derived.
+  available: 0,
   uninvoicedCount: 2,
   uninvoicedSar: round2(RATE_INC * 2),
   // Postpaid-arm inputs, empty: the prepaid arm never reads them.
@@ -221,7 +235,7 @@ write(
   "ledger-statement-sixtypes",
   "ar",
   buildStatementHtml(
-    buildStatementVm({ ...baseStatement, ledger: sixTypes, balance: sumOf(sixTypes) }),
+    buildStatementVm({ ...baseStatement, ledger: sixTypes, balance: sumOf(sixTypes), available: availOf(sixTypes) }),
   ),
 );
 
@@ -262,6 +276,6 @@ write(
   "ledger-statement-LONG-synthetic",
   "ar",
   buildStatementHtml(
-    buildStatementVm({ ...baseStatement, ledger: longRows, balance: sumOf(longRows) }),
+    buildStatementVm({ ...baseStatement, ledger: longRows, balance: sumOf(longRows), available: availOf(longRows) }),
   ),
 );

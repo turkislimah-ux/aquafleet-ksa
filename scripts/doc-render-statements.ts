@@ -1722,6 +1722,10 @@ const stmtBase: Omit<
   customerName: "شركة سدر لإدارة المرافق",
   projectName: "Riyadh North Compound",
   mode: "prepaid",
+  // THE RUNNING COLUMN AND THE HEADLINE. Each sheet below overrides it with
+  // the figure its own rows walk to — stated per case rather than derived, so
+  // a walk that drifts shows up as a mismatch instead of following the drift.
+  available: 0,
   uninvoicedCount: 2,
   uninvoicedSar: round2(STMT_RATE_INC * 2),
   // Prepaid reads no truck metadata — its table has no Truck or Capacity
@@ -1735,6 +1739,26 @@ const stmtBase: Omit<
  *  the app never computes it. Only LEDGER rows are summed — a delivered trip
  *  and an invoice payment are on the sheet and not in this total, which is the
  *  whole point the footnote explains. */
+// AVAILABLE OVER A SHEET'S OWN ROWS — the figure its running column walks to,
+// stated here the way v_customer_available states it rather than taken from
+// the view-model, so a sheet's headline cannot silently follow a drifting
+// walk. The three ledger types that move Balance and the reservation together
+// contribute nothing; work lowers it, a shortfall payment raises it.
+const stmtAvailable = (
+  rows: StatementLedgerEntry[],
+  trips: ConsumingTrip[] = [],
+  chargeRows: StatementChargeInput[] = [],
+  pays: StatementInvoicePaymentInput[] = [],
+) =>
+  round2(
+    rows
+      .filter((e) => !["invoice_draw", "balance_applied", "draw_reversal"].includes(e.entry_type))
+      .reduce((sum, e) => sum + e.amount_sar, 0) -
+      trips.reduce((sum, t) => sum + round2(t.rate_sar * 1.15), 0) -
+      chargeRows.filter((c) => !c.legacyInvoice).reduce((sum, c) => sum + round2(c.amount_sar * 1.15), 0) +
+      pays.reduce((sum, pmt) => sum + pmt.amount_sar, 0),
+  );
+
 const stmtBalance = (rows: StatementLedgerEntry[]) =>
   round2(rows.reduce((s, e) => s + e.amount_sar, 0));
 
@@ -1763,10 +1787,10 @@ const BUSY_TRIPS: ConsumingTrip[] = [
 ];
 
 const BUSY_CHARGES: StatementChargeInput[] = [
-  { id: "sc-1", label: "Tanker cleaning — Riyadh North", amount_sar: 450, charge_date: "2026-02-02", created_at: "2026-02-02T07:00:00Z" },
+  { id: "sc-1", label: "Tanker cleaning — Riyadh North", amount_sar: 450, charge_date: "2026-02-02", created_at: "2026-02-02T07:00:00Z", legacyInvoice: false },
   // NULL charge_date: pre-0032 rows carry none, and the view-model falls back
   // to created_at rather than dropping the row off a dated list.
-  { id: "sc-2", label: "بدل انتظار الصهريج", amount_sar: 275.5, charge_date: null, created_at: "2026-03-18T12:30:00Z" },
+  { id: "sc-2", label: "بدل انتظار الصهريج", amount_sar: 275.5, charge_date: null, created_at: "2026-03-18T12:30:00Z", legacyInvoice: false },
 ];
 
 const BUSY_PAYMENTS: StatementPaymentInput[] = [
@@ -1790,6 +1814,7 @@ write(
       ...stmtBase,
       ledger: BUSY_LEDGER,
       balance: stmtBalance(BUSY_LEDGER),
+      available: stmtAvailable(BUSY_LEDGER, BUSY_TRIPS, BUSY_CHARGES),
       trips: BUSY_TRIPS,
       charges: BUSY_CHARGES,
       invoicePayments: [],
@@ -1815,6 +1840,7 @@ write(
       ...stmtBase,
       ledger: BUSY_LEDGER,
       balance: stmtBalance(BUSY_LEDGER),
+      available: stmtAvailable(BUSY_LEDGER, BUSY_TRIPS, BUSY_CHARGES),
       trips: BUSY_TRIPS,
       charges: BUSY_CHARGES,
       invoicePayments: [],
@@ -1897,6 +1923,7 @@ write(
       ...stmtBase,
       ledger: LONG_LEDGER,
       balance: stmtBalance(LONG_LEDGER),
+      available: stmtAvailable(LONG_LEDGER, LONG_TRIPS),
       trips: LONG_TRIPS,
       charges: [],
       invoicePayments: [],
@@ -1980,6 +2007,7 @@ write(
       ...stmtBase,
       ledger: PARTIAL_LEDGER,
       balance: stmtBalance(PARTIAL_LEDGER),
+      available: stmtAvailable(PARTIAL_LEDGER, PARTIAL_TRIPS, [], PARTIAL_INVOICE_PAYMENTS),
       trips: PARTIAL_TRIPS,
       charges: [],
       // No legacy whole-invoice rows on this sheet — see the note above.
