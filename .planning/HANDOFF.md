@@ -1,7 +1,7 @@
 # SESSION HANDOFF
 
 ## State
-- **main = 84280de. DB at 0208** (prod + test). Prepaid rebuild + legacy
+- **main = 43d52e7. DB at 0208** (prod + test). Prepaid rebuild + legacy
   removal DONE; no branches. Gates green (637 DB).
 - **LEDGER IS THE ONLY MODEL.** 0207 dropped both pool views,
   return_customer_balance, dummy tables, invoice trip-id arrays,
