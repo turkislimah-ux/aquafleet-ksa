@@ -43,17 +43,16 @@
 // (freeze law 0027) and are never re-derived, so nothing needs it to run.
 //
 // PERIOD-MEMBERSHIP RULE (the one subtle correctness point in this file):
-// splitCoveredUnpaidItems/consumingItems are called over the customer's FULL
-// trip/topup/charge history up to periodEnd, THEN the result is filtered
-// down to items whose date falls within [periodStart, periodEnd] — never the
-// other way around. The FIFO pool-drain order depends on every item ever
-// consumed, not just this period's; pre-filtering to the period first would
-// let an item "skip the queue" and appear falsely Covered by ignoring
-// balance an earlier period's items already spent. lib/money.ts's own
-// header already established consumption depends only on
-// trip_date/delivered_at/rate (or charge_date/amount), never on invoice
-// linkage — this reuses that guarantee correctly. Callers MUST pass the
-// customer's full trip/topup/charge history, not a period-prefiltered slice.
+// consumingItems is called over the customer's FULL trip/charge history up to
+// periodEnd, THEN the result is filtered down to items whose date falls within
+// [periodStart, periodEnd] — never the other way around. It was the FIFO
+// pool's drain order that made this load-bearing: pre-filtering let an item
+// "skip the queue" and read as falsely Covered by ignoring balance an earlier
+// period's items had already spent. The pool is gone and each item now prices
+// itself (round2(rate * 1.15), independent of its neighbours), but the call
+// order stands as this file's convention — one queue built the same way for
+// every caller, filtered afterwards. Callers MUST pass the customer's full
+// trip/charge history, not a period-prefiltered slice.
 //
 // ── FROM HERE TO THE IMPORTS: THE SUPERSEDED (PRE-0203) PREPAID LAW ────────
 // Every paragraph below describes what this file did BEFORE the ledger era and
@@ -226,13 +225,11 @@
 // being assembled"): `reservedElsewhereIds` removes trips/charges already
 // claimed by ANOTHER non-void invoice from THIS invoice's line-item output,
 // so the same trip/charge can never appear on two invoices at once. Applied
-// AFTER splitCoveredUnpaidItems/consumingItems run on the FULL history (see
-// PERIOD-MEMBERSHIP RULE above) — a display/billing filter on the
-// already-computed split, never a pre-filter on the input arrays. Excluding
-// an item here does NOT change the FIFO pool math for every OTHER item in
-// the split (a reserved-elsewhere item still consumed its share of balance
-// when it was walked — this filter only hides it from THIS invoice's line
-// items, it doesn't un-consume it).
+// AFTER consumingItems runs on the FULL history (see PERIOD-MEMBERSHIP RULE
+// above) — a display/billing filter on the already-computed queue, never a
+// pre-filter on the input arrays. Excluding an item here changes nothing for
+// any OTHER item: each prices itself, and this filter only hides the item
+// from THIS invoice's line items.
 
 import { consumingItems, VAT_RATE, round2, type ConsumingTrip, type ConsumedItem } from "./money";
 import { calculateVat, type VatLineItem } from "./vat";

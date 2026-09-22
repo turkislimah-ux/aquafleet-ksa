@@ -259,10 +259,11 @@ export default async function TripsPage() {
           "id, customer_id, invoice_number, payment_method, payment_reference, payment_date, paid_at, grand_total_sar, amount_payable_sar",
         )
         .eq("status", "paid"),
-      // v3 Finance ledger source (2 of 2, with customer_topups above) — every
-      // special charge on a non-void invoice, customer-tagged via its parent
-      // invoice. Void-invoice charges are filtered out below (never consumed
-      // balance) — same rule as assembleForCustomerPeriod.
+      // The Finance tab's charge source — every special charge on a non-void
+      // invoice, customer-tagged via its parent invoice. Void-invoice charges
+      // are filtered out below (they never consumed balance) — same rule as
+      // assembleForCustomerPeriod. The ledger figures themselves are the four
+      // lib/customer-ledger reads further down, not a table read here.
       supabase
         .from("invoice_special_charges")
         .select(

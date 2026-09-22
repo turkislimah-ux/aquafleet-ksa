@@ -151,15 +151,15 @@ const SPECIAL_CHARGE_IMAGE_BUCKET = "special-charge-images";
 // "reserved elsewhere"; pass null when no invoice exists yet
 // (createDraftInvoice's pre-create assembly).
 //
-// v3: the special-charges fetch is now CUSTOMER-WIDE (every charge on every
+// v3: the special-charges fetch is CUSTOMER-WIDE (every charge on every
 // NON-VOID invoice for this customer, not just this invoiceId's own) — the
-// FIFO pool must see every charge that ever consumed it (see lib/invoice.ts's
+// consumption queue is built over the whole history (see lib/invoice.ts's
 // PERIOD-MEMBERSHIP RULE + lib/money.ts's "which invoices' charges
 // consume" note: void-invoice charges are excluded here, at the fetch, by
 // filtering out void invoice ids before the charges query even runs — this
 // IS the caller-side exclusion lib/money.ts's header defers to). Charges
 // belonging to another (non-void) invoice than the one being assembled are
-// still included in the FIFO input but excluded from the DISPLAYED
+// still included in that input but excluded from the DISPLAYED
 // chargeLines via reservedElsewhereIds, exactly like trips.
 //
 // Used by: previewInvoice() (read-only display, draft/review), confirmInvoice()

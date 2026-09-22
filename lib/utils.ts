@@ -606,7 +606,7 @@ export function addYearsToKey(key: string, years: number): string {
  * Riyadh it answers the previous month, and on 1 January the previous year.
  *
  * Every month comparison in the app now buckets on a DATE column (trips.trip_date,
- * customer_topups.topup_date), which is already local calendar terms — so
+ * customer_ledger.entry_date), which is already local calendar terms — so
  * monthKeyOf's plain slice and this function land on the same calendar by
  * construction. A short-lived localMonthKeyOf() existed here to convert
  * timestamptz values instead; re-basing those call sites onto trip_date removed

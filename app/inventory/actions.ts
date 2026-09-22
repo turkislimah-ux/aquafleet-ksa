@@ -305,7 +305,7 @@ export async function updatePart(
 // unreferenced app-code wrapper is gone.
 //
 // "Who acted" — same convention as unpay_invoice (app/trips/invoiceActions.ts)
-// and customer_topups.entered_by (lib/actions/finance.ts): the authenticated
+// and the ledger RPCs' p_actor (lib/actions/finance.ts): the authenticated
 // user's email, read server-side, never a UI text field.
 // ---------------------------------------------------------------------------
 

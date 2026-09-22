@@ -14,8 +14,8 @@
 // lib/vat.ts's calculateVat() would silently apply the wrong one.
 //
 // This file borrows ONLY the 15% rate from lib/money.ts (a read, an
-// import — not a modification of that file, and lib/vat.ts/prepaid.ts/
-// invoice.ts are never touched by anything in this file or its callers).
+// import — not a modification of that file, and lib/vat.ts and
+// lib/invoice.ts are never touched by anything in this file or its callers).
 // Its own rounding is round-half-up to 2 decimals — same arithmetic
 // Postgres's round(numeric, 2) and lib/money.ts's Math.round-based
 // round2() both already use for positive amounts, so the SQL side

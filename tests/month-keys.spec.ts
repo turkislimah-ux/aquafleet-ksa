@@ -15,7 +15,7 @@
 // stronger, and it is what these tests pin:
 //
 //   EVERY MONTH COMPARISON IN THE APP BUCKETS ON A **DATE** COLUMN.
-//   trips.trip_date (NOT NULL) and customer_topups.topup_date are already local
+//   trips.trip_date (NOT NULL) and customer_ledger.entry_date are already local
 //   calendar terms, so slicing them needs no timezone conversion at all, and
 //   cannot drift from currentMonthKey() in any timezone.
 //

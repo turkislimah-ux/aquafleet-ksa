@@ -153,8 +153,8 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
     }
     // NARROW ON `data`, NOT ON `error`. `error: string` includes "", which is
     // falsy, so `if (res.error)` does not discriminate the union — the same trap
-    // lib/prepaid.ts's priceDelivery already documents. Checking `data` is what
-    // actually proves which branch this is.
+    // app/trips/actions.ts's priceDelivery already documents. Checking `data`
+    // is what actually proves which branch this is.
     if (!res.data) { setLoadError(res.error); return; }
     const next = res.data;
     setLoadError(null);

@@ -1482,7 +1482,7 @@ export type ArchiveCustomerRow = {
 // customer_ledger refunds (the Returned mark and its record), and
 // customer_write_offs (the forced-archive audit). It replaced
 // CustomerAmountPayableRow, which read v_customer_amount_payable — a view the
-// receivables stack no longer defines anything by and 0207 drops.
+// receivables stack stopped defining anything by in 0206, and 0207 dropped.
 //
 // SIGN CONVENTION:
 //   available_sar <  0  the customer owes us      -> archiving is BLOCKED
