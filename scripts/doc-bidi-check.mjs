@@ -31,13 +31,53 @@
 // node with no `dir` isolate pinning it. That is greppable; the visual result
 // is not.
 //
-// It reports two shapes, which have different fixes:
+// It reports three shapes, which have different fixes:
 //   NAKED   — a text node holding both a strong-RTL char and an LTR run, with
 //             no isolate at all. The whole string was never passed through
 //             iso(). The browser reorders it.
 //   EDGE    — an isolate whose content STARTS or ENDS with a separator that
 //             abuts Arabic. iso() swept a boundary neutral into the LTR run,
 //             so it renders at that run's wrong end.
+//   ORDER   — an isolate whose characters do NOT land on the page in the order
+//             they were written. The pin did not hold. See below.
+//
+// ---------------------------------------------------------------------------
+// THE ORDER GUARD — the character-order check, promoted from a manual tool
+// ---------------------------------------------------------------------------
+// NAKED and EDGE are STRUCTURAL: they read the DOM and ask whether a string was
+// pinned, and whether the pin swallowed a separator. Neither one ever looks at
+// where a character actually lands. So the failure they cannot see is the pin
+// that is PRESENT and does not WORK — an `.iso` whose `dir` is missing, wrong,
+// or overridden by CSS. The node is inside `.iso`, so the NAKED test skips it;
+// no separator sits at its boundary, so the EDGE test passes it; and the sheet
+// prints "1,260.00 INV-026" as "INV-026 1,260.00" with nothing in the markup
+// looking wrong.
+//
+// doc-bidi-line.mjs has always been able to answer this, one element at a time,
+// by hand: it reads each character's box and prints the true visual order. This
+// is that reading made automatic over every isolate on every Arabic sheet.
+//
+// THE INVARIANT: inside an isolate that contains no strong-RTL character of its
+// own, the characters must appear left-to-right in the order they were written.
+// That is the whole claim `iso()` makes. If the browser moved any of them, the
+// isolate failed at its one job.
+//
+// WHY IT CANNOT OVER-REPORT, which is what kept doc-bidi-tokens.mjs advisory:
+//   · OUTERMOST ISOLATES ONLY. An inner `.iso dir="auto"` wrapping an Arabic
+//     month (isoUnit) is strong RTL and reads right-to-left correctly; judged on
+//     its own it would look reversed. It is never judged on its own.
+//   · A NESTED ISOLATE IS ONE ATOM. Its internal order is its own business, so
+//     the outer box is asked only where that whole box landed. This is the same
+//     reasoning doc-bidi-tokens.mjs applies to a token, applied to a run that
+//     really is top-level rather than to one the regex invented.
+//   · ANY STRONG-RTL CHARACTER OUTSIDE A NESTED ISOLATE DISQUALIFIES THE BOX.
+//     Then the box is genuinely mixed and plain logical order is not the rule.
+//   · LINES ARE READ ONE AT A TIME. A wrapped isolate continues on the next
+//     line, so atoms are ordered by line first and x second — otherwise every
+//     wrap would read as a reordering.
+//
+// ORDER EXITS 1, like EDGE, and for the same reason: there is no arrangement of
+// correct text that produces it.
 
 import { chromium } from "playwright";
 import { readdirSync } from "node:fs";
@@ -55,7 +95,7 @@ if (!files.length) {
 
 const browser = await chromium.launch({ channel: "chrome" });
 const page = await browser.newPage();
-let naked = 0, edge = 0;
+let naked = 0, edge = 0, order = 0;
 
 for (const f of files) {
   await page.goto(`file://${SRC}/${f}`, { waitUntil: "load" });
@@ -91,6 +131,64 @@ for (const f of files) {
         out.push({ kind: "EDGE", text: before.trim().slice(-20) + " ←[ " + t.slice(0, 60) });
       }
     }
+
+    // ----- ORDER: did the pin hold? (see this file's header) -----------------
+    // Atoms in LOGICAL order. A nested .iso is one atom; every other character
+    // is its own. A strong-RTL character that is not inside a nested isolate
+    // disqualifies the box — see the header.
+    const atoms = (box) => {
+      const list = [];
+      let mixed = false;
+      const walkNode = (node) => {
+        for (const child of node.childNodes) {
+          if (child.nodeType === 1) {
+            if (child.classList?.contains("iso")) {
+              const r = child.getBoundingClientRect();
+              list.push({ label: (child.textContent ?? "").trim().slice(0, 12), x: r.x, y: r.y });
+            } else {
+              walkNode(child);
+            }
+            continue;
+          }
+          if (child.nodeType !== 3) continue;
+          const s = child.nodeValue ?? "";
+          for (let k = 0; k < s.length; k++) {
+            if (!s[k].trim()) continue;
+            if (RTL.test(s[k])) { mixed = true; return; }
+            const r = document.createRange();
+            r.setStart(child, k);
+            r.setEnd(child, k + 1);
+            const bb = r.getBoundingClientRect();
+            list.push({ label: s[k], x: bb.x, y: bb.y });
+          }
+        }
+      };
+      walkNode(box);
+      return mixed ? null : list;
+    };
+
+    for (const box of document.querySelectorAll(".iso")) {
+      // Outermost only: an inner dir="auto" Arabic run is an atom, never a case.
+      if (box.parentElement?.closest(".iso")) continue;
+      const list = atoms(box);
+      if (!list || list.length < 2) continue;
+
+      // Line first, x second. A wrapped isolate resumes on the next line, and
+      // that is not a reordering.
+      const line = (a) => Math.round(a.y / 4);
+      const visual = list
+        .map((a, i) => ({ ...a, i }))
+        .sort((a, b) => (line(a) - line(b)) || (a.x - b.x));
+      const moved = visual.some((a, k) => a.i !== k);
+      if (moved) {
+        out.push({
+          kind: "ORDER",
+          text:
+            "written: " + list.map((a) => a.label).join("") +
+            "   |   rendered: " + visual.map((a) => a.label).join(""),
+        });
+      }
+    }
     return out;
   });
   if (!hits.length) continue;
@@ -100,13 +198,16 @@ for (const f of files) {
     const key = h.kind + h.text;
     if (seen.has(key)) continue;
     seen.add(key);
-    if (h.kind === "NAKED") naked++; else edge++;
+    if (h.kind === "NAKED") naked++; else if (h.kind === "EDGE") edge++; else order++;
     console.log(`  ${h.kind}  ${h.text}`);
   }
 }
 await browser.close();
-console.log(`\n${naked} NAKED, ${edge} EDGE across ${files.length} Arabic sheets`);
+console.log(`\n${naked} NAKED, ${edge} EDGE, ${order} ORDER across ${files.length} Arabic sheets`);
 if (edge) {
   console.error(`FAIL: ${edge} EDGE. An isolate swept a boundary separator into its LTR run.`);
-  process.exit(1);
 }
+if (order) {
+  console.error(`FAIL: ${order} ORDER. An isolate's characters did not print in written order — the pin did not hold.`);
+}
+if (edge || order) process.exit(1);
