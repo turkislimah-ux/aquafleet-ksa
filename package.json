@@ -20,6 +20,7 @@
     "test:pages": "npm run doc:render && node scripts/doc-a4-proof.mjs",
     "doc:clearance": "npm run doc:render && node scripts/doc-a4-proof.mjs --clearance",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:e2e": "npx playwright test",
     "test:guards": "node scripts/capacity-single-writer-check.mjs && node scripts/trucks-write-surface-check.mjs && node scripts/server-action-export-check.mjs && npx tsx scripts/upload-prep-check.ts",
     "test": "sh scripts/repo-root-check.sh && npm run typecheck && npm run test:money && npm run test:copy && npm run test:guards && npm run test:sheets"
   },
