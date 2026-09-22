@@ -1,8 +1,8 @@
 # SESSION HANDOFF
 
 ## State
-- **main = 43d52e7. DB at 0208** (prod + test). Prepaid rebuild + legacy
-  removal DONE; no branches. Gates green (637 DB).
+- **main = f3d9d3a. DB at 0209** (prod + test). No branches. Gates green
+  (637 DB).
 - **LEDGER IS THE ONLY MODEL.** 0207 dropped both pool views,
   return_customer_balance, dummy tables, invoice trip-id arrays,
   projects.payment_mode. prepaid.ts gone; money.ts = primitives.
@@ -23,8 +23,9 @@
 - **29 legacy invoices** render from frozen columns — do NOT drop.
 - **0208:** customer_ledger.entry_date — operator-picked, any date incl.
   future; record_topup 8 args. Balance/Available NEVER date-filtered.
-- **StickyTabs** (ui.tsx) pins tabs on 8 tabbed pages. Its `top-14` IS
-  the header's h-14 — move one, move both.
+- **0209:** anon = 0 in public — tables, sequences, functions, and the
+  postgres default ACL. A new grant or sequence re-opens it.
+- **StickyTabs** (ui.tsx): `top-14` IS the header's h-14 — move both.
 - **PARKED:** dummy wipe; snapshot-drop STEP 2; leaked-password off.
 
 ## Rules
@@ -32,6 +33,5 @@
   safe-build.sh; use `build:verify`. Dev rewrites tsconfig.json — restore,
   never stage.
 - CLAUDE.md + domain SKILL.md = rules. NEVER append.
-- `test:e2e` = Playwright unit specs, not in npm test.
 - Migration gate: draft, STOP, review. Cap 15 turns.
 - Under 2KB. If larger, Code is appending diary.
