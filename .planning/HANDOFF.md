@@ -1,7 +1,7 @@
 # SESSION HANDOFF
 
 ## State
-- **main = f598d59. DB at 0210** (prod + test). No branches. Gates green
+- **main = 175c72e. DB at 0210** (prod + test). No branches. Gates green
   (637 DB).
 - **LEDGER IS THE ONLY MODEL.** 0207 dropped the pool views,
   return_customer_balance, the dummy tables, the invoice trip-id arrays and
