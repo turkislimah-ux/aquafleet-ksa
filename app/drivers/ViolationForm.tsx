@@ -39,7 +39,7 @@ import {
   VIOLATION_IMAGE_ACCEPT,
   type ViolationType,
 } from "@/lib/violations";
-import { prepareUploadImage, MAX_PREPARED_FILE_BYTES } from "@/lib/upload-image";
+import { prepareUploadImage, MAX_PREPARED_FILE_BYTES, mbLabel } from "@/lib/upload-image";
 import {
   addViolationType,
   removeDriverViolationImage,
@@ -159,7 +159,7 @@ export function usePhotoDraft(lang: Lang): PhotoDraft {
         }
         if (prepared.file.size > MAX_PREPARED_FILE_BYTES) {
           setFile(null);
-          setError(fill(t("shared.upload.fileTooLarge", lang), { name: prepared.file.name }));
+          setError(fill(t("shared.upload.fileTooLarge", lang), { name: prepared.file.name, mb: mbLabel(MAX_PREPARED_FILE_BYTES) }));
           setInputKey((k) => k + 1);
           return;
         }

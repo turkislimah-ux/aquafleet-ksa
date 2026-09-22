@@ -48,7 +48,7 @@ import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { NAV, isLandingRoute } from "@/lib/nav";
 import { t, fill } from "@/lib/i18n";
-import { prepareUploadFiles, AVATAR_LONG_EDGE_PX } from "@/lib/upload-image";
+import { prepareUploadFiles, uploadErrorVars, AVATAR_LONG_EDGE_PX } from "@/lib/upload-image";
 import {
   fetchProfile, saveProfile, changePassword, uploadAvatar, removeAvatar,
   type ProfileData,
@@ -204,7 +204,7 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
       // compressed result, so a 3-4 MB camera photo now passes it.
       const r = await prepareUploadFiles([file], { longEdgePx: AVATAR_LONG_EDGE_PX });
       if (!r.ok) {
-        setAvatarError(fill(t(r.errorKey, lang), { name: r.name }));
+        setAvatarError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
         return;
       }
       const prepared = r.files[0];

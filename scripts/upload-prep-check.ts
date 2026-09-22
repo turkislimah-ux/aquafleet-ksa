@@ -13,6 +13,9 @@
 // NEGATIVE control — a case the gate must REFUSE — so a dead guard cannot
 // stay green.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import {
   prepareUploadImage,
   prepareUploadFiles,
@@ -21,6 +24,10 @@ import {
   batchBytes,
   MAX_PREPARED_FILE_BYTES,
   MAX_BATCH_BYTES,
+  MAX_REQUEST_BYTES,
+  IMAGE_TARGET_BYTES,
+  mbLabel,
+  uploadErrorVars,
   LONG_EDGE_PX,
   AVATAR_LONG_EDGE_PX,
   WEBP_QUALITY,
@@ -105,6 +112,51 @@ async function main() {
   const batchEmpty = await prepareUploadFiles([]);
   check("empty pick prepares to an empty batch", batchEmpty.ok === true && batchEmpty.files.length === 0);
 
+  // --- The batch TOTAL, which is a different gate from the per-file one -----
+  // Two files that each fit and together do not. This is the case eleven of
+  // the thirteen upload surfaces never checked, because the total used to be
+  // the caller's job; it is now inside prepareUploadFiles so every surface has
+  // it. Non-images on purpose: they are passed through untouched, so their
+  // sizes are exactly what the request would carry.
+  const twoThirds = Math.ceil((MAX_BATCH_BYTES * 2) / 3);
+  const pdfA = new File([new Uint8Array(1)], "a.pdf", { type: "application/pdf" });
+  const pdfB = new File([new Uint8Array(1)], "b.pdf", { type: "application/pdf" });
+  Object.defineProperty(pdfA, "size", { value: twoThirds });
+  Object.defineProperty(pdfB, "size", { value: twoThirds });
+  check("each file on its own is under the per-file ceiling",
+    twoThirds <= MAX_PREPARED_FILE_BYTES);
+  check("but together they exceed the batch ceiling",
+    twoThirds * 2 > MAX_BATCH_BYTES);
+
+  const batchTotal = await prepareUploadFiles([pdfA, pdfB]);
+  check(
+    "batch refuses on the TOTAL, with the batchTooLarge key",
+    batchTotal.ok === false && batchTotal.errorKey === "shared.upload.batchTooLarge",
+  );
+
+  // …and the opt-out, for the pickers that post one file per request. Same two
+  // files, same total, allowed — because that pick is never one body.
+  const batchSeparate = await prepareUploadFiles([pdfA, pdfB], { sentSeparately: true });
+  check(
+    "sentSeparately skips the total gate (one file per request)",
+    batchSeparate.ok === true && batchSeparate.files.length === 2,
+  );
+
+  // --- The message variables --------------------------------------------
+  // The limit a person reads comes from the constant the gate enforces, so the
+  // two cannot drift. Asserted per key because the two messages quote
+  // different ceilings.
+  check("mbLabel renders whole and half megabytes", mbLabel(3.5 * 1024 * 1024) === "3.5" && mbLabel(4 * 1024 * 1024) === "4");
+  if (batchTotal.ok === false) {
+    check("batchTooLarge quotes the BATCH ceiling",
+      uploadErrorVars(batchTotal).mb === mbLabel(MAX_BATCH_BYTES));
+  }
+  if (batchHuge.ok === false) {
+    check("fileTooLarge quotes the PER-FILE ceiling",
+      uploadErrorVars(batchHuge).mb === mbLabel(MAX_PREPARED_FILE_BYTES));
+    check("fileTooLarge still names the file", uploadErrorVars(batchHuge).name === "huge.pdf");
+  }
+
   // --- isImageFile ---------------------------------------------------------
   check("isImageFile: image/jpeg -> true", isImageFile(fakeJpeg) === true);
   check("isImageFile: application/pdf -> false", isImageFile(pdf) === false);
@@ -117,9 +169,30 @@ async function main() {
   check('webpName(".hidden") keeps a leading dot-name intact', webpName(".hidden") === ".hidden.webp");
 
   // --- Size gates (the exact expressions the modals use) -------------------
-  check("per-file ceiling is 10 MB", MAX_PREPARED_FILE_BYTES === 10 * 1024 * 1024);
-  check("batch ceiling is 14 MB (headroom under the 15mb body limit)", MAX_BATCH_BYTES === 14 * 1024 * 1024);
-  check("batch ceiling stays UNDER the 15 MB framework limit", MAX_BATCH_BYTES < 15 * 1024 * 1024);
+  //
+  // THE ORDERING IS THE INVARIANT, not any one number. Vercel kills a request
+  // body over ~4.5 MB at the edge, before a single line of this app runs, so
+  // every limit below has to sit under the one outside it or the user meets a
+  // failure nothing here can explain. Pinning the chain means a later edit
+  // cannot raise one rung past another and quietly reopen that.
+  check(
+    "image target < per-file ceiling",
+    IMAGE_TARGET_BYTES < MAX_PREPARED_FILE_BYTES,
+  );
+  check(
+    "per-file ceiling <= batch ceiling",
+    MAX_PREPARED_FILE_BYTES <= MAX_BATCH_BYTES,
+  );
+  check("batch ceiling < request limit", MAX_BATCH_BYTES < MAX_REQUEST_BYTES);
+  check(
+    "request limit stays under Vercel's ~4.5 MB body cap",
+    MAX_REQUEST_BYTES <= 4.5 * 1024 * 1024,
+  );
+  // The headroom between the batch and the request is what carries the form's
+  // own fields and the multipart framing. Zero would mean a batch exactly at
+  // the ceiling still overflows the request.
+  check("batch ceiling leaves headroom under the request limit",
+    MAX_REQUEST_BYTES - MAX_BATCH_BYTES >= 256 * 1024);
 
   const under = { size: MAX_PREPARED_FILE_BYTES };
   const over = { size: MAX_PREPARED_FILE_BYTES + 1 };
@@ -127,9 +200,10 @@ async function main() {
   // NEGATIVE control: the gate must be able to refuse.
   check("per-file gate REFUSES one byte over the limit", over.size > MAX_PREPARED_FILE_BYTES);
 
-  const okBatch = [{ size: 7 * 1024 * 1024 }, { size: 7 * 1024 * 1024 }];
-  const bigBatch = [{ size: 7 * 1024 * 1024 }, { size: 7 * 1024 * 1024 }, { size: 1 }];
-  check("batchBytes sums correctly", batchBytes(okBatch) === 14 * 1024 * 1024);
+  const half = Math.floor(MAX_BATCH_BYTES / 2);
+  const okBatch = [{ size: half }, { size: MAX_BATCH_BYTES - half }];
+  const bigBatch = [{ size: half }, { size: MAX_BATCH_BYTES - half }, { size: 1 }];
+  check("batchBytes sums correctly", batchBytes(okBatch) === MAX_BATCH_BYTES);
   check("batch gate ADMITS a batch exactly at the limit", !(batchBytes(okBatch) > MAX_BATCH_BYTES));
   // NEGATIVE control: the gate must be able to refuse.
   check("batch gate REFUSES one byte over the limit", batchBytes(bigBatch) > MAX_BATCH_BYTES);
@@ -142,6 +216,22 @@ async function main() {
   // if someone "unifies" them the avatar payload win silently dies.
   check("avatar edge strictly smaller than default edge", AVATAR_LONG_EDGE_PX < LONG_EDGE_PX);
   check("WebP quality is 0.85", WEBP_QUALITY === 0.85);
+
+  // --- next.config.js states the SAME limit, and this is what proves it -----
+  // MAX_REQUEST_BYTES and serverActions.bodySizeLimit are one number written in
+  // two files. Nothing else can catch them disagreeing: if the config is the
+  // larger of the two the framework accepts a body the platform then kills, and
+  // if it is the smaller the client gates admit a request the framework rejects.
+  // Either way the operator sees a failed save and no message.
+  const nextConfig = readFileSync(
+    join(__dirname, "..", "next.config.js"),
+    "utf8",
+  );
+  const declared = /bodySizeLimit:\s*"([^"]+)"/.exec(nextConfig)?.[1] ?? "(absent)";
+  check(
+    `next.config.js bodySizeLimit "${declared}" matches MAX_REQUEST_BYTES`,
+    declared === `${mbLabel(MAX_REQUEST_BYTES)}mb`,
+  );
 
   if (failures > 0) {
     console.error(`upload-prep-check: ${failures} FAILED`);

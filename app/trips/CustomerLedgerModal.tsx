@@ -38,7 +38,7 @@ import {
   getLedgerPhotoSignedUrl,
   type LedgerDocResult,
 } from "@/lib/actions/finance";
-import { prepareUploadFiles } from "@/lib/upload-image";
+import { prepareUploadFiles, uploadErrorVars } from "@/lib/upload-image";
 import { buildLedgerDocVm } from "@/lib/docvm/ledgerDoc";
 import { buildLedgerDocHtml } from "@/lib/docs/ledgerDoc";
 import { printHtml } from "@/lib/printHtml";
@@ -508,7 +508,7 @@ export default function CustomerLedgerModal({
                       const r = await prepareUploadFiles([f]);
                       if (!r.ok) {
                         setRefPhoto(null);
-                        setRefundError(fill(t(r.errorKey, lang), { name: r.name }));
+                        setRefundError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
                         setRefPhotoKey((k) => k + 1);
                         return;
                       }

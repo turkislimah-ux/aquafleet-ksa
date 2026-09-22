@@ -24,7 +24,7 @@ import { X } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { recordRefund } from "@/lib/actions/finance";
-import { prepareUploadFiles } from "@/lib/upload-image";
+import { prepareUploadFiles, uploadErrorVars } from "@/lib/upload-image";
 import type { ArchiveCustomerRow, ArchiveCustomerFundsRow } from "@/lib/db-types";
 import { useApp } from "@/components/AppShell";
 import { t, fill } from "@/lib/i18n";
@@ -238,7 +238,7 @@ export default function ReturnBalanceModal({
                   const r = await prepareUploadFiles([f]);
                   if (!r.ok) {
                     setPhoto(null);
-                    setError(fill(t(r.errorKey, lang), { name: r.name }));
+                    setError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
                     setPhotoKey((k) => k + 1);
                     return;
                   }

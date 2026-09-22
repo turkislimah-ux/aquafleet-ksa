@@ -18,6 +18,7 @@
 // The other three restores below (driver, truck, staff) are plain updates
 // because they genuinely are single-table.
 
+import { MAX_PREPARED_FILE_BYTES, mbLabel } from "@/lib/upload-image";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { lookupKey } from "@/lib/slug";
@@ -41,7 +42,10 @@ import type {
 } from "@/lib/db-types";
 
 const BUCKET = "archive-documents";
-const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB — scans/PDFs run larger than photos
+// The server half of the upload ceiling. ONE constant with the client gate
+// (lib/upload-image.ts), because a server limit that is looser than the client
+// one is not a second line of defence - it is a number nobody is enforcing.
+const MAX_FILE_BYTES = MAX_PREPARED_FILE_BYTES;
 
 async function actorEmail(supabase: ReturnType<typeof createClient>): Promise<string | null> {
   const { data } = await supabase.auth.getUser();
@@ -586,7 +590,7 @@ export async function uploadArchiveDocumentFile(
 
   if (!documentId) return { error: "Document is required." };
   if (!(file instanceof File) || file.size === 0) return { error: "File is required." };
-  if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
+  if (file.size > MAX_FILE_BYTES) return { error: `File too large (max ${mbLabel(MAX_FILE_BYTES)} MB).` };
 
   const supabase = createClient();
 

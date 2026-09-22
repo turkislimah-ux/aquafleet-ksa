@@ -26,7 +26,7 @@ import { invoiceStatusLabel, paymentMethodLabel, waterTypeLabel } from "@/lib/en
 // English — see the note there.
 import { formatDate, formatDateLang, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
-import { prepareUploadFiles } from "@/lib/upload-image";
+import { prepareUploadFiles, uploadErrorVars } from "@/lib/upload-image";
 import { round2 } from "@/lib/vat";
 import { groupInvoiceLines } from "@/lib/invoiceDisplay";
 import {
@@ -689,7 +689,7 @@ export default function InvoiceDetailModal({
       if (!r.ok) {
         setChargeImageFile(null);
         setChargeImageInputKey((k) => k + 1);
-        setActionError(fill(t(r.errorKey, lang), { name: r.name }));
+        setActionError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
         return;
       }
       setActionError(null);
@@ -703,7 +703,7 @@ export default function InvoiceDetailModal({
     // travels (compress image, refuse undecodable/oversize by name).
     const r = await prepareUploadFiles([file]);
     if (!r.ok) {
-      setActionError(fill(t(r.errorKey, lang), { name: r.name }));
+      setActionError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
       return;
     }
     const prepared = r.files[0];
@@ -831,7 +831,7 @@ export default function InvoiceDetailModal({
       if (proof instanceof File && proof.size > 0) {
         const r = await prepareUploadFiles([proof]);
         if (!r.ok) {
-          setActionError(fill(t(r.errorKey, lang), { name: r.name }));
+          setActionError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
           return;
         }
         const prepared = r.files[0];
@@ -891,7 +891,7 @@ export default function InvoiceDetailModal({
       if (proof instanceof File && proof.size > 0) {
         const r = await prepareUploadFiles([proof]);
         if (!r.ok) {
-          setActionError(fill(t(r.errorKey, lang), { name: r.name }));
+          setActionError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
           return;
         }
         const prepared = r.files[0];

@@ -18,7 +18,7 @@ import { Btn } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText } from "@/lib/i18n";
 import { toLatinDigits } from "@/lib/digits";
-import { prepareUploadFiles } from "@/lib/upload-image";
+import { prepareUploadFiles, uploadErrorVars } from "@/lib/upload-image";
 import { cn, formatDate } from "@/lib/utils";
 import {
   ARCHIVE_GROUP_COLORS, ARCHIVE_STATUS_PILL, archiveStatusLabel, docStatus, groupDot,
@@ -835,9 +835,9 @@ export function DocumentModal({
     // on busy with no message. Uploads are one file per request, so a batch
     // gate is not needed here — no single request can exceed the body limit.
     try {
-      const r = await prepareUploadFiles(picked);
+      const r = await prepareUploadFiles(picked, { sentSeparately: true });
       if (!r.ok) {
-        setError(fill(t(r.errorKey, lang), { name: r.name }));
+        setError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
         return;
       }
       for (const file of r.files) {
@@ -1251,9 +1251,9 @@ export function DocumentModal({
             // compressed (and the size shown is the size that will upload);
             // PDFs/Office files pass through untouched.
             void (async () => {
-              const r = await prepareUploadFiles(picked);
+              const r = await prepareUploadFiles(picked, { sentSeparately: true });
               if (!r.ok) {
-                setError(fill(t(r.errorKey, lang), { name: r.name }));
+                setError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
                 return;
               }
               setError(null);
@@ -1465,9 +1465,9 @@ export function RenewModal({
             // compressed (and the size shown is the size that will upload);
             // PDFs/Office files pass through untouched.
             void (async () => {
-              const r = await prepareUploadFiles(picked);
+              const r = await prepareUploadFiles(picked, { sentSeparately: true });
               if (!r.ok) {
-                setError(fill(t(r.errorKey, lang), { name: r.name }));
+                setError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
                 return;
               }
               setError(null);

@@ -26,6 +26,7 @@
 // submit. If the two ever disagree, the RPC wins and its message is what the
 // user sees — every error below is surfaced verbatim.
 
+import { MAX_PREPARED_FILE_BYTES, mbLabel } from "@/lib/upload-image";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -61,7 +62,10 @@ const PHOTO_BUCKET = "topup-proofs";
 // Server backstop matching app/archive/actions.ts — the client compresses
 // images and gates at this same figure BEFORE submit; this is the layer that
 // holds when the client is bypassed or stale.
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// The server half of the upload ceiling. ONE constant with the client gate
+// (lib/upload-image.ts), because a server limit that is looser than the client
+// one is not a second line of defence - it is a number nobody is enforcing.
+const MAX_FILE_BYTES = MAX_PREPARED_FILE_BYTES;
 
 // ONE upload path for every ledger proof. Top-up and refund put their images
 // in the SAME bucket under the same `${customerId}/${kind}-${ts}.${ext}` shape,
@@ -78,7 +82,7 @@ async function uploadLedgerProof(
   file: FormDataEntryValue | null,
 ): Promise<{ error: string; path?: undefined } | { error: null; path: string | null }> {
   if (!(file instanceof File) || file.size === 0) return { error: null, path: null };
-  if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
+  if (file.size > MAX_FILE_BYTES) return { error: `File too large (max ${mbLabel(MAX_FILE_BYTES)} MB).` };
   const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
   const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
   const path = `${customerId}/${kind}-${Date.now()}.${ext}`;

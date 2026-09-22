@@ -33,7 +33,7 @@ import {
 import VehicleOptGroups from "@/components/VehicleOptGroups";
 import { useApp } from "@/components/AppShell";
 import { t, plural, arText, personName, type Lang, type TKey } from "@/lib/i18n";
-import { prepareUploadFiles } from "@/lib/upload-image";
+import { prepareUploadFiles, uploadErrorVars } from "@/lib/upload-image";
 // THE PRINTED PERMIT IS A DOCUMENT, not this DOM with the chrome hidden. The
 // view-model decides every word and figure, the renderer only the look, and
 // printHtml owns the transport — a hidden same-origin iframe the browser prints
@@ -843,12 +843,16 @@ function PermitFiles({
               // an undecodable or still-over-10MB pick is refused by name.
               // Uploads stay ONE FILE PER REQUEST below, so each request is
               // ≤10MB — no whole-batch gate needed against the 15MB body cap.
-              const r = await prepareUploadFiles(picked);
+              const r = await prepareUploadFiles(picked, { sentSeparately: true });
               if (!r.ok) {
                 // This file's LOCAL fill (key, lang, token, value) — not the
                 // i18n module's map-based one, which a same-name import would
-                // shadow-conflict with.
-                onError(fill(r.errorKey, lang, "{name}", r.name));
+                // shadow-conflict with. Two tokens now, so it is applied
+                // twice: `{name}` and the `{mb}` the gate enforces.
+                const vars = uploadErrorVars(r);
+                onError(
+                  fill(r.errorKey, lang, "{name}", vars.name).replace("{mb}", vars.mb),
+                );
                 return;
               }
               if (!permitId) { onStage(r.files); return; }

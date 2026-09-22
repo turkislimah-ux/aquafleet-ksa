@@ -110,7 +110,7 @@ import { categoryLabel } from "@/lib/inventory-labels";
 import { computePartFinanceStats, partAiTip } from "@/lib/part-finance";
 import ScrollLock from "@/components/ScrollLock";
 import { arText, fill, plural, t } from "@/lib/i18n";
-import { prepareUploadImage, batchBytes, MAX_PREPARED_FILE_BYTES, MAX_BATCH_BYTES } from "@/lib/upload-image";
+import { prepareUploadImage, batchBytes, MAX_PREPARED_FILE_BYTES, MAX_BATCH_BYTES, mbLabel } from "@/lib/upload-image";
 // THE PRINTED PURCHASE ORDER IS A DOCUMENT, not this DOM with the chrome hidden.
 // The view-model decides every word and figure, the renderer only the look, and
 // printHtml owns the transport — a hidden same-origin iframe the browser prints
@@ -2075,7 +2075,7 @@ export function ReceivePOModal({
         return;
       }
       if (result.file.size > MAX_PREPARED_FILE_BYTES) {
-        setError(fill(t("shared.upload.fileTooLarge", lang), { name: result.file.name }));
+        setError(fill(t("shared.upload.fileTooLarge", lang), { name: result.file.name, mb: mbLabel(MAX_PREPARED_FILE_BYTES) }));
         return;
       }
       prepared.push(result.file);
@@ -2104,7 +2104,7 @@ export function ReceivePOModal({
     // serverActions body limit kills the request before the action runs and
     // the user sees nothing.
     if (batchBytes(files) > MAX_BATCH_BYTES) {
-      setError(t("shared.upload.batchTooLarge", lang));
+      setError(fill(t("shared.upload.batchTooLarge", lang), { mb: mbLabel(MAX_BATCH_BYTES) }));
       return;
     }
 

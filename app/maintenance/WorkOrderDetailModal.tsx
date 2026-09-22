@@ -29,7 +29,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { X, CheckSquare, Square, Play, Check, Pencil, Trash2, AlertTriangle, ImagePlus } from "lucide-react";
 import { t, arText, fill } from "@/lib/i18n";
-import { prepareUploadFiles } from "@/lib/upload-image";
+import { prepareUploadFiles, uploadErrorVars } from "@/lib/upload-image";
 import { cn, formatDate, formatSar } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
@@ -197,7 +197,7 @@ export default function WorkOrderDetailModal({
       // parity, and the server enforces the same figure).
       const r = await prepareUploadFiles([file]);
       if (!r.ok) {
-        setPhotoError(fill(t(r.errorKey, lang), { name: r.name }));
+        setPhotoError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
         return;
       }
       const prepared = r.files[0];

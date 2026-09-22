@@ -38,7 +38,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { X, CheckSquare, Square, Play, Check, Pencil, FileText, Trash2, Upload } from "lucide-react";
 import { t, arText, fill } from "@/lib/i18n";
-import { prepareUploadFiles } from "@/lib/upload-image";
+import { prepareUploadFiles, uploadErrorVars } from "@/lib/upload-image";
 import { cn, formatDate, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
@@ -638,7 +638,7 @@ export default function OutsourcedJobDetailModal({
                         const r = await prepareUploadFiles([f]);
                         if (!r.ok) {
                           setPendingFile(null);
-                          setError(fill(t(r.errorKey, lang), { name: r.name }));
+                          setError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
                           setPendingFileKey((k) => k + 1);
                           return;
                         }

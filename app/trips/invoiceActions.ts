@@ -10,6 +10,7 @@
 //
 // NOT the UI (5c, later) — no components here, just the actions 5c will call.
 
+import { MAX_PREPARED_FILE_BYTES, mbLabel } from "@/lib/upload-image";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type SpecialChargeInput } from "@/lib/invoice";
@@ -49,7 +50,10 @@ const PDF_BUCKET = "invoice-pdfs";
 // Server backstop matching app/archive/actions.ts — the client compresses
 // images and gates at this same figure BEFORE submit; this is the layer that
 // holds when the client is bypassed or stale.
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// The server half of the upload ceiling. ONE constant with the client gate
+// (lib/upload-image.ts), because a server limit that is looser than the client
+// one is not a second line of defence - it is a number nobody is enforcing.
+const MAX_FILE_BYTES = MAX_PREPARED_FILE_BYTES;
 // THE CACHE KEY CARRIES A TEMPLATE VERSION, AND THAT IS THE ONLY INVALIDATION
 // A LAYOUT CHANGE CAN HAVE. getInvoicePdf() caches paid/void bytes on 0027's
 // premise that an issued document never changes — true of its DATA and false of
@@ -552,7 +556,7 @@ export async function uploadSpecialChargeImage(invoiceId: string, chargeId: stri
   }
   const file = formData.get("imageFile");
   if (!(file instanceof File) || file.size === 0) return { error: "No image file provided." };
-  if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
+  if (file.size > MAX_FILE_BYTES) return { error: `File too large (max ${mbLabel(MAX_FILE_BYTES)} MB).` };
 
   const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
   const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
@@ -1169,7 +1173,7 @@ export async function markInvoicePaidLegacy(formData: FormData): Promise<ActionR
     if (!(file instanceof File) || file.size === 0) {
       return { error: "bank_transfer requires a proof-of-payment file." };
     }
-    if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
+    if (file.size > MAX_FILE_BYTES) return { error: `File too large (max ${mbLabel(MAX_FILE_BYTES)} MB).` };
     const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
     const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
     proofPath = `${invoiceId}/proof-${Date.now()}.${ext}`;
@@ -1274,7 +1278,7 @@ export async function recordInvoicePayment(formData: FormData): Promise<ActionRe
     if (!(file instanceof File) || file.size === 0) {
       return { error: "bank_transfer requires a proof-of-payment file." };
     }
-    if (file.size > MAX_FILE_BYTES) return { error: "File too large (max 10 MB)." };
+    if (file.size > MAX_FILE_BYTES) return { error: `File too large (max ${mbLabel(MAX_FILE_BYTES)} MB).` };
     const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
     const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
     proofPath = `${invoiceId}/proof-${Date.now()}.${ext}`;

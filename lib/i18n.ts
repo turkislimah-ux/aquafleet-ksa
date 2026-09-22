@@ -952,8 +952,12 @@ export const dict = {
     // viewer-specific strings (invoiceFiles, fileOpenFailed) stay in inventory.
     upload: {
       fileUnreadable: { en: "Could not read {name} — the browser cannot decode this image (HEIC?). Convert it to JPEG and try again.", ar: "تعذر قراءة {name} — المتصفح لا يستطيع فك ترميز هذه الصورة (HEIC؟). حوّلها إلى JPEG وحاول مرة أخرى." },
-      fileTooLarge: { en: "{name} is still over 10 MB after compression. Choose a smaller file.", ar: "{name} ما زال أكبر من 10 م.ب بعد الضغط. اختر ملفاً أصغر." },
-      batchTooLarge: { en: "The attached files together exceed the upload limit. Remove a file and try again.", ar: "الملفات المرفقة مجتمعةً تتجاوز حد الرفع. أزل ملفاً وحاول مرة أخرى." },
+      // {mb} is filled from MAX_PREPARED_FILE_BYTES / MAX_BATCH_BYTES rather
+      // than written into the sentence, so the number on screen cannot drift
+      // from the number the gate enforces. Photos never reach these messages —
+      // they are shrunk to fit; a PDF or a scan is what lands here.
+      fileTooLarge: { en: "{name} is larger than {mb} MB. Photos are shrunk automatically, but a file like this has to be smaller before it can be attached.", ar: "{name} أكبر من {mb} م.ب. الصور تُصغَّر تلقائياً، أما ملف كهذا فيجب أن يكون أصغر قبل إرفاقه." },
+      batchTooLarge: { en: "The attached files come to more than {mb} MB together. Attach fewer at a time, or save them in two goes.", ar: "الملفات المرفقة مجتمعةً تتجاوز {mb} م.ب. أرفق عدداً أقل في المرة الواحدة، أو احفظها على دفعتين." },
       saveFailedNetwork: { en: "Saving failed before reaching the server — check your connection and try again. Nothing was saved.", ar: "فشل الحفظ قبل الوصول إلى الخادم — تحقق من اتصالك وحاول مرة أخرى. لم يُحفظ أي شيء." },
     },
 
@@ -2745,7 +2749,9 @@ export const dict = {
       chooseFile: { en: "Choose a file.", ar: "اختر ملفاً." },
       // "10" stays Latin — every figure in this app does — and ميغابايت is the
       // unit `common.photoTooLarge` already uses for the same limit class.
-      fileTooLarge: { en: "File is larger than 10 MB.", ar: "حجم الملف أكبر من 10 ميغابايت." },
+      // {mb} filled from the same constant the gate uses — see
+      // shared.upload.fileTooLarge for why the number is not written in.
+      fileTooLarge: { en: "File is larger than {mb} MB.", ar: "حجم الملف أكبر من {mb} ميغابايت." },
 
       // --- approvals: subjectIsEligible() and the decision guards ---
       // The queue's own inclusion rules, restated server-side. Each says WHY

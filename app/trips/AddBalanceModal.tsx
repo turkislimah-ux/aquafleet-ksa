@@ -27,7 +27,7 @@ import { X, Plus, Printer, Image as ImageIcon } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar, todayKey } from "@/lib/utils";
 import { recordTopup, getLedgerPhotoSignedUrl, type LedgerDocResult } from "@/lib/actions/finance";
-import { prepareUploadFiles } from "@/lib/upload-image";
+import { prepareUploadFiles, uploadErrorVars } from "@/lib/upload-image";
 // The printable RCT sheet (0203) — view-model decides the words, docs kit the
 // look, printHtml the iframe. Same trio every other document print uses.
 import { buildLedgerDocVm } from "@/lib/docvm/ledgerDoc";
@@ -476,7 +476,7 @@ export default function AddBalanceModal({
                       const r = await prepareUploadFiles([f]);
                       if (!r.ok) {
                         setPhoto(null);
-                        setError(fill(t(r.errorKey, lang), { name: r.name }));
+                        setError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
                         setPhotoKey((k) => k + 1);
                         return;
                       }

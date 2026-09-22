@@ -49,7 +49,7 @@ import {
   type IssueRow,
 } from "@/lib/issues";
 import { t, fill, type Lang } from "@/lib/i18n";
-import { prepareUploadFiles } from "@/lib/upload-image";
+import { prepareUploadFiles, uploadErrorVars } from "@/lib/upload-image";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -384,7 +384,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                   // result — a full-screen PNG now fits with room to spare.
                   const r = await prepareUploadFiles([f]);
                   if (!r.ok) {
-                    setFormError(fill(t(r.errorKey, lang), { name: r.name }));
+                    setFormError(fill(t(r.errorKey, lang), uploadErrorVars(r)));
                     return;
                   }
                   const prepared = r.files[0] ?? null;

@@ -20,14 +20,18 @@
 //              no permit event around it, so this file could not call them
 //              even if someone tried.
 
+import { MAX_PREPARED_FILE_BYTES, mbLabel } from "@/lib/upload-image";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { ExitPermit, ExitPermitFile } from "@/lib/db-types";
 import { APPROVAL_SUBJECT_COLUMN, type ApprovalKind } from "@/lib/consumption-approvals";
-import { t, type Lang } from "@/lib/i18n";
+import { t, fill, type Lang } from "@/lib/i18n";
 
 const BUCKET = "exit-permits";
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// The server half of the upload ceiling. ONE constant with the client gate
+// (lib/upload-image.ts), because a server limit that is looser than the client
+// one is not a second line of defence - it is a number nobody is enforcing.
+const MAX_FILE_BYTES = MAX_PREPARED_FILE_BYTES;
 
 async function actorEmail(supabase: ReturnType<typeof createClient>): Promise<string | null> {
   const { data } = await supabase.auth.getUser();
@@ -442,7 +446,7 @@ export async function uploadExitPermitFile(
   const file = formData.get("file");
   if (!permitId) return { error: t("consumption.errors.permitRequired", lang) };
   if (!(file instanceof File) || file.size === 0) return { error: t("consumption.errors.chooseFile", lang) };
-  if (file.size > MAX_FILE_BYTES) return { error: t("consumption.errors.fileTooLarge", lang) };
+  if (file.size > MAX_FILE_BYTES) return { error: fill(t("consumption.errors.fileTooLarge", lang), { mb: mbLabel(MAX_FILE_BYTES) }) };
 
   const supabase = createClient();
   const ext = file.name.includes(".") ? file.name.split(".").pop() : null;

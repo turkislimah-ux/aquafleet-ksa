@@ -279,7 +279,7 @@ import {
   type ReceiveLine,
 } from "./actions";
 import { arText, fill, plural, t } from "@/lib/i18n";
-import { prepareUploadImage, batchBytes, MAX_PREPARED_FILE_BYTES, MAX_BATCH_BYTES } from "@/lib/upload-image";
+import { prepareUploadImage, batchBytes, MAX_PREPARED_FILE_BYTES, MAX_BATCH_BYTES, mbLabel } from "@/lib/upload-image";
 import { categoryLabel, lotStatusLabel, movementLabel } from "@/lib/inventory-labels";
 import { computePartFinanceStats } from "@/lib/part-finance";
 // THE PRINTED ITEM RECORD IS A DOCUMENT, not this drawer with the chrome
@@ -2064,7 +2064,7 @@ function ReceivePartsModal({
         return;
       }
       if (result.file.size > MAX_PREPARED_FILE_BYTES) {
-        setError(fill(t("shared.upload.fileTooLarge", lang), { name: result.file.name }));
+        setError(fill(t("shared.upload.fileTooLarge", lang), { name: result.file.name, mb: mbLabel(MAX_PREPARED_FILE_BYTES) }));
         return;
       }
       prepared.push(result.file);
@@ -2101,7 +2101,7 @@ function ReceivePartsModal({
     // serverActions body limit kills the request before the action runs and
     // the user sees nothing.
     if (batchBytes(files) > MAX_BATCH_BYTES) {
-      setError(t("shared.upload.batchTooLarge", lang));
+      setError(fill(t("shared.upload.batchTooLarge", lang), { mb: mbLabel(MAX_BATCH_BYTES) }));
       return;
     }
 
