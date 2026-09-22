@@ -236,9 +236,9 @@ async function main(): Promise<void> {
       await c.query(
         `insert into public.projects
            (customer_id, name, initials, default_water_station, water_type, status,
-            payment_mode, rate_per_trip_sar)
+            rate_per_trip_sar)
          values ($1, 'DBCHK LEDGER PROJECT', 'DBL', 'manfuhah_station', 'potable', 'active',
-                 'prepaid', $2) returning id`,
+                 $2) returning id`,
         [customer, TRIP_NET],
       )
     ).rows[0].id as string;
@@ -355,10 +355,12 @@ async function main(): Promise<void> {
     {
       const walk = await c.query(`
         with prepaid as (
-          select distinct cu.id, cu.name
+          -- The CUSTOMER's mode is the one authority (0206 Group C; 0207
+          -- dropped the projects copy this used to read). No projects join is
+          -- needed at all — the arrangement was never the project's.
+          select cu.id, cu.name
             from public.customers cu
-            join public.projects p on p.customer_id = cu.id
-           where p.payment_mode = 'prepaid'
+           where cu.payment_mode = 'prepaid'
         ),
         -- Ledger: a draw, 0203's confirm-time draw and a reversal move Balance
         -- and the reservation together, so they are worth nothing here.

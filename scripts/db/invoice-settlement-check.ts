@@ -207,19 +207,18 @@ const VOID_SQL = `select * from public.void_invoice($1::uuid, $2::text, $3::text
 // expanded with `.*` in the target list is evaluated ONCE PER OUTPUT COLUMN, so
 // the second evaluation would find the invoice already confirmed and raise
 // "Invoice is not in review status" — a real bug wearing a green disguise.
-// $18 = p_payment_mode, $19 = p_actor. The six nullable ledger numerics between
-// them stay literal nulls: they are the pre-ledger FIFO split, which this model
-// does not use. p_actor survives 0204 unused inside the function — it is the
-// audit actor for a ledger row confirm no longer writes.
+// 0207: 18 arguments. $15 = p_payment_mode, $16 = p_actor; the two nulls are
+// the ledger subtotals. No covered lines and no trip-id arrays any more — the
+// trip is reserved at seed time (trips.invoice_id), the way the app's own
+// draft reservation (0030) does it, and that reservation IS the linkage.
 const CONFIRM_SQL = `
   select * from public.confirm_invoice(
-    $1::uuid, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb,
-    $7::uuid[], $8::uuid[],
+    $1::uuid, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb,
+    $6::numeric, $7::numeric, $8::numeric,
     $9::numeric, $10::numeric, $11::numeric,
     $12::numeric, $13::numeric, $14::numeric,
-    $15::numeric, $16::numeric, $17::numeric,
     null, null,
-    $18::text, $19::text
+    $15::text, $16::text
   )`;
 
 /** Confirm args for a one-trip invoice with NO pool-covered split. Under 0204
@@ -234,11 +233,8 @@ function confirmArgs(
     invoiceId,
     JSON.stringify({ name: "SETTLECHK SELLER" }),
     JSON.stringify({ name: "SETTLECHK BUYER" }),
-    JSON.stringify([]),
     JSON.stringify([{ kind: "trip", id: tripId, label: "SETTLECHK trip", date: TRIP_DATE, amount_sar: net }]),
     JSON.stringify([]),
-    [],
-    [tripId],
     0, 0, 0,
     net, vat, gross,
     net, vat, gross,
@@ -499,9 +495,9 @@ async function main(): Promise<void> {
         [`SETTLECHK ${tag}`, mode])).rows[0].id as string;
       const project = (await c.query(
         `insert into public.projects
-           (customer_id, name, initials, default_water_station, water_type, status, payment_mode, rate_per_trip_sar)
-         values ($1, $2, $3, 'manfuhah_station', 'potable', 'active', $4, $5) returning id`,
-        [customer, `SETTLECHK ${tag} PROJECT`, initials, mode, net])).rows[0].id as string;
+           (customer_id, name, initials, default_water_station, water_type, status, rate_per_trip_sar)
+         values ($1, $2, $3, 'manfuhah_station', 'potable', 'active', $4) returning id`,
+        [customer, `SETTLECHK ${tag} PROJECT`, initials, net])).rows[0].id as string;
       const invoice = (await c.query(
         `insert into public.invoices (customer_id, period_start, period_end, status)
          values ($1, $2, $3, 'review') returning id`,

@@ -8,8 +8,8 @@ export type CustomerType = "construction" | "government_office" | "facility_mana
 // unmaintained spelling of the payment arrangement, retired in migration 0121.
 // `customers.payment_mode` ("postpaid" | "prepaid", NOT NULL since 0203) is
 // the ONE authority on a customer's arrangement (Turki's ruling, 0206 Group
-// C): every app read resolves the mode from the CUSTOMER. projects.payment_mode
-// is write-only until 0207 drops it, and invoices.payment_mode stays what it
+// C): every app read resolves the mode from the CUSTOMER. The projects copy
+// is GONE (0207 dropped the column), and invoices.payment_mode stays what it
 // always was — a frozen snapshot on issued documents.
 
 export type Customer = {
@@ -73,9 +73,6 @@ export type Project = {
   end_date: string | null;
   status: ProjectStatus;
   water_type: WaterType | null;
-  // Finance (0025). WRITE-ONLY since 0206 Group C — the app resolves every
-  // mode from customers.payment_mode; 0207 drops this column.
-  payment_mode: PaymentMode | null;
   default_station: string | null;
   // Demo header fields (Path B).
   location: string | null;
@@ -695,8 +692,6 @@ export type Invoice = {
   covered_lines: InvoiceLineSnapshot[] | null;
   unpaid_lines: InvoiceLineSnapshot[] | null;
   special_charges_snapshot: InvoiceLineSnapshot[] | null;
-  covered_trip_ids: string[] | null;
-  unpaid_trip_ids: string[] | null;
 
   payment_method: InvoicePaymentMethod | null;
   proof_of_payment_path: string | null;

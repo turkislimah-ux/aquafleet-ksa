@@ -160,8 +160,6 @@ async function main(): Promise<void> {
       (select count(*) from public.customers)                     as customers,
       (select count(*) from public.projects)                      as projects,
       (select count(*) from public.trips)                         as trips,
-      (select count(*) from public.customer_topups)               as topups,
-      (select count(*) from public.customer_balance_returns)      as balance_returns,
       (select count(*) from public.customer_ledger)                as ledger_rows,
       (select coalesce(sum(qty_on_hand), 0) from public.parts)    as total_on_hand,
       (select coalesce(sum(qty_remaining), 0) from public.price_lots) as total_remaining`;
@@ -449,9 +447,9 @@ async function main(): Promise<void> {
       const project = (
         await c.query(
           `insert into public.projects
-             (customer_id, name, initials, default_water_station, water_type, status, payment_mode, rate_per_trip_sar)
-           values ($1, $2, $3, 'manfuhah_station', 'potable', 'active', $4, $5) returning id`,
-          [customer, `DBCHK ${tag}`, tag.slice(0, 3), mode, TRIP_NET],
+             (customer_id, name, initials, default_water_station, water_type, status, rate_per_trip_sar)
+           values ($1, $2, $3, 'manfuhah_station', 'potable', 'active', $4) returning id`,
+          [customer, `DBCHK ${tag}`, tag.slice(0, 3), TRIP_NET],
         )
       ).rows[0].id;
       for (let i = 0; i < opts.trips; i++) {

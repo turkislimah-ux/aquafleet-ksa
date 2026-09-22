@@ -183,13 +183,12 @@ export default async function TripsPage() {
           // buyer identity + mailto target for the invoice UI. Batch D: name_ar
           // added — now wired into ProjectModal's Customer section (edit prefill).
           //
-          // payment_mode (0203) — THE arrangement, read from the customer and
-          // not from the project. confirm_invoice draws the prepaid pool on
-          // `customers.payment_mode` (0203 §10), so every surface that predicts
-          // that draw has to read the same column or it will predict it for the
-          // wrong people. projects.payment_mode survives as the edit surface
-          // (ProjectModal, behind can_switch_payment_mode) and 0203's backfill
-          // guarantees the two agreed at migration time.
+          // payment_mode (0203) — THE arrangement, and since 0207 the ONLY
+          // copy of it: the projects column is dropped. Every surface that
+          // predicts a prepaid draw reads this column, the same one the
+          // settlement RPCs resolve the mode from. ProjectModal still edits it,
+          // through create/update_project_with_customer behind
+          // can_switch_payment_mode.
           "id, name, name_ar, default_station, delivery_site_address, customer_type, contact_name, phone, delivery_lat, delivery_lng, vat_number, cr_number, billing_address, email, payment_mode"
         )
         .is("archived_at", null)

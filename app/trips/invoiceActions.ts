@@ -1013,8 +1013,6 @@ export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ 
   const { error: assembleErr, assembly } = await assembleForInvoice(invoiceId);
   if (assembleErr || !assembly) return { error: assembleErr ?? "Could not assemble invoice for confirm." };
 
-  const coveredTripIds = assembly.coveredLines.filter((l) => l.kind === "trip").map((l) => l.id);
-  const unpaidTripIds = assembly.unpaidLines.filter((l) => l.kind === "trip").map((l) => l.id);
   // v3: prepaid keeps ALL its charges (covered + uncovered) in the dedicated
   // chargeLines table; postpaid keeps the old v2 shape (charges merged into
   // unpaidLines). Either way this is a full InvoiceLine snapshot now, not the
@@ -1028,11 +1026,14 @@ export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ 
     p_invoice_id: invoiceId,
     p_seller_snapshot: assembly.sellerSnapshot,
     p_buyer_snapshot: assembly.buyerSnapshot,
-    p_covered_lines: assembly.coveredLines,
+    // p_covered_lines AND THE TWO TRIP-ID ARRAYS ARE GONE (0207), not nulled.
+    // The ledger era has no covered lines — the array was always [] — and the
+    // trip linkage is the DRAFT RESERVATION (trips.invoice_id, 0030), never a
+    // frozen array re-stamped at settlement. Named arguments make this call
+    // require 0207: against the 21-argument function it fails loudly on the
+    // first confirm instead of silently defaulting.
     p_unpaid_lines: assembly.unpaidLines,
     p_special_charges: specialChargesSnapshot,
-    p_covered_trip_ids: coveredTripIds,
-    p_unpaid_trip_ids: unpaidTripIds,
     p_covered_subtotal: assembly.covered.subtotal,
     p_covered_vat: assembly.covered.vat,
     p_covered_total: assembly.covered.total,
@@ -1055,9 +1056,7 @@ export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ 
     // ledger-era invoice derives its Balance/Remaining from the customer_ledger
     // rows that actually moved the money — see loadLedgerDraw below.
     //
-    // THIS CALL REQUIRES 0205. Named arguments mean a missing parameter is a
-    // schema fault, not a silent default, so a deploy that runs this against
-    // the 25-argument function fails loudly on the first confirm.
+    // THIS CALL REQUIRES 0207 (see the note above the line payload).
     p_payment_mode: assembly.paymentMode,
     // 0203 — WHO confirmed. The prepaid draw this call performs writes a
     // customer_ledger row, and a money row with no author is an audit hole.

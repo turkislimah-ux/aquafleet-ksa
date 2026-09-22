@@ -1016,7 +1016,7 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
   const { mode, bump, commissionValue } = normalizeCommissionInput(input);
 
   const supabase = createClient();
-  const { data: newProjectId, error } = await supabase.rpc("create_project_with_customer", {
+  const { error } = await supabase.rpc("create_project_with_customer", {
     p_cust_name: custName,
     p_cust_type: input.cust_type,
     p_contact_name: input.contact_name?.trim() || null,
@@ -1042,27 +1042,11 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
   });
   if (error) return { error: error.message };
 
-  // THE CUSTOMER'S MODE IS THE AUTHORITY (0206 Group C), and the RPC writes
-  // only the projects copy — which is write-only until 0207 drops it. Mirror
-  // the chosen mode onto the customer row the RPC just created, keyed through
-  // the returned project id (the RPC hands back v_proj_id). Failing here is a
-  // REAL failure: a customer whose authoritative mode disagrees with the one
-  // just chosen would misprice every surface, so it is surfaced, not
-  // swallowed. Same direct-table write discipline as app/customers/actions.ts
-  // — customers is plain CRUD, not an RPC table.
-  const { data: newProject, error: lookupErr } = await supabase
-    .from("projects")
-    .select("customer_id")
-    .eq("id", String(newProjectId))
-    .single();
-  if (lookupErr || !newProject) {
-    return { error: `Project created, but recording the payment mode failed: ${lookupErr?.message ?? "customer not found"}` };
-  }
-  const { error: modeErr } = await supabase
-    .from("customers")
-    .update({ payment_mode: paymentMode })
-    .eq("id", newProject.customer_id);
-  if (modeErr) return { error: `Project created, but recording the payment mode failed: ${modeErr.message}` };
+  // NO MIRROR WRITE. create_project_with_customer writes the mode onto the
+  // CUSTOMER itself (0207) — the one authority, in the same transaction as
+  // the customer row it lands on. The 0206 Group C mirror that used to sit
+  // here existed only because the RPC wrote the projects copy instead; it is
+  // gone with that copy, leaving ONE writer.
 
   revalidatePath("/trips");
   revalidatePath("/projects");
@@ -1208,18 +1192,9 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
   });
   if (error) return { error: error.message };
 
-  // Mirror the mode onto the CUSTOMER — the authority (0206 Group C) — after
-  // the RPC's can_switch_payment_mode gate has accepted the change. The RPC
-  // still writes the projects copy, which is write-only until 0207. Surfaced,
-  // never swallowed: a mode the guard accepted but the authority never
-  // received would leave every surface pricing the OLD arrangement.
-  if (currentProject) {
-    const { error: modeErr } = await supabase
-      .from("customers")
-      .update({ payment_mode: paymentMode })
-      .eq("id", currentProject.customer_id);
-    if (modeErr) return { error: `Project saved, but recording the payment mode failed: ${modeErr.message}` };
-  }
+  // NO MIRROR WRITE — same reason as create above: update_project_with_customer
+  // writes customers.payment_mode itself (0207), behind the same
+  // can_switch_payment_mode gate, in one transaction. ONE writer.
 
   revalidatePath("/trips");
   revalidatePath("/projects");

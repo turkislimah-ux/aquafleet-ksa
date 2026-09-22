@@ -98,23 +98,23 @@ const LEDGER_BASE = 500.0; // the record_topup — nothing below writes another 
 const OUTSTANDING_BASE = 230.0; // Q's frozen claim while open
 const UNINV_CONFIRMED = 0.0; // everything sits billed on the confirmed document
 const UNINV_AFTER_VOID = 345.0; // the released trips alone; the void charge enters nothing
-const COVERED_TOTAL = 115.0; // the figure a balance payment settles by
-const GRAND_TOTAL = 402.5; // the figure it must NOT settle by
-const OVERCHARGE_IF_GRAND = 287.5; // GRAND_TOTAL − COVERED_TOTAL
+const GRAND_TOTAL = 402.5; // 3 trips + 1 charge, gross — and since 0204
+// due === grand === amount_payable: the whole document is billable.
 
 const PERIOD_START = "2020-01-01";
 const PERIOD_END = "2020-01-31";
 const TRIP_DATE = "2020-01-15";
 
+// 0207: 18 arguments — no covered lines, no trip-id arrays (the linkage is
+// the draft reservation, stamped in seedCustomer above).
 const CONFIRM_SQL = `
   select * from public.confirm_invoice(
-    $1::uuid, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb,
-    $7::uuid[], $8::uuid[],
+    $1::uuid, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb,
+    $6::numeric, $7::numeric, $8::numeric,
     $9::numeric, $10::numeric, $11::numeric,
     $12::numeric, $13::numeric, $14::numeric,
-    $15::numeric, $16::numeric, $17::numeric,
     null, null,
-    $18::text
+    $15::text
   )`;
 
 // Called from `from`, never as `select (f(...)).*` — a composite expanded with
@@ -140,9 +140,7 @@ async function main(): Promise<void> {
   check("fixture arithmetic — OUTSTANDING_BASE = 2 trips gross", OUTSTANDING_BASE, money(2 * TRIP_GROSS));
   check("fixture arithmetic — UNINV_CONFIRMED: a confirmed document leaves nothing uninvoiced", UNINV_CONFIRMED, 0);
   check("fixture arithmetic — UNINV_AFTER_VOID = 3 trips gross", UNINV_AFTER_VOID, money(3 * TRIP_GROSS));
-  check("fixture arithmetic — COVERED_TOTAL = 1 trip gross", COVERED_TOTAL, TRIP_GROSS);
   check("fixture arithmetic — GRAND_TOTAL = 3 trips + 1 charge, gross", GRAND_TOTAL, money(3 * TRIP_GROSS + CHARGE_GROSS));
-  check("fixture arithmetic — OVERCHARGE_IF_GRAND = GRAND − COVERED", OVERCHARGE_IF_GRAND, money(GRAND_TOTAL - COVERED_TOTAL));
 
   // Every table these three RPCs can touch, plus the two the seed writes.
   const censusSql = `
@@ -152,8 +150,7 @@ async function main(): Promise<void> {
       (select count(*) from public.trips)                       as trips,
       (select count(*) from public.invoices)                    as invoices,
       (select count(*) from public.invoice_special_charges)     as charges,
-      (select count(*) from public.customer_topups)             as topups,
-      (select count(*) from public.customer_balance_returns)    as returns,
+      (select count(*) from public.customer_ledger)             as ledger_rows,
       (select count(*) from public.project_commission_history)  as commission_history,
       (select coalesce(sum(next_number), 0)
          from public.invoice_number_counter)                    as counter_sum,
@@ -321,9 +318,9 @@ async function main(): Promise<void> {
         await c.query(
           `insert into public.projects
              (customer_id, name, initials, default_water_station, water_type, status,
-              payment_mode, rate_per_trip_sar)
-           values ($1, $2, $3, 'manfuhah_station', 'potable', 'active', $4, $5) returning id`,
-          [customer, `DBCHK ${tag} PROJECT`, tag.slice(0, 3), mode, TRIP_NET],
+              rate_per_trip_sar)
+           values ($1, $2, $3, 'manfuhah_station', 'potable', 'active', $4) returning id`,
+          [customer, `DBCHK ${tag} PROJECT`, tag.slice(0, 3), TRIP_NET],
         )
       ).rows[0].id;
 
@@ -349,6 +346,13 @@ async function main(): Promise<void> {
           [customer, PERIOD_START, PERIOD_END],
         )
       ).rows[0].id;
+
+      // RESERVE-AT-DRAFT (0030), mirrored: the app stamps trips.invoice_id
+      // when the draft is created (create_draft_invoice), and since 0207 that
+      // reservation is the ONE trip<->invoice linkage — the settlement RPCs
+      // re-stamp nothing. A seed that skipped this would test rows the app
+      // cannot produce.
+      await c.query(`update public.trips set invoice_id = $1 where id = any($2::uuid[])`, [invoice, trips]);
 
       return { customer, project, trips, invoice };
     }
@@ -380,20 +384,21 @@ async function main(): Promise<void> {
     //     rather than writing 'confirmed' by hand is the point: a lifecycle
     //     test that hand-forged its starting row would not be testing the
     //     lifecycle.
+    // Ledger era: the WHOLE document is billable — every trip in unpaid_lines,
+    // covered pinned to zero, due === grand. (The old seed minted a 115/287.50
+    // covered/due split; 0207's confirm cannot produce covered rows at all.)
     const pConfirm = await rpc(CONFIRM_SQL, [
       P.invoice,
       JSON.stringify({ name: "DBCHK SELLER" }),
       JSON.stringify({ name: "DBCHK BUYER P" }),
-      JSON.stringify([{ kind: "trip", id: P.trips[0], amount_sar: TRIP_NET }]),
       JSON.stringify([
+        { kind: "trip", id: P.trips[0], amount_sar: TRIP_NET },
         { kind: "trip", id: P.trips[1], amount_sar: TRIP_NET },
         { kind: "trip", id: P.trips[2], amount_sar: TRIP_NET },
       ]),
       JSON.stringify([{ kind: "charge", id: pCharge, amount_sar: CHARGE_NET }]),
-      [P.trips[0]],
-      [P.trips[1], P.trips[2]],
-      100.0, 15.0, 115.0,
-      250.0, 37.5, 287.5,
+      0, 0, 0,
+      350.0, 52.5, 402.5,
       350.0, 52.5, 402.5,
       "prepaid",
     ]);
@@ -403,14 +408,11 @@ async function main(): Promise<void> {
       Q.invoice,
       JSON.stringify({ name: "DBCHK SELLER" }),
       JSON.stringify({ name: "DBCHK BUYER Q" }),
-      JSON.stringify([]),
       JSON.stringify([
         { kind: "trip", id: Q.trips[0], amount_sar: TRIP_NET },
         { kind: "trip", id: Q.trips[1], amount_sar: TRIP_NET },
       ]),
       JSON.stringify([]),
-      [],
-      [Q.trips[0], Q.trips[1]],
       0, 0, 0,
       200.0, 30.0, 230.0,
       200.0, 30.0, 230.0,
@@ -426,7 +428,7 @@ async function main(): Promise<void> {
     check("baseline — postpaid open receivable (2 x 115.00 frozen on the confirmed invoice)", await outstanding(Q.customer), OUTSTANDING_BASE);
     check("baseline — prepaid invoice is 'confirmed'", await invStatus(P.invoice), "confirmed");
     check("baseline — postpaid invoice is 'confirmed'", await invStatus(Q.invoice), "confirmed");
-    check("baseline — no trip is reserved to the prepaid invoice yet", await reservedCount(P.invoice), 0);
+    check("baseline — all 3 trips reserved to the prepaid invoice FROM DRAFT (0030)", await reservedCount(P.invoice), 3);
 
     // =====================================================================
     // CASE 1 — pay_invoice on the PREPAID invoice, method 'balance'.
@@ -448,31 +450,26 @@ async function main(): Promise<void> {
       check("case 1 — the LEDGER BALANCE is unmoved by payment (pay_invoice writes no ledger row)", after, before);
       check("case 1 — the delta is exactly 0.00", money(after - before), 0);
 
-      // The covered-vs-grand rule, in the form the database can prove: the
-      // frozen covered total reconciles to the COVERED LINES, and the grand
-      // total does not. settlementGross() sums those same lines.
-      const sums = (
+      // 0207: a fresh confirm cannot mint a covered split any more — covered
+      // is pinned to zero, no covered_lines row exists, and the WHOLE
+      // document is payable. (The legacy covered-vs-grand overcharge hazard
+      // lives on only in the FROZEN rows, whose law is pinned by
+      // scripts/invoice-flow-check.ts's freeze fixture.)
+      const frozen = (
         await c.query(
-          `select round(coalesce(sum(round((e->>'amount_sar')::numeric * (1 + public.vat_rate()), 2)), 0), 2) covered_lines_gross,
-                  max(i.covered_total_sar) covered_total, max(i.grand_total_sar) grand_total
-             from public.invoices i
-             left join lateral jsonb_array_elements(i.covered_lines) e on true
-            where i.id = $1`,
+          `select covered_total_sar, covered_lines, grand_total_sar, amount_payable_sar
+             from public.invoices where id = $1`,
           [P.invoice],
         )
       ).rows[0];
-      check("case 1 — covered_total_sar equals the gross of the COVERED lines", money(sums.covered_total), money(sums.covered_lines_gross));
-      check("case 1 — covered_total_sar is 115.00", money(sums.covered_total), COVERED_TOTAL);
-      check("case 1 — grand_total_sar is 402.50, a DIFFERENT figure", money(sums.grand_total), GRAND_TOTAL);
-      ok("case 1 — the two totals genuinely differ, so the case discriminates", money(sums.grand_total) !== money(sums.covered_total));
-      check(
-        "case 1 — settling by grand instead of covered would overcharge by 287.50",
-        money(Number(sums.grand_total) - Number(sums.covered_total)),
-        OVERCHARGE_IF_GRAND,
-      );
+      check("case 1 — covered_total_sar frozen at 0.00", money(frozen.covered_total_sar), 0);
+      ok("case 1 — covered_lines was never written (NULL, renders as [])", frozen.covered_lines === null);
+      check("case 1 — grand_total_sar is 402.50", money(frozen.grand_total_sar), GRAND_TOTAL);
+      check("case 1 — amount_payable_sar === grand (0204: the whole document)", money(frozen.amount_payable_sar), GRAND_TOTAL);
 
-      // 0027: BOTH lists lock, covered and unpaid alike.
-      check("case 1 — all 3 trips locked to the invoice (covered AND unpaid)", await reservedCount(P.invoice), 3);
+      // The DRAFT reservation is the one linkage, and settlement leaves it
+      // exactly where the draft put it.
+      check("case 1 — all 3 trips still reserved (the draft reservation, not a settlement stamp)", await reservedCount(P.invoice), 3);
     });
 
     // =====================================================================
@@ -485,7 +482,7 @@ async function main(): Promise<void> {
       if (r.err) return console.log(`          unexpected raise: ${r.err.message}`);
       check("case 2 — status is 'paid'", r.row!.status, "paid");
       check("case 2 — the claim leaves the open receivables: outstanding 0.00", await outstanding(Q.customer), 0);
-      check("case 2 — both trips locked to the invoice", await reservedCount(Q.invoice), 2);
+      check("case 2 — both trips still reserved from draft", await reservedCount(Q.invoice), 2);
     });
 
     // =====================================================================
@@ -540,10 +537,8 @@ async function main(): Promise<void> {
     // mechanisms, asserted separately.
     // =====================================================================
     await scenario("case 5 — void (prepaid): trips released, charge released economically", async () => {
-      // Lock the trips first, so the release is visible as a change rather
-      // than as a state that was never set.
-      await rpc(PAY_SQL, [P.invoice, "balance", null, null, PERIOD_END, null]);
-      await rpc(UNPAY_SQL, [P.invoice, "DBCHK", "DBCHK"]);
+      // The trips are reserved FROM DRAFT (seedCustomer), so the release
+      // below is visible as a change without any pay/unpay preamble.
       check("case 5 — 3 trips reserved before the void", await reservedCount(P.invoice), 3);
       const ledgerBefore = await ledgerBalance(P.customer);
       // With the trips reserved and the charge frozen on the confirmed

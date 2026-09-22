@@ -78,11 +78,8 @@ const PERIOD_END = "2020-01-31";
 const TRIP_DATE = "2020-01-15";
 
 type Payload = {
-  coveredLines: unknown[];
   unpaidLines: unknown[];
   charges: unknown[];
-  coveredTripIds: string[];
-  unpaidTripIds: string[];
   cSub: number; cVat: number; cTot: number;
   dSub: number; dVat: number; dTot: number;
   gSub: number; gVat: number; gTot: number;
@@ -90,13 +87,10 @@ type Payload = {
 
 function basePayload(tripId: string): Payload {
   return {
-    coveredLines: [],
     unpaidLines: [
       { kind: "trip", id: tripId, label: "DBCHK trip", date: TRIP_DATE, amount_sar: LINE_NET },
     ],
     charges: [],
-    coveredTripIds: [],
-    unpaidTripIds: [tripId],
     cSub: 0, cVat: 0, cTot: 0,
     dSub: 100.0, dVat: 15.0, dTot: 115.0,
     gSub: 100.0, gVat: 15.0, gTot: 115.0,
@@ -110,15 +104,17 @@ function basePayload(tripId: string): Payload {
 // status", which reads exactly like the RPC rejecting a good payload. That is
 // not hypothetical: this harness hit it on its first run. In `from` the
 // function is a single relation-producing call, evaluated once.
+// 0207: 18 arguments — p_covered_lines and the two trip-id arrays are gone
+// (the ledger era has no covered lines, and the trip linkage is the draft
+// reservation). The two nulls are the ledger subtotals; p_actor defaults.
 const CONFIRM_SQL = `
   select * from public.confirm_invoice(
-    $1::uuid, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb,
-    $7::uuid[], $8::uuid[],
+    $1::uuid, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb,
+    $6::numeric, $7::numeric, $8::numeric,
     $9::numeric, $10::numeric, $11::numeric,
     $12::numeric, $13::numeric, $14::numeric,
-    $15::numeric, $16::numeric, $17::numeric,
     null, null,
-    $18::text
+    $15::text
   )`;
 
 function confirmArgs(invoiceId: string, p: Payload): unknown[] {
@@ -126,11 +122,8 @@ function confirmArgs(invoiceId: string, p: Payload): unknown[] {
     invoiceId,
     JSON.stringify({ name: "DBCHK SELLER" }),
     JSON.stringify({ name: "DBCHK BUYER" }),
-    JSON.stringify(p.coveredLines),
     JSON.stringify(p.unpaidLines),
     JSON.stringify(p.charges),
-    p.coveredTripIds,
-    p.unpaidTripIds,
     p.cSub, p.cVat, p.cTot,
     p.dSub, p.dVat, p.dTot,
     p.gSub, p.gVat, p.gTot,
@@ -196,8 +189,8 @@ async function main(): Promise<void> {
     seeded.project = (
       await c.query(
         `insert into public.projects
-           (customer_id, name, initials, default_water_station, water_type, status, payment_mode)
-         values ($1, 'DBCHK HARNESS PROJECT', 'DBK', 'manfuhah_station', 'potable', 'active', 'postpaid')
+           (customer_id, name, initials, default_water_station, water_type, status)
+         values ($1, 'DBCHK HARNESS PROJECT', 'DBK', 'manfuhah_station', 'potable', 'active')
          returning id`,
         [seeded.customer],
       )

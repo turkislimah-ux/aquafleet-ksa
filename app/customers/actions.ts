@@ -38,11 +38,11 @@ function parse(formData: FormData) {
     delivery_lat: numOrNull(formData.get("delivery_lat")),
     delivery_lng: numOrNull(formData.get("delivery_lng")),
     // NO payment_model KEY HERE, DELIBERATELY. That column is retired (0121).
-    // The payment arrangement lives on the PROJECT (projects.payment_mode) and is
-    // edited only through ProjectModal, where can_switch_payment_mode (0035)
-    // guards the switch. Re-adding it here would recreate a second writable
-    // source that no finance code reads — which is exactly how the old column
-    // came to say "postpaid" for customers whose projects were prepaid.
+    // The arrangement is customers.payment_mode — the one authority — and it
+    // is written ONLY by create/update_project_with_customer, behind
+    // can_switch_payment_mode (0035). Writing it from this plain CRUD form
+    // would bypass that gate and recreate a second writable source: exactly
+    // how the old payment_model came to say "postpaid" for prepaid customers.
     active: formData.get("active") != null,
   };
 }
