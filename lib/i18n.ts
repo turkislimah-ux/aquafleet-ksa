@@ -1,8 +1,6 @@
 export type Lang = "en" | "ar";
 
 export const dict = {
-  appName: { en: "AquaFleet KSA", ar: "أكوافليت السعودية" },
-  tagline: { en: "Water Transportation Fleet Operations", ar: "إدارة عمليات أسطول نقل المياه" },
   nav: {
     dashboard: { en: "Dashboard", ar: "لوحة التحكم" },
     fleet: { en: "Fleet", ar: "الأسطول" },
@@ -143,17 +141,7 @@ export const dict = {
     inspection: { en: "Inspection", ar: "فحص" },
   },
   kpi: {
-    activeTrucks: { en: "Active Trucks", ar: "الشاحنات النشطة" },
-    fleetSize: { en: "Fleet Size", ar: "حجم الأسطول" },
     utilization: { en: "Utilization", ar: "معدل الاستخدام" },
-    onTime: { en: "On-Time Delivery", ar: "التسليم في الوقت" },
-    litersDelivered: { en: "Liters Delivered (30d)", ar: "اللترات الموردة (30 يوم)" },
-    fuelCost: { en: "Fuel Cost (30d)", ar: "تكلفة الوقود (30 يوم)" },
-    opCost: { en: "Operating Cost (30d)", ar: "تكلفة التشغيل (30 يوم)" },
-    revenue: { en: "Revenue (30d)", ar: "الإيرادات (30 يوم)" },
-    todayTrips: { en: "Trips Today", ar: "رحلات اليوم" },
-    openWO: { en: "Open Work Orders", ar: "أوامر عمل مفتوحة" },
-    criticalAlerts: { en: "Critical Alerts", ar: "تنبيهات حرجة" },
   },
   common: {
     search: { en: "Search…", ar: "بحث..." },
@@ -161,7 +149,6 @@ export const dict = {
     truck: { en: "Truck", ar: "شاحنة" },
     plate: { en: "Plate", ar: "اللوحة" },
     driver: { en: "Driver", ar: "السائق" },
-    depot: { en: "Depot", ar: "المستودع" },
     status: { en: "Status", ar: "الحالة" },
     odometer: { en: "Odometer", ar: "العداد" },
     actions: { en: "Actions", ar: "إجراءات" },
@@ -479,7 +466,6 @@ export const dict = {
     weekOf: { en: "Week of", ar: "أسبوع" },
     prevWeek: { en: "Previous week", ar: "الأسبوع السابق" },
     nextWeek: { en: "Next week", ar: "الأسبوع التالي" },
-    moreCount: { en: "more", ar: "أكثر" },
     weekActive: { en: "Active", ar: "نشطة" },
     weekPlanned: { en: "Planned", ar: "مخططة" },
     weekDelayed: { en: "Delayed", ar: "متأخرة" },
@@ -502,10 +488,8 @@ export const dict = {
     // woTitlePendingSave keys (title is a real optional field now, not an
     // auto-number preview). Shared by both tracks' create forms.
     titleOptionalHint: { en: "Describe the work — optional", ar: "وصف العمل — اختياري" },
-    totalCost: { en: "Total Cost", ar: "التكلفة الإجمالية" },
     laborHours: { en: "Labor Hrs", ar: "ساعات العمل" },
     laborCost: { en: "Labor Cost", ar: "تكلفة العمالة" },
-    partsCost: { en: "Parts Cost", ar: "تكلفة القطع" },
     // Polish item 2 display refinement — in-house track's parts-only total
     // (0079 migration). A NEW key, not a reuse of `mt.actualCost` — that one
     // already means something different (the OS track's workshop-payment
@@ -517,12 +501,10 @@ export const dict = {
     outsourced: { en: "Out-Sourced", ar: "خارجية" },
     groupByTruck: { en: "Group by truck", ar: "تجميع حسب الشاحنة" },
     clearDate: { en: "Clear date filter", ar: "إلغاء تصفية التاريخ" },
-    phase2Note: { en: "Start / Complete actions land in Phase 2", ar: "إجراءات البدء / الإكمال تُضاف في المرحلة الثانية" },
     markInProg: { en: "Start Job", ar: "بدء العمل" },
     markComplete: { en: "Mark Complete", ar: "إنهاء العمل" },
     editNotes: { en: "Edit", ar: "تعديل" },
     saveNotes: { en: "Save", ar: "حفظ" },
-    outsourcedComingSoon: { en: "Out-sourced jobs — coming in a later phase", ar: "الأعمال الخارجية — قادمة في مرحلة لاحقة" },
     noWorkOrders: { en: "No work orders in this view", ar: "لا توجد أوامر عمل في هذا العرض" },
     // P3 item 2 — combined group-by-truck table row count, matches
     // preview's own T("mt.jobCount") (pages-2.js's groupHeader).
@@ -602,7 +584,6 @@ export const dict = {
     osNoJobs: { en: "No outsourced jobs in this view", ar: "لا توجد أعمال خارجية في هذا العرض" },
     // OS adjustments batch
     all: { en: "All", ar: "الكل" },
-    track: { en: "Track", ar: "المسار" },
     note: { en: "Note", ar: "ملاحظة" },
     discount: { en: "Discount", ar: "الخصم" },
     edit: { en: "Edit", ar: "تعديل" },
@@ -773,7 +754,6 @@ export const dict = {
       en: "Recent searches are kept in this browser only.",
       ar: "عمليات البحث الأخيرة محفوظة في هذا المتصفح فقط.",
     },
-    typeToSearch: { en: "Type at least 2 characters.", ar: "اكتب حرفين على الأقل." },
     searchedAcross: {
       en: "Searched pages, trucks, drivers, staff, customers, invoices, trips, parts, orders, permits and documents.",
       ar: "تم البحث في الصفحات والشاحنات والسائقين والموظفين والعملاء والفواتير والرحلات وقطع الغيار والطلبات والأذونات والوثائق.",
@@ -784,7 +764,6 @@ export const dict = {
     // differ from the English without a code change.
     resultsCount: { en: "{n} results", ar: "{n} \u0646\u062a\u064a\u062c\u0629" },
     noResultsShort: { en: "No results", ar: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0646\u062a\u0627\u0626\u062c" },
-    pages: { en: "Pages", ar: "الصفحات" },
     askTitle: { en: "Ask about your operation", ar: "اسأل عن عملياتك" },
     askBody: {
       en: "A chat assistant that answers from this app's own data will live here. It is not built yet — nothing you type is sent anywhere, and no answer is generated.",
@@ -1140,7 +1119,6 @@ export const dict = {
     // are `CITIES` coordinate data rather than copy, so naming them in Arabic
     // is a content decision and not a translation gap to be closed.
     map: {
-      approximate: { en: "Saudi Arabia · approximate", ar: "المملكة العربية السعودية · تقريبي" },
     },
   },
 
@@ -10037,16 +10015,6 @@ export const dict = {
     // and InvoiceDetailModal's chrome, which is why they are named for the
     // CONCEPT and not for this tab's column position.
     finance: {
-      kRunningBalance: { en: "Total running balance", ar: "إجمالي الرصيد الجاري" },
-      // "prepaid customer(s)" under the running-balance KPI. English had a
-      // singular already (`${n === 1 ? "" : "s"}`), so `one` is genuinely
-      // singular here rather than kept-verbatim.
-      kPrepaidCustomers: {
-        one: { en: "{n} prepaid customer", ar: "عميل واحد بالدفع المقدم" },
-        two: { en: "{n} prepaid customers", ar: "عميلان بالدفع المقدم" },
-        few: { en: "{n} prepaid customers", ar: "{n} عملاء بالدفع المقدم" },
-        many: { en: "{n} prepaid customers", ar: "{n} عميلاً بالدفع المقدم" },
-      },
       kOverBalance: { en: "Over-balance", ar: "تجاوز الرصيد" },
       kNeedsBalance: { en: "needs balance added", ar: "بحاجة إلى إضافة رصيد" },
       kAllCovered: { en: "all covered", ar: "الجميع مغطى" },
@@ -10058,7 +10026,6 @@ export const dict = {
       // The leading " · " is inside the value, same device as
       // `driverTable.kept`.
       kByModeUnset: { en: " · {n} unset", ar: " · {n} غير محدد" },
-      kAddBalanceMonth: { en: "Add Balance · month", ar: "إضافة رصيد · الشهر" },
       // The over-balance banner. The trailing colon is part of the English
       // sentence — the customer names follow it.
       overBanner: {
@@ -10083,16 +10050,6 @@ export const dict = {
       //   paid-up balance  -> trips.invoiceSheet.paidUpBalance (the invoice's)
       //   running balance  -> trips.statement.colRunningBalance (the statement's)
       // Two keys, no third wording, and neither invented here.
-      // Hint text for the pair, so the difference is on the screen and not only
-      // in this file:
-      colPaidUpBalanceHint: {
-        en: "Deposits minus what PAID invoices have settled, minus refunds. Not the spendable pool.",
-        ar: "الإيداعات ناقص ما سدّدته الفواتير المدفوعة، ناقص المبالغ المستردة. ليس الرصيد القابل للإنفاق.",
-      },
-      colRunningBalanceHint: {
-        en: "The spendable pool: deposits minus every delivered trip and charge, minus refunds.",
-        ar: "الرصيد القابل للإنفاق: الإيداعات ناقص كل رحلة ورسم تم تسليمه، ناقص المبالغ المستردة.",
-      },
       colAmountPayable: { en: "Amount Payable", ar: "المبلغ الواجب السداد" },
       // The Amount Payable header's `title` tooltip — a DEFINITION, and the one
       // place the rule is written on screen. It is a native title attribute, so
@@ -10358,13 +10315,8 @@ export const dict = {
       // Latin too. `trips.project.fVat` is a different concept again (tax
       // registration number) and is still untouched.
       colVat: { en: "VAT", ar: "VAT" },
-      // The Type column's four NAMED row kinds. The fifth renders the trip's
-      // water type through waterTypeLabel(), off the enum value.
-      //
-      // "Invoice payable" is the RECORD-ONLY settlement row — it is not a
-      // movement and the running balance holds flat across it (statement law).
-      // The Arabic says the same: a document being noted, not money moving.
-      typeSettlement: { en: "Invoice payable", ar: "فاتورة مستحقة" },
+      // The Type column's NAMED row kinds. The one not named here renders the
+      // trip's water type through waterTypeLabel(), off the enum value.
       typeReturn: { en: "Balance returned", ar: "رصيد مُعاد" },
       typeCharge: { en: "Special charge", ar: "رسوم خاصة" },
       typePayment: { en: "Payment", ar: "دفعة" },
@@ -10416,9 +10368,6 @@ export const dict = {
       // is a list of events, not a set of headings.
       typeInvoicePayment: { en: "Invoice paid", ar: "فاتورة مدفوعة" },
       typeShortfallPayment: { en: "Shortfall payment", ar: "سداد الفرق" },
-      // The settlement row's Note cell — says WHAT the invoice was settled
-      // against, not the balance figure itself.
-      noteBalance: { en: "Balance", ar: "الرصيد" },
       // The faded pre-VAT/VAT sub-line under a debit. BOTH tokens are
       // formatNum() output and stay Latin; only the connector is a word.
       // The connector is the same Latin "VAT" as `colVat` above — this sub-line
@@ -10426,7 +10375,6 @@ export const dict = {
       vatSplit: { en: "{net} + VAT {vat}", ar: "{net} + VAT {vat}" },
       // Footer captions. The trailing space that separates each from its
       // figure is a JSX literal at the call site, not part of the value.
-      footRunningBalance: { en: "Running balance:", ar: "الرصيد الجاري:" },
       footTotalPayable: { en: "Total payable:", ar: "الإجمالي المستحق:" },
       // The download button. Says "statement", not "PDF", because it sits
       // beside a Print button in the same toolbar and the two produce
@@ -10450,10 +10398,6 @@ export const dict = {
       typeBalanceApplied: { en: "Balance applied", ar: "رصيد مُطبَّق" },
       typeDrawReversal: { en: "Draw reversed", ar: "خصم مُلغى" },
       typeCorrection: { en: "Correction", ar: "تصحيح" },
-      // The prepaid headline is the LEDGER Balance — the view's figure, not a
-      // cumulative walk — so it does not say "running". Same trailing-colon
-      // grammar as footRunningBalance/footTotalPayable above.
-      footBalance: { en: "Balance:", ar: "الرصيد:" },
       // Footer template under the prepaid statement: work delivered but not
       // yet drawn from the balance, so the reader can reconcile Balance −
       // this = Available. Count is trips; amount is the view's uninvoiced_sar
@@ -12016,7 +11960,7 @@ type Leaf = { readonly en: string; readonly ar: string };
 
 /**
  * Every dotted path in `dict` that ends at a leaf, as a union of string
- * literals: "appName" | "nav.dashboard" | … | "search.g_repairer".
+ * literals: "nav.dashboard" | "common.search" | … | "search.g_repairer".
  *
  * Derived FROM the dictionary, never hand-listed — add a key above and it is
  * callable immediately; delete one and every caller breaks at compile time
