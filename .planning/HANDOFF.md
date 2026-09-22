@@ -8,15 +8,15 @@
   trip-id arrays, projects.payment_mode. prepaid.ts gone; money.ts =
   primitives + consumingItems. 5 harnesses retired into invoice-flow-check.
 - **0204:** confirm moves NO money — freezes amount_payable = grand_total.
-  record_refund = the ONE refund door, capped by Available; 7 args.
+  record_refund = the ONE refund door, capped by Available.
 - **Mark Paid** = the ONE settlement action. Draw = min(Available + claim,
   claim) — ADD-BACK load-bearing — balanceDrawPreview(). Shortfall opens cash.
 - **Balance/Remaining** = ledgerDrawFrom(): LAST UNREVERSED draw/applied,
   walked (created_at, id). Draft/review project the same two off the live
-  account (projectedLedgerDraw) — display only, freeze nothing.
+  account (projectedLedgerDraw) — display, freeze nothing.
 - **Statement run = AVAILABLE**, not Balance. draw/applied/reversal move it 0;
   trip/charge deduct round2(gross) at delivery; invoice_payments add; LEGACY
-  items in neither term. ledger-check walks it in SQL.
+  items in neither term. ledger-check walks it.
 - **customers.payment_mode = the ONE authority.** Written only by the two
   project RPCs, behind can_switch_payment_mode.
 - **confirm_invoice = 18 args.** No covered lines, no trip-id arrays; trip
