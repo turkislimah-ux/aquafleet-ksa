@@ -213,7 +213,7 @@ import {
   Printer,
 } from "lucide-react";
 import { useApp } from "@/components/AppShell";
-import { PageHeader, Btn, Stat, Table, TH, TD, Card } from "@/components/ui";
+import { PageHeader, Btn, Stat, Table, TH, TD, Card, StickyTabs } from "@/components/ui";
 import { cn, formatSar, formatNum, formatDateTime } from "@/lib/utils";
 // VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
 // NOT lib/vat.ts (see lib/inventory-vat.ts's own header).
@@ -754,33 +754,35 @@ export default function InventoryClient({
               Analysis. Turki: both Approvals and Financial Analysis were
               missing from this app entirely before this pass — preview has
               had them since the Purchase Orders phases began. */}
-          <div
-            className="inline-flex p-1 gap-1 rounded-xl border flex-wrap"
-            style={{ background: "rgb(var(--card))", borderColor: "rgb(var(--border))" }}
-          >
-            {(
-              [
-                ["inventory", t("inventory.stock.inventoryLevels", lang), null],
-                ["approvals", t("inventory.stock.tabApprovals", lang), pendingReviewCount],
-                ["analysis", t("inventory.stock.financialAnalysis", lang), null],
-              ] as const
-            ).map(([key, label, count]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setInvTab(key)}
-                className={cn(
-                  "px-3.5 py-2 rounded-lg text-[13px] font-medium transition-colors whitespace-nowrap",
-                  invTab === key ? "bg-brand-600 text-white shadow-sm" : "hover:bg-black/5 dark:hover:bg-white/5"
-                )}
-              >
-                {label}
-                {count != null && (
-                  <span className={cn("ms-1", invTab === key ? "text-white/85" : "muted")}>({count})</span>
-                )}
-              </button>
-            ))}
-          </div>
+          <StickyTabs className="py-2">
+            <div
+              className="inline-flex p-1 gap-1 rounded-xl border flex-wrap"
+              style={{ background: "rgb(var(--card))", borderColor: "rgb(var(--border))" }}
+            >
+              {(
+                [
+                  ["inventory", t("inventory.stock.inventoryLevels", lang), null],
+                  ["approvals", t("inventory.stock.tabApprovals", lang), pendingReviewCount],
+                  ["analysis", t("inventory.stock.financialAnalysis", lang), null],
+                ] as const
+              ).map(([key, label, count]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setInvTab(key)}
+                  className={cn(
+                    "px-3.5 py-2 rounded-lg text-[13px] font-medium transition-colors whitespace-nowrap",
+                    invTab === key ? "bg-brand-600 text-white shadow-sm" : "hover:bg-black/5 dark:hover:bg-white/5"
+                  )}
+                >
+                  {label}
+                  {count != null && (
+                    <span className={cn("ms-1", invTab === key ? "text-white/85" : "muted")}>({count})</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </StickyTabs>
 
           {invTab === "inventory" && (
             <>

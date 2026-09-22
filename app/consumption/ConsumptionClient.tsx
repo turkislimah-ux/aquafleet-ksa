@@ -19,7 +19,7 @@ import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, Printer, Undo2, Ban,
   RotateCcw, AlertTriangle, FileText, FileMinus, Paperclip,
 } from "lucide-react";
-import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
+import { PageHeader, Card, Btn, Table, TH, TD, StickyTabs } from "@/components/ui";
 import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
 import { t, arText, personName, type Lang, type TKey } from "@/lib/i18n";
@@ -342,22 +342,24 @@ export default function ConsumptionClient({
         }
       />
 
-      <div className="flex items-center gap-1 border-b flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
-        {TABS.map((tb) => (
-          <button
-            key={tb.key}
-            onClick={() => setTab(tb.key)}
-            className={cn(
-              "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
-              tab === tb.key
-                ? "border-brand-600 text-brand-600 dark:text-brand-300"
-                : "border-transparent muted hover:text-[rgb(var(--fg))]",
-            )}
-          >
-            {t(tb.labelKey, lang)}
-          </button>
-        ))}
-      </div>
+      <StickyTabs>
+        <div className="flex items-center gap-1 border-b flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
+          {TABS.map((tb) => (
+            <button
+              key={tb.key}
+              onClick={() => setTab(tb.key)}
+              className={cn(
+                "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
+                tab === tb.key
+                  ? "border-brand-600 text-brand-600 dark:text-brand-300"
+                  : "border-transparent muted hover:text-[rgb(var(--fg))]",
+              )}
+            >
+              {t(tb.labelKey, lang)}
+            </button>
+          ))}
+        </div>
+      </StickyTabs>
 
       {(error || actionError) && (
         <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">

@@ -18,7 +18,7 @@ import { useRecordFocus } from "@/lib/useRecordFocus";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Pencil, Eye, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon, AlertTriangle, Trash2, History } from "lucide-react";
-import { Btn, Stat, StatusPill, Table, TH, TD, PILL_TONE_CLS } from "@/components/ui";
+import { Btn, Stat, StatusPill, Table, TH, TD, PILL_TONE_CLS, StickyTabs } from "@/components/ui";
 import { addYearsToKey, cn, formatSar } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
 import {
@@ -684,21 +684,23 @@ export default function DriversClient({
       </div>
 
       {/* Tab bar — underline style mirrors the demo. */}
-      <div className="flex items-center gap-1 border-b mb-4 flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
-        <TabBtn active={tab === "drivers"} onClick={() => setTab("drivers")} label={t("drivers.tab.drivers", lang)} badge={total} />
-        {/* Item 1 — Commission owns History now, as a sub-tab. The top-level
-            button therefore reads active for BOTH values. "history" stays in
-            DRIVER_TABS and in the Tab union deliberately: it is a real URL
-            (?tab=history) that global search deep-links into, so removing the
-            value would break existing links to settle it as a sub-tab. */}
-        <TabBtn
-          active={tab === "commissions" || tab === "history"}
-          onClick={() => setTab("commissions")}
-          label={t("drivers.tab.commissions", lang)}
-          badge={pendingPayouts}
-        />
-        <TabBtn active={tab === "staff"} onClick={() => setTab("staff")} label={t("drivers.tab.staff", lang)} badge={staff.length} />
-      </div>
+      <StickyTabs>
+        <div className="flex items-center gap-1 border-b mb-4 flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
+          <TabBtn active={tab === "drivers"} onClick={() => setTab("drivers")} label={t("drivers.tab.drivers", lang)} badge={total} />
+          {/* Item 1 — Commission owns History now, as a sub-tab. The top-level
+              button therefore reads active for BOTH values. "history" stays in
+              DRIVER_TABS and in the Tab union deliberately: it is a real URL
+              (?tab=history) that global search deep-links into, so removing the
+              value would break existing links to settle it as a sub-tab. */}
+          <TabBtn
+            active={tab === "commissions" || tab === "history"}
+            onClick={() => setTab("commissions")}
+            label={t("drivers.tab.commissions", lang)}
+            badge={pendingPayouts}
+          />
+          <TabBtn active={tab === "staff"} onClick={() => setTab("staff")} label={t("drivers.tab.staff", lang)} badge={staff.length} />
+        </div>
+      </StickyTabs>
 
       {error && (
         <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{t("drivers.loadFailed", lang)} {error}</p>

@@ -39,7 +39,7 @@
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD } from "@/components/ui";
+import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD, StickyTabs } from "@/components/ui";
 import { type OperationStation, type VehicleClass, type VehicleType } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
 import { driverAvailability, AVAILABILITY_KEY } from "@/lib/driver-assignment";
@@ -547,22 +547,24 @@ export default function FleetClient({
       />
 
       {/* Tabs — underline style, matching ArchiveClient / TripsTabs / Maintenance. */}
-      <div className="flex items-center gap-1 border-b flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
-        {FLEET_TABS.map((key) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={cn(
-              "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
-              tab === key
-                ? "border-brand-600 text-brand-600 dark:text-brand-300"
-                : "border-transparent muted hover:text-[rgb(var(--fg))]",
-            )}
-          >
-            {t(`fleet.tabs.${key}`, lang)}
-          </button>
-        ))}
-      </div>
+      <StickyTabs>
+        <div className="flex items-center gap-1 border-b flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
+          {FLEET_TABS.map((key) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={cn(
+                "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
+                tab === key
+                  ? "border-brand-600 text-brand-600 dark:text-brand-300"
+                  : "border-transparent muted hover:text-[rgb(var(--fg))]",
+              )}
+            >
+              {t(`fleet.tabs.${key}`, lang)}
+            </button>
+          ))}
+        </div>
+      </StickyTabs>
 
       {/* ABOVE THE TABS' CONTENT, not inside one of them. A failed fetch breaks
           both rosters at once — it is a page-level fact. */}

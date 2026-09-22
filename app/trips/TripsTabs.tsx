@@ -16,7 +16,7 @@
 import { useMemo, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Droplet } from "lucide-react";
-import { Btn, PageHeader } from "@/components/ui";
+import { Btn, PageHeader, StickyTabs } from "@/components/ui";
 import ProjectsBoard, { buildDriverProjectNames, type ProjectsBoardProps } from "./ProjectsBoard";
 import CustomersTab from "./CustomersTab";
 import FinanceTab from "./FinanceTab";
@@ -168,26 +168,28 @@ export default function TripsTabs({
       )}
 
       {/* Tab bar — underline style mirrors the Drivers & People sub-tabs. */}
-      <div
-        className="flex items-center gap-1 border-b mb-4 flex-wrap"
-        style={{ borderColor: "rgb(var(--border))" }}
-      >
-        <TabBtn
-          active={tab === "projects"}
-          onClick={() => setTab("projects")}
-          label={t("trips.shell.tabProjects", lang)}
-        />
-        <TabBtn
-          active={tab === "customers"}
-          onClick={() => setTab("customers")}
-          label={t("trips.shell.tabCustomers", lang)}
-        />
-        <TabBtn
-          active={tab === "finance"}
-          onClick={() => setTab("finance")}
-          label={t("trips.shell.tabFinance", lang)}
-        />
-      </div>
+      <StickyTabs>
+        <div
+          className="flex items-center gap-1 border-b mb-4 flex-wrap"
+          style={{ borderColor: "rgb(var(--border))" }}
+        >
+          <TabBtn
+            active={tab === "projects"}
+            onClick={() => setTab("projects")}
+            label={t("trips.shell.tabProjects", lang)}
+          />
+          <TabBtn
+            active={tab === "customers"}
+            onClick={() => setTab("customers")}
+            label={t("trips.shell.tabCustomers", lang)}
+          />
+          <TabBtn
+            active={tab === "finance"}
+            onClick={() => setTab("finance")}
+            label={t("trips.shell.tabFinance", lang)}
+          />
+        </div>
+      </StickyTabs>
 
       {error && (
         <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">

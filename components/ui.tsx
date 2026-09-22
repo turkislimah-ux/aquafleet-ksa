@@ -15,6 +15,43 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   );
 }
 
+/**
+ * THE TAB STRIP THAT STAYS PUT. Wraps a page's existing underline tab bar so
+ * it pins directly under the app header once the page scrolls, leaving the
+ * tabs reachable without scrolling back up (Turki's ruling). The page title
+ * above it scrolls away normally — it is a label, not a control.
+ *
+ * `top-14` IS THE HEADER'S OWN HEIGHT, and the two are married: the topbar in
+ * components/AppShell.tsx is `h-14 sticky top-0`, and globals.css's print rule
+ * hides the chrome by that exact class. Change one and this gaps or overlaps.
+ *
+ * `glass-chrome` is the SAME surface the topbar uses, and for the same reason:
+ * its backdrop here is scrolling page content — cards, tables, chips — so the
+ * blur has something to work on. (Over a flat page background it would be
+ * invisible by construction; see the note beside the rail glass in
+ * globals.css.) Without it, rows would read straight through the tabs.
+ *
+ * THE NEGATIVE MARGIN IS NOT DECORATION. <main> pads the page by 4/6, so a
+ * plain sticky bar would leave two unpainted gutters for content to scroll up
+ * through on either side. The bar bleeds out by exactly that padding and puts
+ * it back inside, so the glass spans the full width while the tabs stay on the
+ * page's own grid.
+ *
+ * z-20 sits under the header (z-30), the sidebar (z-40) and every modal
+ * (z-50), so a pinned tab bar can never cover something that opened over it.
+ *
+ * The strip inside keeps its own bottom border and spacing — this adds the
+ * pinning and the surface, nothing else, so the eight pages that use it look
+ * exactly as they did until the moment they scroll.
+ */
+export function StickyTabs({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("sticky top-14 z-20 glass-chrome -mx-4 px-4 md:-mx-6 md:px-6", className)}>
+      {children}
+    </div>
+  );
+}
+
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("card p-4", className)}>{children}</div>;
 }

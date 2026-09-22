@@ -28,7 +28,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, ChevronDown, ChevronRight, Eye, Layers, X, AlertTriangle } from "lucide-react";
-import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
+import { PageHeader, Card, Btn, Table, TH, TD, StickyTabs } from "@/components/ui";
 import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
 import { useApp } from "@/components/AppShell";
 import { t, arText } from "@/lib/i18n";
@@ -512,26 +512,28 @@ export default function MaintenanceClient({
           border-b underline container, each tab border-b-2 -mb-px). Was
           a small pill-segmented control further down the page, below the
           calendar. */}
-      <div className="flex items-center gap-1 border-b mb-4 flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
-        <button
-          onClick={() => setTrack("in_house")}
-          className={cn(
-            "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
-            track === "in_house" ? "border-brand-600 text-brand-600 dark:text-brand-300" : "border-transparent muted hover:text-[rgb(var(--fg))]",
-          )}
-        >
-          {t("mt.inHouse", lang)} ({workOrders.length})
-        </button>
-        <button
-          onClick={() => setTrack("outsourced")}
-          className={cn(
-            "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
-            track === "outsourced" ? "border-brand-600 text-brand-600 dark:text-brand-300" : "border-transparent muted hover:text-[rgb(var(--fg))]",
-          )}
-        >
-          {t("mt.outsourced", lang)} ({outsourcedJobs.length})
-        </button>
-      </div>
+      <StickyTabs>
+        <div className="flex items-center gap-1 border-b mb-4 flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
+          <button
+            onClick={() => setTrack("in_house")}
+            className={cn(
+              "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
+              track === "in_house" ? "border-brand-600 text-brand-600 dark:text-brand-300" : "border-transparent muted hover:text-[rgb(var(--fg))]",
+            )}
+          >
+            {t("mt.inHouse", lang)} ({workOrders.length})
+          </button>
+          <button
+            onClick={() => setTrack("outsourced")}
+            className={cn(
+              "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
+              track === "outsourced" ? "border-brand-600 text-brand-600 dark:text-brand-300" : "border-transparent muted hover:text-[rgb(var(--fg))]",
+            )}
+          >
+            {t("mt.outsourced", lang)} ({outsourcedJobs.length})
+          </button>
+        </div>
+      </StickyTabs>
 
       {error && (
         <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">{error}</div>
