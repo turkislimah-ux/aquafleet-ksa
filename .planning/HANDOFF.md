@@ -1,37 +1,35 @@
 # SESSION HANDOFF
 
 ## State
-- **main = 5d5fa6d. DB at 0205** (prod + test). prepaid-adjustments merged
-  and deleted; work on prepaid-legacy-removal. Gates green.
+- **main = 7e694ec. DB at 0207** (prod + test). Prepaid rebuild + legacy
+  removal COMPLETE on main; no branches. Gates green (626 DB assertions).
+- **LEDGER IS THE ONLY MODEL.** 0207 dropped both pool views,
+  return_customer_balance, customer_topups, customer_balance_returns, invoice
+  trip-id arrays, projects.payment_mode. prepaid.ts gone; money.ts =
+  primitives + consumingItems. 5 harnesses retired into invoice-flow-check.
 - **0204:** confirm moves NO money — freezes amount_payable = grand_total.
-  record_refund SEVEN args (p_photo_path 5th); 6-arg DROPPED; its proof
-  guard precedes the Available cap, so cap tests use cash.
-- **Mark Paid** = the ONE settlement action. Prepaid draw =
-  min(Available + remainder, remainder) — ADD-BACK load-bearing. Shortfall
-  opens the cash form.
-- **0205:** four *_ledger_balance/remaining DROPPED, confirm_invoice 21 args
-  (*_subtotal STAY — legacy doc reads them). Balance/Remaining DERIVED by
-  ledgerDrawFrom() in lib/invoiceViewModel.ts: LAST UNREVERSED draw/applied,
-  walked (created_at, id).
-- **Statement run = AVAILABLE** (v_customer_available), not Balance.
-  draw/applied/reversal move it 0 (Amount still prints); trip/charge deduct
-  round2(gross) at delivery; invoice_payments add. LEGACY-invoice items
-  excluded — in neither term. Headline = available_sar; ledger-check.ts
-  walks it in SQL.
-- **Sources:** invoice_payments 5th; 0204 doors DISJOINT, no de-dup;
-  `payments` LEGACY-ONLY; TIMED rows sort created_at, rank 0.
-- **Trips say paid/unpaid** (invoiceLocked). Label = stem + tail; screen inks
-  the TAIL only, paper carries it in words (monochrome by design).
-- **ONE uninvoiced count** — fetchUninvoicedTripCounts; invoiceLocked is
-  status='paid', never count with it.
-- **hide-from-customer** omits the trips section WHOLE on print/PDF.
+  record_refund = the ONE refund door, capped by Available; 7 args.
+- **Mark Paid** = the ONE settlement action. Draw = min(Available + claim,
+  claim) — ADD-BACK load-bearing — balanceDrawPreview(). Shortfall opens cash.
+- **Balance/Remaining** = ledgerDrawFrom(): LAST UNREVERSED draw/applied,
+  walked (created_at, id). Draft/review project the same two off the live
+  account (projectedLedgerDraw) — display only, freeze nothing.
+- **Statement run = AVAILABLE**, not Balance. draw/applied/reversal move it 0;
+  trip/charge deduct round2(gross) at delivery; invoice_payments add; LEGACY
+  items in neither term. ledger-check walks it in SQL.
+- **customers.payment_mode = the ONE authority.** Written only by the two
+  project RPCs, behind can_switch_payment_mode.
+- **confirm_invoice = 18 args.** No covered lines, no trip-id arrays; trip
+  linkage = the DRAFT reservation (0030).
+- **Trips say paid/unpaid**; screen inks the tail, paper uses words.
 - **Era:** invoiceEra() in lib/invoice-era.ts — NOT a status test.
-- **Gap:** balance returns render as the 0203 refund row.
-- **PARKED:** snapshot-drop STEP 2 (SQL Editor); leaked-password off.
+- **29 legacy invoices** render from frozen columns — do NOT drop them.
+- **OPEN:** Add Balance date field ignored (ledger stamps created_at).
+- **PARKED (deploy):** dummy wipe; snapshot-drop STEP 2; leaked-password off.
 
 ## Rules
 - **NEVER build into .next while dev is up** — `npm run build` REFUSES via
-  safe-build.sh; use `npm run build:verify`.
+  safe-build.sh; use `build:verify`.
 - CLAUDE.md + domain SKILL.md = rules. NEVER append.
 - Migration gate: draft, STOP, review. Cap 15 turns.
-- Stays under 2KB. If larger, Code is appending diary.
+- Under 2KB. If larger, Code is appending diary.
