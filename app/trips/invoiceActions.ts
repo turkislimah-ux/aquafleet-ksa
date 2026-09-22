@@ -20,7 +20,7 @@ import { settlementGross, type ConsumingTrip } from "@/lib/money";
 import type { Invoice, CompanySettings, Customer, WaterType, PaymentMode } from "@/lib/db-types";
 import { generateInvoicePdf, PdfServiceNotConfiguredError } from "@/lib/pdf";
 import { buildInvoicePdfHtml, type PdfInvoiceData, type PdfIdentity } from "@/lib/invoicePdfTemplate";
-import { ledgerDrawFrom, type InvoiceLedgerDraw } from "@/lib/invoiceViewModel";
+import { ledgerDrawFrom, projectedLedgerDraw, type InvoiceLedgerDraw } from "@/lib/invoiceViewModel";
 import { buildInvoicePrintHtml } from "@/lib/invoicePrintTemplate";
 import {
   MAX_BANK_ACCOUNTS,
@@ -725,6 +725,10 @@ export async function getInvoice(
       // remainder) computed inside the RPC under its lock, so this figure is a
       // preview and is never sent anywhere.
       availableSar: number | null;
+      // The same view row's BALANCE column. Draft and review show Balance and
+      // Remaining like every other prepaid invoice, and with no draw row to
+      // walk the figures start from what the account holds now.
+      ledgerBalanceSar: number | null;
       // THE BALANCE EITHER SIDE OF THIS INVOICE'S DRAW. Feeds the Balance /
       // Remaining pair under the ledger-era Trips subtotal, and nothing else.
       //
@@ -815,6 +819,7 @@ export async function getInvoice(
       settlement: settlementRes.error ? null : (settlementRes.data ?? null),
       payments: paymentsRes.error ? [] : (paymentsRes.data ?? []),
       availableSar: availableRes && !availableRes.error ? (availableRes.data?.available_sar ?? null) : null,
+      ledgerBalanceSar: availableRes && !availableRes.error ? (availableRes.data?.balance_sar ?? null) : null,
       // Postpaid gets "none", not "unreadable": there was no ledger to read,
       // which is a different thing from failing to read one.
       ledgerDraw:
@@ -1669,6 +1674,11 @@ async function loadLedgerDocExtras(
   supabase: ReturnType<typeof createClient>,
   inv: Invoice,
   paymentMode: PaymentMode,
+  // The invoice's grand total, for an UNISSUED invoice only: with no draw row
+  // to walk, the two rows are built from what a balance payment would take,
+  // and that is capped by what the invoice is asking for. The frozen branch
+  // passes nothing — an issued invoice has a real draw or it has none.
+  claimSar?: number | null,
 ): Promise<LedgerDocExtras> {
   if (paymentMode !== "prepaid" || invoiceEra(inv) !== "ledger") return NO_LEDGER_EXTRAS;
 
@@ -1687,10 +1697,13 @@ async function loadLedgerDocExtras(
   // ONE READ SERVES BOTH. The settlement list wants this invoice's draws and
   // the foot wants the balance around the last of them; filtering in memory
   // is cheaper and more obviously consistent than asking twice.
-  const [ledgerRes, settlementRes, paymentsRes] = await Promise.all([
+  const [ledgerRes, settlementRes, paymentsRes, availableRes] = await Promise.all([
     fetchLedgerWalkRows(supabase, inv.customer_id),
     issued ? fetchInvoiceSettlement(supabase, inv.id) : Promise.resolve(null),
     issued ? fetchInvoicePayments(supabase, inv.id) : Promise.resolve(null),
+    // Draft and review only: Balance and Remaining come from the account's
+    // live figures rather than a ledger row. One row, both columns.
+    issued ? Promise.resolve(null) : fetchCustomerAvailable(supabase, inv.customer_id),
   ]);
   const ledgerRows = ledgerRes.error ? null : (ledgerRes.data ?? []);
   const appliedRows = (ledgerRows ?? []).filter(
@@ -1727,7 +1740,18 @@ async function loadLedgerDocExtras(
     // A FAILED LEDGER READ SAYS SO. It is the one case that must not fall
     // through to "none": "nothing has been drawn" and "we could not find out"
     // are opposite facts that would print the same em-dash.
-    ledgerDraw: ledgerRows == null ? { state: "unreadable" } : ledgerDrawFrom(ledgerRows, inv.id),
+    // AN UNISSUED INVOICE HAS NO DRAW TO WALK, so the same two figures are
+    // projected instead — same definitions, same fields, and every renderer
+    // shows them in the same rows as a settled invoice's.
+    ledgerDraw: !issued
+      ? projectedLedgerDraw({
+          availableSar: availableRes && !availableRes.error ? (availableRes.data?.available_sar ?? null) : null,
+          balanceNowSar: availableRes && !availableRes.error ? (availableRes.data?.balance_sar ?? null) : null,
+          claimSar: claimSar ?? null,
+        })
+      : ledgerRows == null
+        ? { state: "unreadable" }
+        : ledgerDrawFrom(ledgerRows, inv.id),
     // MERGED AND SORTED ON THE DAY, not the timestamp. The two sources stamp
     // differently — a payment carries a date, a ledger row a full instant — so
     // comparing them raw would order a whole day's payments after a draw that
@@ -1784,7 +1808,7 @@ async function toPdfInvoiceData(
     // is the operator who sees the message, not the customer.
     const paidUp = await loadPaidUpBalance(supabase, inv, assembly.paymentMode);
     if (!paidUp.ok) return { error: paidUp.error };
-    const ledgerExtras = await loadLedgerDocExtras(supabase, inv, assembly.paymentMode);
+    const ledgerExtras = await loadLedgerDocExtras(supabase, inv, assembly.paymentMode, assembly.grand.total);
     const seller = assembly.sellerSnapshot as SellerSnap;
     const buyer = assembly.buyerSnapshot as BuyerSnap;
     pdfData = {

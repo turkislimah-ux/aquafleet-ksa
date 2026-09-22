@@ -29,7 +29,13 @@ import { canEditSpecialCharges } from "@/lib/invoice";
 import { prepareUploadFiles } from "@/lib/upload-image";
 import { round2 } from "@/lib/vat";
 import { groupInvoiceLines } from "@/lib/invoiceDisplay";
-import { buildBankBlock, type InvoiceLedgerDraw, type VmBankBlock } from "@/lib/invoiceViewModel";
+import {
+  balanceDrawPreview,
+  buildBankBlock,
+  projectedLedgerDraw,
+  type InvoiceLedgerDraw,
+  type VmBankBlock,
+} from "@/lib/invoiceViewModel";
 import TripRefLink from "@/components/TripRefLink";
 import { printHtml } from "@/lib/printHtml";
 import {
@@ -261,6 +267,10 @@ export default function InvoiceDetailModal({
         // post-confirm apply-balance would draw against, so it must not be
         // confused with prepaid_applied_sar, which froze at confirm.
         availableSar: number | null;
+        // The same view row's BALANCE column — what the account holds. Draft
+        // and review build their two rows from it; a settled invoice reads its
+        // balance off the draw instead.
+        ledgerBalanceSar: number | null;
         // The customer's ledger BALANCE right now (prepaid only, null for
         // postpaid or a failed read). Distinct from availableSar above:
         // balance is everything on the ledger, available is that balance less
@@ -1027,6 +1037,7 @@ export default function InvoiceDetailModal({
   // be confused with prepaid_applied_sar beside it, which froze at confirm:
   // this is what a post-confirm apply-balance would have to draw from.
   const availableSar = raw?.availableSar ?? null;
+  const ledgerBalanceSar = raw?.ledgerBalanceSar ?? null;
   // WHAT MARK PAID WILL TAKE OFF THE BALANCE — apply_balance_to_invoice()'s own
   // arithmetic, previewed. Null when either side is unreadable, never zero:
   // "nothing to draw" and "we could not find out" are different answers and
@@ -1047,10 +1058,10 @@ export default function InvoiceDetailModal({
   //
   // It is a FORECAST, never an instruction. Nothing sends it: the RPC re-reads
   // under the customer row lock and its answer is the one that lands.
-  const markPaidDraw =
-    availableSar == null || remainderSar == null
-      ? null
-      : Math.max(0, round2(Math.min(round2(availableSar + remainderSar), remainderSar)));
+  // THE EXPRESSION ITSELF now lives in lib/invoiceViewModel.ts so the
+  // draft/review rows can call the same one. Everything above still describes
+  // exactly what it does.
+  const markPaidDraw = balanceDrawPreview(availableSar, remainderSar);
 
   // UN-PAY'S GATE, mirroring unpay_invoice()'s two guards exactly (0203 §12):
   // no invoice_payments rows, and no balance_applied ledger rows. Both are
@@ -1126,14 +1137,30 @@ export default function InvoiceDetailModal({
   // THREE STATES, and the middle one is the common case under 0204: an invoice
   // nothing has been drawn against yet prints an em-dash on both rows, because
   // there is no moment to report rather than a zero to report.
-  const ledgerDraw: InvoiceLedgerDraw = raw?.ledgerDraw ?? { state: "unreadable" };
-  const ledgerBalanceRow: { amount: number } | { note: string } | null =
-    ledgerDraw.state === "drawn"
-      ? { amount: ledgerDraw.balanceBefore }
-      : ledgerDraw.state === "none"
-        ? null
-        : { note: t("trips.invoiceSheet.paidUpUnavailable", lang) };
-  const ledgerRemaining = ledgerDraw.state === "drawn" ? ledgerDraw.balanceAfter : null;
+  // DRAFT AND REVIEW SHOW THE SAME TWO ROWS (Turki's ruling), read as they
+  // would stand if the invoice were paid from balance right now. Neither state
+  // freezes or deducts anything — that is unchanged — so there is no draw row
+  // to walk and the figures come from the account's live columns instead. The
+  // grand total is the live assembly's, which is why this is built here rather
+  // than server-side: an unissued invoice has no frozen total to read.
+  const isUnissuedPrepaid =
+    (raw?.status === "draft" || raw?.status === "review") && view?.paymentMode === "prepaid";
+  const ledgerDraw: InvoiceLedgerDraw = isUnissuedPrepaid
+    ? projectedLedgerDraw({
+        availableSar,
+        balanceNowSar: ledgerBalanceSar,
+        claimSar: view?.grand.total ?? null,
+      })
+    : (raw?.ledgerDraw ?? { state: "unreadable" });
+  // "projected" renders IDENTICALLY to "drawn": same two rows, same captions,
+  // same figures in the same places.
+  const ledgerSettled = ledgerDraw.state === "drawn" || ledgerDraw.state === "projected";
+  const ledgerBalanceRow: { amount: number } | { note: string } | null = ledgerSettled
+    ? { amount: ledgerDraw.balanceBefore }
+    : ledgerDraw.state === "none"
+      ? null
+      : { note: t("trips.invoiceSheet.paidUpUnavailable", lang) };
+  const ledgerRemaining = ledgerSettled ? ledgerDraw.balanceAfter : null;
 
   // --- WHAT THE PAYMENT FORM IS STILL MISSING (0204, item 10) --------------
   // A bank transfer is a real transaction somewhere else, and the only thing

@@ -918,13 +918,30 @@ async function main() {
     // explained in prose beside the code it guards, and an unstripped scan
     // would read the explanation as the defect.
     const code = stripped.join("\n");
-    check(
-      "the Mark Paid draw adds this invoice's own remainder back before capping",
-      /availableSar \+ remainderSar/.test(code),
+
+    // THE EXPRESSION MOVED, THE LAW DID NOT. The add-back was written inline in
+    // this screen until the draft/review rows needed the same arithmetic; it
+    // now lives in lib/invoiceViewModel.ts's balanceDrawPreview() and both
+    // callers go through it. Scanning this file for the old literal would fail
+    // on correct code, so the guard follows the formula and gains a third side:
+    // this screen must CALL the helper rather than restate anything.
+    const helperSrc = stripComments(
+      readFileSync(join(process.cwd(), "lib/invoiceViewModel.ts"), "utf8"),
+      "ts",
     );
     check(
-      "…and the un-added-back min() appears nowhere",
-      !/Math\.min\(\s*availableSar\s*,/.test(code),
+      "the Mark Paid draw adds this invoice's own claim back before capping",
+      /availableSar \+ claimSar/.test(helperSrc),
+    );
+    check(
+      "…and the un-added-back min() appears nowhere in the helper",
+      !/Math\.min\(\s*availableSar\s*,/.test(helperSrc),
+    );
+    check("…nor anywhere in this screen", !/Math\.min\(\s*availableSar\s*,/.test(code));
+    check("the Mark Paid dialog calls the shared helper", /balanceDrawPreview\(/.test(code));
+    check(
+      "…and the draft/review rows reach the same one",
+      /balanceDrawPreview\(/.test(helperSrc) && /projectedLedgerDraw\(/.test(code),
     );
     // THE CONTROL. Both lines above are green on a file that never mentions
     // either expression, so plant the exact pre-fix code and require each scan
@@ -938,7 +955,11 @@ async function main() {
     );
     check(
       "CONTROL: …and the pre-fix expression does NOT satisfy the add-back scan",
-      !/availableSar \+ remainderSar/.test(plantedDraw),
+      !/availableSar \+ claimSar/.test(plantedDraw),
+    );
+    check(
+      "CONTROL: …nor look like a call to the shared helper",
+      !/balanceDrawPreview\(/.test(plantedDraw),
     );
 
     // ── Legacy pay-with-balance panel ──────────────────────────────────────

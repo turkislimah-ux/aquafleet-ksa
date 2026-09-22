@@ -126,8 +126,67 @@ export type PdfSettlementEvent = {
  */
 export type InvoiceLedgerDraw =
   | { state: "drawn"; balanceBefore: number; drawSar: number; balanceAfter: number }
+  // DRAFT AND REVIEW, where the draw has not happened yet. Same three fields
+  // with the same meanings, so every renderer shows the same two rows in the
+  // same places with the same captions — see projectedLedgerDraw below.
+  | { state: "projected"; balanceBefore: number; drawSar: number; balanceAfter: number }
   | { state: "none" }
   | { state: "unreadable" };
+
+/**
+ * WHAT A BALANCE PAYMENT WOULD DRAW — apply_balance_to_invoice()'s own
+ * arithmetic. Extracted from InvoiceDetailModal's Mark Paid dialog, which was
+ * its only home; both that dialog and the draft/review rows below call this, so
+ * one expression serves every preview and none of them can drift.
+ *
+ * THE ADD-BACK IS THE WHOLE POINT. Since 0204 `v_customer_available` reserves
+ * this invoice's own unsettled claim against the customer, so Available is
+ * already that claim lighter. A plain min(Available, claim) understates every
+ * draw and reads negative on the ordinary case — balance 300 against a claim of
+ * 400 shows Available −100 — so 0204 adds the claim back before capping, and
+ * this is that same expression:
+ *
+ *     draw = min(Available + claim, claim)
+ *
+ * `claimSar` is what the invoice is asking for: its settlement remainder once
+ * confirmed, its grand total while still unissued.
+ *
+ * NULL, NEVER ZERO, when either input is missing — "nothing to draw" and "could
+ * not read" are different answers. A FORECAST, never an instruction: the RPC
+ * re-reads under the customer row lock and its answer is the one that lands.
+ */
+export function balanceDrawPreview(availableSar: number | null, claimSar: number | null): number | null {
+  if (availableSar == null || claimSar == null) return null;
+  return Math.max(0, round2(Math.min(round2(availableSar + claimSar), claimSar)));
+}
+
+/**
+ * THE SAME TWO FIGURES FOR A DRAFT OR REVIEW INVOICE (Turki's ruling), read as
+ * they would stand if the invoice were paid from balance right now.
+ *
+ * Nothing is frozen and nothing is deducted at draft or review — confirm moves
+ * no money either, only settlement does — so `ledgerDrawFrom` finds no row and
+ * answers "none", which prints two em-dashes. These are the same definitions
+ * filled from live figures instead of a ledger row:
+ *
+ *   balanceBefore  the balance now, since nothing has been drawn yet
+ *   drawSar        balanceDrawPreview(Available, the invoice's grand total)
+ *   balanceAfter   the balance now, less that draw
+ *
+ * `balanceNowSar` is v_customer_ledger_balance's own column, passed in — never
+ * summed here. Either input missing answers "unreadable" rather than inventing
+ * a figure from a half-read account.
+ */
+export function projectedLedgerDraw(input: {
+  availableSar: number | null;
+  balanceNowSar: number | null;
+  claimSar: number | null;
+}): InvoiceLedgerDraw {
+  const drawSar = balanceDrawPreview(input.availableSar, input.claimSar);
+  if (drawSar == null || input.balanceNowSar == null) return { state: "unreadable" };
+  const balanceBefore = round2(input.balanceNowSar);
+  return { state: "projected", balanceBefore, drawSar, balanceAfter: round2(balanceBefore - drawSar) };
+}
 
 /**
  * THE DRAW BEHIND A LEDGER-ERA INVOICE, walked out of the customer's ledger.
@@ -921,13 +980,16 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
       // THREE STATES, THREE RENDERINGS — a real draw, no draw yet, and a
       // failed read are three different facts, so the slot is a union and
       // none of them can be printed as a fabricated 0.
+      // "projected" renders IDENTICALLY to "drawn" — same rows, same captions,
+      // same places (Turki's ruling). The two states differ only in where the
+      // figures came from, which is the caller's business, not this render's.
       const draw: InvoiceLedgerDraw = data.ledgerDraw ?? { state: "unreadable" };
-      const ledgerBalanceRow: { amount: number } | { note: BiLabel } | null =
-        draw.state === "drawn"
-          ? { amount: draw.balanceBefore }
-          : draw.state === "none"
-            ? null
-            : { note: bi("trips.invoiceSheet.paidUpUnavailable") };
+      const settled = draw.state === "drawn" || draw.state === "projected";
+      const ledgerBalanceRow: { amount: number } | { note: BiLabel } | null = settled
+        ? { amount: draw.balanceBefore }
+        : draw.state === "none"
+          ? null
+          : { note: bi("trips.invoiceSheet.paidUpUnavailable") };
 
       sections.push({
         kind: "trips",
@@ -941,7 +1003,7 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
           subtotal: tripT.total,
           balanceLabel: bi("trips.invoiceSheet.ledgerBalance"),
           balance: ledgerBalanceRow,
-          remaining: draw.state === "drawn" ? draw.balanceAfter : null,
+          remaining: settled ? draw.balanceAfter : null,
         },
       });
 
