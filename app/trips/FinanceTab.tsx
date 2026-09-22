@@ -828,7 +828,12 @@ function ModeBadge({ mode, lang }: { mode: PaymentMode | null; lang: Lang }) {
   const cls =
     mode === "prepaid"
       ? "bg-brand-500/10 text-brand-700 dark:text-brand-300 ring-brand-500/20"
-      : "bg-slate-500/10 text-slate-700 dark:text-slate-300 ring-slate-500/20";
+      // POSTPAID IS GREEN (Turki's call). It was slate, which read as
+      // "unset"-adjacent beside the genuinely grey states on this screen;
+      // emerald is the same green the rest of the app already uses for
+      // settled money, and it reads as a real arrangement rather than an
+      // absent one. Prepaid keeps brand — the two must stay distinct.
+      : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20";
   return (
     <span className={"inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset " + cls}>
       {paymentModeLabel(mode, lang)}
