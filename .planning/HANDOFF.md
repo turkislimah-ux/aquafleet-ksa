@@ -1,10 +1,9 @@
 # SESSION HANDOFF
 
 ## State
-- **main = 175c72e. DB at 0210** (prod + test). No branches. Gates green
-  (637 DB).
+- **main = 1491877. DB at 0210** (prod + test). No branches. Gates green (637).
 - **LEDGER IS THE ONLY MODEL.** 0207 dropped the pool views,
-  return_customer_balance, the dummy tables, the invoice trip-id arrays and
+  return_customer_balance, the dummy tables, the trip-id arrays and
   projects.payment_mode. prepaid.ts gone; money.ts = primitives.
 - **0204:** confirm moves NO money — freezes amount_payable = grand_total.
   record_refund = the ONE refund door, capped by Available.
@@ -16,15 +15,15 @@
   deduct round2(gross) at delivery; invoice_payments add; LEGACY neither.
   DATED entry_date, ORDERED created_at.
 - **0209/0210:** anon = 0 in public; authenticated closed on the 8 number
-  generators + 6 trigger fns — definer callers only, a direct .rpc FAILS.
-  vat_rate NOT pinned — stays inlinable (0190).
+  generators + 6 trigger fns (definer callers only). vat_rate NOT pinned —
+  stays inlinable (0190).
+- **VERCEL request cap 4.5MB** — uploads gate 4MB/3.5MB; PDF fonts traced.
 - **customers.payment_mode = the ONE authority**, written only by the
   project RPCs behind can_switch_payment_mode.
-- **confirm_invoice = 18 args**; trip linkage = DRAFT reservation (0030).
 - **Trips say paid/unpaid**; screen inks the tail, paper uses words.
 - **Era:** invoiceEra() (lib/invoice-era.ts) — NOT a status test.
-- **29 legacy invoices** render from frozen columns — do NOT drop.
-- **0208:** customer_ledger.entry_date — operator-picked, any date incl.
+- **29 legacy invoices** render from frozen columns — never drop.
+- **0208:** customer_ledger.entry_date — operator-picked, any date incl
   future; record_topup 8 args. Balance/Available NEVER date-filtered.
 - **PARKED:** dummy wipe; snapshot-drop STEP 2; leaked-password off.
 
@@ -34,4 +33,4 @@
   never stage.
 - CLAUDE.md + domain SKILL.md = rules. NEVER append.
 - Migration gate: draft, STOP, review. Cap 15 turns.
-- Under 2KB. If larger, Code is appending diary.
+- Under 2KB; if larger, Code is appending diary.
