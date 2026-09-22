@@ -163,6 +163,7 @@ export default function AddBalanceModal({
       method: receipt.method,
       reference: receipt.reference,
       note: receipt.note,
+      entryDate: receipt.entryDate,
       createdAt: receipt.createdAt,
       createdBy: receipt.createdBy,
       company,

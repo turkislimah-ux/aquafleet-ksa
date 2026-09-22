@@ -119,6 +119,7 @@ const DOC_CASES: LedgerDocCase[] = [
       method: "bank_transfer",
       reference: "TRF-2026-88120",
       note: "Q4 advance per agreement",
+      entryDate: "2026-09-10",
       createdAt: "2026-09-10T08:45:00Z",
       createdBy: "turkislimah@gmail.com",
       company,
@@ -138,6 +139,7 @@ const DOC_CASES: LedgerDocCase[] = [
       method: "cash",
       reference: null,
       note: null,
+      entryDate: "2026-09-11",
       createdAt: "2026-09-11T14:10:00Z",
       createdBy: null,
       company: null,
@@ -157,6 +159,7 @@ const DOC_CASES: LedgerDocCase[] = [
       method: "bank_transfer",
       reference: "TRF-2026-91007",
       note: "Contract closed — balance returned",
+      entryDate: "2026-09-12",
       createdAt: "2026-09-12T10:00:00Z",
       createdBy: "turkislimah@gmail.com",
       company,
@@ -183,12 +186,12 @@ const RATE = 1234.5;
 const RATE_INC = round2(RATE * 1.15); // 1419.68 — the halala that must survive
 
 const sixTypes: StatementLedgerEntry[] = [
-  { id: "le-1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000001", invoice_number: null, method: "bank_transfer", reference: "TRF-88120", note: null, created_at: "2026-01-05T09:00:00Z" },
-  { id: "le-2", entry_type: "invoice_draw", amount_sar: -RATE_INC, doc_number: null, invoice_number: "026-000004", method: null, reference: null, note: null, created_at: "2026-01-12T08:00:00Z" },
-  { id: "le-3", entry_type: "balance_applied", amount_sar: -800, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-20T10:00:00Z" },
-  { id: "le-4", entry_type: "draw_reversal", amount_sar: RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: "Invoice cancelled", created_at: "2026-02-25T09:30:00Z" },
-  { id: "le-5", entry_type: "refund", amount_sar: -1500, doc_number: "CN-2026-000001", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-03-20T13:00:00Z" },
-  { id: "le-6", entry_type: "correction", amount_sar: 250.25, doc_number: null, invoice_number: null, method: null, reference: null, note: "Bank fee reversed", created_at: "2026-03-25T15:00:00Z" },
+  { id: "le-1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000001", invoice_number: null, method: "bank_transfer", reference: "TRF-88120", note: null, created_at: "2026-01-05T09:00:00Z", entry_date: "2026-01-05" },
+  { id: "le-2", entry_type: "invoice_draw", amount_sar: -RATE_INC, doc_number: null, invoice_number: "026-000004", method: null, reference: null, note: null, created_at: "2026-01-12T08:00:00Z", entry_date: "2026-01-12" },
+  { id: "le-3", entry_type: "balance_applied", amount_sar: -800, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-20T10:00:00Z", entry_date: "2026-02-20" },
+  { id: "le-4", entry_type: "draw_reversal", amount_sar: RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: "Invoice cancelled", created_at: "2026-02-25T09:30:00Z", entry_date: "2026-02-25" },
+  { id: "le-5", entry_type: "refund", amount_sar: -1500, doc_number: "CN-2026-000001", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-03-20T13:00:00Z", entry_date: "2026-03-20" },
+  { id: "le-6", entry_type: "correction", amount_sar: 250.25, doc_number: null, invoice_number: null, method: null, reference: null, note: "Bank fee reversed", created_at: "2026-03-25T15:00:00Z", entry_date: "2026-03-25" },
 ];
 
 /** The view's arithmetic, restated so the FIXTURE is self-consistent the way
@@ -256,6 +259,7 @@ for (let m = 0; m < 10; m++) {
     reference: m % 2 === 0 ? `TRF-2026-${9000 + m}` : null,
     note: null,
     created_at: `2026-${mm}-01T08:00:00Z`,
+    entry_date: `2026-${mm}-01`,
   });
   for (let d = 0; d < 14; d++) {
     longRows.push({
@@ -268,6 +272,7 @@ for (let m = 0; m < 10; m++) {
       reference: null,
       note: null,
       created_at: `2026-${mm}-${String(2 + d).padStart(2, "0")}T09:00:00Z`,
+      entry_date: `2026-${mm}-${String(2 + d).padStart(2, "0")}`,
     });
   }
 }

@@ -38,6 +38,8 @@ export type LedgerDocResult = {
   method: string;
   reference: string | null;
   note: string | null;
+  /** The day the money moved — what the printed sheet dates itself by. */
+  entryDate: string;
   createdAt: string;
   createdBy: string | null;
 };
@@ -48,6 +50,8 @@ type LedgerRpcRow = {
   method: string | null;
   reference: string | null;
   note: string | null;
+  /** date column — PostgREST serialises it as "YYYY-MM-DD". */
+  entry_date: string;
   created_at: string;
   created_by: string | null;
 };
@@ -94,6 +98,13 @@ export async function recordTopup(formData: FormData): Promise<ActionResult<Ledg
   const note = String(formData.get("note") ?? "").trim() || null;
   const reference = String(formData.get("reference") ?? "").trim() || null;
   const file = formData.get("photoFile");
+  // THE DATE THE FORM HAS ALWAYS COLLECTED, and until 0208 always discarded:
+  // record_topup had no date parameter and customer_ledger had only
+  // created_at, so a picked date reached the server and died here. SHAPE is
+  // all that is checked — any date is legal, future included (Turki's ruling)
+  // — and null lets the RPC fall back to today in Riyadh.
+  const topupDate = String(formData.get("topupDate") ?? "").trim();
+  const entryDate = /^\d{4}-\d{2}-\d{2}$/.test(topupDate) ? topupDate : null;
 
   if (!customerId) return { error: "Missing customer." };
   if (!Number.isFinite(amountSar) || amountSar <= 0) {
@@ -126,6 +137,10 @@ export async function recordTopup(formData: FormData): Promise<ActionResult<Ledg
     p_photo_path: photoPath,
     p_actor: auth?.user?.email ?? null,
     p_note: note,
+    // REQUIRES 0208. Named arguments mean a missing parameter is a schema
+    // fault, not a silent default, so a deploy that runs this against the
+    // 7-argument function fails loudly on the first top-up.
+    p_entry_date: entryDate,
   });
   if (error) return { error: error.message };
   // `returns customer_ledger` (a single composite row) comes back as one
@@ -141,6 +156,7 @@ export async function recordTopup(formData: FormData): Promise<ActionResult<Ledg
       method: row.method ?? method,
       reference: row.reference,
       note: row.note,
+      entryDate: row.entry_date,
       createdAt: row.created_at,
       createdBy: row.created_by,
     },
@@ -215,6 +231,7 @@ export async function recordRefund(formData: FormData): Promise<ActionResult<Led
       method: row.method ?? method,
       reference: row.reference,
       note: row.note,
+      entryDate: row.entry_date,
       createdAt: row.created_at,
       createdBy: row.created_by,
     },

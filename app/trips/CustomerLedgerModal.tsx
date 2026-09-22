@@ -219,6 +219,7 @@ export default function CustomerLedgerModal({
       method: e.method,
       reference: e.reference,
       note: e.note,
+      entryDate: e.entry_date,
       createdAt: e.created_at,
       createdBy: e.created_by,
       company,
@@ -239,6 +240,7 @@ export default function CustomerLedgerModal({
       method: creditNote.method,
       reference: creditNote.reference,
       note: creditNote.note,
+      entryDate: creditNote.entryDate,
       createdAt: creditNote.createdAt,
       createdBy: creditNote.createdBy,
       company,
@@ -727,7 +729,10 @@ export default function CustomerLedgerModal({
               <tbody>
                 {walked.map(({ e, run }) => (
                   <tr key={e.id}>
-                    <TD className="tabular-nums">{e.created_at.slice(0, 10)}</TD>
+                    {/* The day the money moved (0208). On a top-up that is
+                        the date the operator picked; on every other row it is
+                        that row's own day, unchanged. */}
+                    <TD className="tabular-nums">{e.entry_date}</TD>
                     <TD>{typeLabel(e.entry_type, lang)}</TD>
                     {/* Ref = the row's own document number, else the invoice
                         it is linked to. Corrections have neither, on purpose:

@@ -53,7 +53,9 @@ const BALANCE_AFTER_REFUND = 2839.36; // TOPUP − AVAILABLE
 const TRIP_DATE = "2020-01-15";
 const ACTOR = "dbchk@harness.local";
 
-const TOPUP_SQL = `select * from public.record_topup($1::uuid, $2::numeric, $3::text, $4::text, $5::text, $6::text, $7::text)`;
+// 0208: eight arguments — $8 is p_entry_date, the day the money moved. Null
+// means today in Riyadh.
+const TOPUP_SQL = `select * from public.record_topup($1::uuid, $2::numeric, $3::text, $4::text, $5::text, $6::text, $7::text, $8::date)`;
 // Seven arguments since 0204, which gave the refund a proof photo and DROPPED
 // the six-argument version outright. The argument list here is positional, so
 // the added p_photo_path sits fifth and pushes p_actor and p_note along one
@@ -270,7 +272,7 @@ async function main(): Promise<void> {
     // a storage key in a text column — the RPC does not resolve it and nothing
     // in this harness reads it back — so a literal keeps the seed honest
     // without inventing a bucket object.
-    const t = await rpc(TOPUP_SQL, [customer, TOPUP, "bank_transfer", "DBCHK-REF-1", `${customer}/topup-dbchk.webp`, ACTOR, "harness top-up"]);
+    const t = await rpc(TOPUP_SQL, [customer, TOPUP, "bank_transfer", "DBCHK-REF-1", `${customer}/topup-dbchk.webp`, ACTOR, "harness top-up", null]);
     ok("topup accepted", t.err === null);
     if (t.err) throw new Error("topup seed failed: " + t.err.message);
     ok("topup doc is an RCT- number", /^RCT-\d{4}-\d{6}$/.test(String(t.row?.doc_number)));
@@ -296,6 +298,76 @@ async function main(): Promise<void> {
     );
     check("refusal left Balance unmoved", await balance(customer), TOPUP);
     check("refusal left Available unmoved", await available(customer), AVAILABLE);
+
+    // =====================================================================
+    // ENTRY DATE (0208) — THE RULING, MEASURED BOTH WAYS.
+    //
+    // A top-up is recorded on the date the operator picks, and any date is
+    // allowed including a future one. The date is a RECORD AND DISPLAY fact:
+    // Balance and Available keep summing every row regardless of it, so a
+    // back-dated and a future-dated top-up must each move both figures by
+    // exactly their own amount, IMMEDIATELY.
+    //
+    // This is the assertion that fails the day somebody "improves" the balance
+    // views with an `entry_date <= today` predicate — at which point a
+    // future-dated top-up would sit invisible in the ledger while the customer
+    // has already handed the money over.
+    // =====================================================================
+    await scenario("entry_date: a back-dated and a future-dated top-up both land in full", async () => {
+      // THE DATE IS READ BACK AS TEXT, CAST IN SQL. The RPC returns a composite
+      // whose date column the driver hands over as a JS Date, and every way of
+      // turning that back into a day — toISOString(), local formatting, slicing
+      // the stringified object — can land on the wrong calendar day depending
+      // on the machine's timezone. `entry_date::text` is rendered by Postgres
+      // as the stored day, so the comparison is against the column itself.
+      const entryDateOf = async (id: string): Promise<string> =>
+        (await c.query(`select entry_date::text d from public.customer_ledger where id = $1`, [id])).rows[0].d;
+
+      const BACK = 100.25;
+      const AHEAD = 55.75;
+      const BACK_DATE = "2020-03-15";
+      const AHEAD_DATE = "2099-12-31";
+
+      const balBefore = await balance(customer);
+      const availBefore = await available(customer);
+
+      const b = await rpc(TOPUP_SQL, [customer, BACK, "cash", null, null, ACTOR, "back-dated", BACK_DATE]);
+      ok("back-dated top-up accepted", b.err === null);
+      if (b.err) return console.log(`          db said: ${b.err.message.split("\n")[0]}`);
+      check("back-dated row carries the picked date, not today", await entryDateOf(b.row!.id as string), BACK_DATE);
+      check("Balance moved by the full amount, immediately", await balance(customer), money(balBefore + BACK));
+      check("Available moved by the full amount too", await available(customer), money(availBefore + BACK));
+
+      const f = await rpc(TOPUP_SQL, [customer, AHEAD, "cash", null, null, ACTOR, "future-dated", AHEAD_DATE]);
+      ok("FUTURE-dated top-up accepted (any date is legal)", f.err === null);
+      if (f.err) return console.log(`          db said: ${f.err.message.split("\n")[0]}`);
+      check("future-dated row carries the picked date", await entryDateOf(f.row!.id as string), AHEAD_DATE);
+      check("Balance counts the future-dated row in full", await balance(customer), money(balBefore + BACK + AHEAD));
+      check("Available counts it too — no date predicate anywhere", await available(customer), money(availBefore + BACK + AHEAD));
+
+      // THE CONTROL. Both figures above would also agree if the two top-ups
+      // had simply not been written, so prove the rows are really there and
+      // really dated apart from today.
+      const dates = (
+        await c.query(
+          `select to_char(entry_date, 'YYYY-MM-DD') d from public.customer_ledger
+            where customer_id = $1 and entry_type = 'topup' order by entry_date`,
+          [customer],
+        )
+      ).rows.map((r: { d: string }) => r.d);
+      ok("CONTROL: both picked dates are stored, and neither is today", dates.includes(BACK_DATE) && dates.includes(AHEAD_DATE));
+
+      // An undated top-up still lands on today — the default the app relies on.
+      const d = await rpc(TOPUP_SQL, [customer, 1, "cash", null, null, ACTOR, "undated", null]);
+      ok("undated top-up accepted", d.err === null);
+      if (!d.err) {
+        check(
+          "…and is dated today in Riyadh",
+          await entryDateOf(d.row!.id as string),
+          (await c.query(`select ((now() at time zone 'Asia/Riyadh')::date)::text d`)).rows[0].d,
+        );
+      }
+    });
 
     await scenario("refund of EXACTLY Available (cap is >, not >=)", async () => {
       const r = await rpc(REFUND_SQL, [customer, AVAILABLE, "cash", null, null, ACTOR, "harness refund"]);
@@ -325,10 +397,10 @@ async function main(): Promise<void> {
     // INPUT GATES + ANON (CLAUDE.md §6).
     // =====================================================================
     console.log("\n-- input gates and grants");
-    await refuses("topup of zero", TOPUP_SQL, [customer, 0, "cash", null, null, ACTOR, null], "greater than zero");
-    await refuses("topup without an actor", TOPUP_SQL, [customer, 100, "cash", null, null, "  ", null], "Actor identity");
+    await refuses("topup of zero", TOPUP_SQL, [customer, 0, "cash", null, null, ACTOR, null, null], "greater than zero");
+    await refuses("topup without an actor", TOPUP_SQL, [customer, 100, "cash", null, null, "  ", null, null], "Actor identity");
     await refuses("refund of zero", REFUND_SQL, [customer, 0, "cash", null, null, ACTOR, null], "greater than zero");
-    await refuses("anon denied record_topup", TOPUP_SQL, [customer, 100, "cash", null, null, ACTOR, null], "permission denied", "anon");
+    await refuses("anon denied record_topup", TOPUP_SQL, [customer, 100, "cash", null, null, ACTOR, null, null], "permission denied", "anon");
     await refuses("anon denied record_refund", REFUND_SQL, [customer, 100, "cash", null, null, ACTOR, null], "permission denied", "anon");
 
     // =====================================================================

@@ -24,17 +24,12 @@ import type { CompanySettings, InvoicePaymentMethod } from "../db-types";
 import { DASH, num2 } from "../docPrimitives";
 import { paymentMethodLabel } from "../enum-labels";
 import { arText, fill, t, type Lang } from "../i18n";
-import { formatDateLang, formatDateTimeLang } from "../utils";
+import { formatDateLang, formatDayKeyLang } from "../utils";
 import type { DocIdent, DocPair } from "./exitPermit";
 
 // Same sheet-date ruling as lib/docvm/exitPermit.ts: named month so the
 // language has something to act on; numeric dates are not language-aware.
 const DOC_DATE = { year: "numeric", month: "short", day: "numeric" } as const;
-const DOC_DATETIME = {
-  ...DOC_DATE,
-  hour: "numeric",
-  minute: "2-digit",
-} as const;
 
 export type LedgerDocKind = "topup" | "refund";
 
@@ -57,7 +52,17 @@ export type LedgerDocInput = {
   method: string | null;
   reference: string | null;
   note: string | null;
-  /** timestamptz of the row, and the session email that wrote it. */
+  /** THE DAY THE MONEY MOVED (0208), as "YYYY-MM-DD" — the date the operator
+   *  picked on a top-up, the row's own day on every other kind. This is the
+   *  Date the sheet prints.
+   *
+   *  IT IS NOT `createdAt`, AND THAT WAS THE BUG: the receipt printed the
+   *  moment the row was written, so a top-up recorded today for money that
+   *  arrived last week handed the customer a receipt dated today — a paper
+   *  that disagrees with the ledger, the statement and the money. */
+  entryDate: string;
+  /** timestamptz of the row, and the session email that wrote it. Kept for the
+   *  audit trail; the sheet's Date reads entryDate above. */
   createdAt: string;
   createdBy: string | null;
 
@@ -126,7 +131,11 @@ export function buildLedgerDocVm(input: LedgerDocInput): LedgerDocVm {
   const ident: DocIdent[] = [
     {
       label: t("common.date", lang),
-      value: formatDateTimeLang(input.createdAt, lang, DOC_DATETIME),
+      // A DAY, NOT AN INSTANT — entry_date is a calendar date, so printing a
+      // time beside it would be inventing one. formatDayKeyLang builds the
+      // date in UTC from the key's own parts, so the printed day cannot shift
+      // with the machine's timezone.
+      value: formatDayKeyLang(input.entryDate, lang),
       num: true,
     },
     { label: t("trips.finance.colMethod", lang), value: methodLabel },

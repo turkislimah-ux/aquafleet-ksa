@@ -1770,12 +1770,12 @@ const stmtBalance = (rows: StatementLedgerEntry[]) =>
 // interleaved on purpose so the merge has to sort rather than concatenate.
 
 const BUSY_LEDGER: StatementLedgerEntry[] = [
-  { id: "sl-1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000001", invoice_number: null, method: "bank_transfer", reference: "TRF-88120", note: null, created_at: "2026-01-05T09:00:00Z" },
-  { id: "sl-2", entry_type: "invoice_draw", amount_sar: -STMT_RATE_INC, doc_number: null, invoice_number: "026-000004", method: null, reference: null, note: null, created_at: "2026-01-12T08:00:00Z" },
-  { id: "sl-3", entry_type: "balance_applied", amount_sar: -800, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-20T10:00:00Z" },
-  { id: "sl-4", entry_type: "draw_reversal", amount_sar: STMT_RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: "Invoice cancelled", created_at: "2026-02-25T09:30:00Z" },
-  { id: "sl-5", entry_type: "refund", amount_sar: -1500, doc_number: "CN-2026-000001", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-03-20T13:00:00Z" },
-  { id: "sl-6", entry_type: "correction", amount_sar: 250.25, doc_number: null, invoice_number: null, method: null, reference: null, note: "Bank fee reversed", created_at: "2026-03-25T15:00:00Z" },
+  { id: "sl-1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000001", invoice_number: null, method: "bank_transfer", reference: "TRF-88120", note: null, created_at: "2026-01-05T09:00:00Z", entry_date: "2026-01-05" },
+  { id: "sl-2", entry_type: "invoice_draw", amount_sar: -STMT_RATE_INC, doc_number: null, invoice_number: "026-000004", method: null, reference: null, note: null, created_at: "2026-01-12T08:00:00Z", entry_date: "2026-01-12" },
+  { id: "sl-3", entry_type: "balance_applied", amount_sar: -800, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-20T10:00:00Z", entry_date: "2026-02-20" },
+  { id: "sl-4", entry_type: "draw_reversal", amount_sar: STMT_RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: "Invoice cancelled", created_at: "2026-02-25T09:30:00Z", entry_date: "2026-02-25" },
+  { id: "sl-5", entry_type: "refund", amount_sar: -1500, doc_number: "CN-2026-000001", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-03-20T13:00:00Z", entry_date: "2026-03-20" },
+  { id: "sl-6", entry_type: "correction", amount_sar: 250.25, doc_number: null, invoice_number: null, method: null, reference: null, note: "Bank fee reversed", created_at: "2026-03-25T15:00:00Z", entry_date: "2026-03-25" },
 ];
 
 const BUSY_TRIPS: ConsumingTrip[] = [
@@ -1874,6 +1874,7 @@ for (let m = 0; m < 10; m++) {
     reference: m % 2 === 0 ? `TRF-2026-${9000 + m}` : null,
     note: null,
     created_at: `2026-${mm}-01T08:00:00Z`,
+    entry_date: `2026-${mm}-01`,
   });
   for (let d = 0; d < 14; d++) {
     const day = String(2 + d).padStart(2, "0");
@@ -1899,6 +1900,7 @@ for (let m = 0; m < 10; m++) {
     reference: null,
     note: null,
     created_at: `2026-${mm}-27T16:00:00Z`,
+    entry_date: `2026-${mm}-27`,
   });
   LONG_PAYMENTS.push({
     id: `sll-p${m}`,
@@ -1958,12 +1960,12 @@ write(
 // one thing that must never happen (invoiceEra picks one), and a fixture that
 // did it would print the defect as if it were the spec.
 const PARTIAL_LEDGER: StatementLedgerEntry[] = [
-  { id: "sp-l1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000031", invoice_number: null, method: "bank_transfer", reference: "TRF-2026-4410", note: null, created_at: "2026-04-01T08:00:00Z" },
-  { id: "sp-l2", entry_type: "balance_applied", amount_sar: -5000, doc_number: null, invoice_number: "026-000031", method: null, reference: null, note: null, created_at: "2026-04-05T16:00:00Z" },
+  { id: "sp-l1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000031", invoice_number: null, method: "bank_transfer", reference: "TRF-2026-4410", note: null, created_at: "2026-04-01T08:00:00Z", entry_date: "2026-04-01" },
+  { id: "sp-l2", entry_type: "balance_applied", amount_sar: -5000, doc_number: null, invoice_number: "026-000031", method: null, reference: null, note: null, created_at: "2026-04-05T16:00:00Z", entry_date: "2026-04-05" },
   // The top-up that lands BETWEEN the two instalments. It is here to make the
   // flat-across-a-payment property visible: the balance moves on this row and
   // on nothing else in the gap.
-  { id: "sp-l3", entry_type: "topup", amount_sar: 7500, doc_number: "RCT-2026-000032", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-04-16T09:30:00Z" },
+  { id: "sp-l3", entry_type: "topup", amount_sar: 7500, doc_number: "RCT-2026-000032", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-04-16T09:30:00Z", entry_date: "2026-04-16" },
 ];
 
 const PARTIAL_INVOICE_PAYMENTS: StatementInvoicePaymentInput[] = [

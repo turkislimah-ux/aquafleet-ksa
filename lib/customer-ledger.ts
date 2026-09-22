@@ -68,6 +68,12 @@ export type LedgerEntryRow = {
   note: string | null;
   created_by: string | null;
   created_at: string;
+  // THE DAY THE MONEY MOVED (0208). Operator-picked on a top-up — any date,
+  // future included — and the column default (today in Riyadh) on every other
+  // writer, so for a refund, a draw or a reversal it is simply that row's own
+  // day. DISPLAY AND ORDERING ONLY: no balance reads it, and a back-dated row
+  // moves Balance and Available the instant it is written.
+  entry_date: string;
   // Joined for display: the human invoice number behind invoice-linked rows.
   invoice: { invoice_number: string | null } | null;
 };
@@ -186,7 +192,7 @@ export async function fetchLedgerEntries(supabase: Db) {
   return supabase
     .from("customer_ledger")
     .select(
-      "id, customer_id, entry_type, amount_sar, invoice_id, doc_number, reversal_of, method, reference, photo_path, note, created_by, created_at, invoice:invoices(invoice_number)",
+      "id, customer_id, entry_type, amount_sar, invoice_id, doc_number, reversal_of, method, reference, photo_path, note, created_by, created_at, entry_date, invoice:invoices(invoice_number)",
     )
     .order("customer_id")
     .order("created_at", { ascending: true })

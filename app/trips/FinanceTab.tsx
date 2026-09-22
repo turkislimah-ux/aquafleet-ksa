@@ -431,9 +431,9 @@ export default function FinanceTab({
       .map((e): AddBalanceHistoryRow => ({
         id: e.id,
         amount_sar: e.amount_sar,
-        // created_at is timestamptz; the list shows the calendar day, same
-        // convention as the statement's date column (first 10 chars).
-        topup_date: e.created_at.slice(0, 10),
+        // The day the money moved, as the operator recorded it (0208) — not
+        // the day the row was written.
+        topup_date: e.entry_date,
         method: e.method === "cash" || e.method === "bank_transfer" ? e.method : null,
         reference: e.reference,
         photo_path: e.photo_path,
@@ -457,6 +457,7 @@ export default function FinanceTab({
       reference: e.reference,
       note: e.note,
       created_at: e.created_at,
+      entry_date: e.entry_date,
     }));
   }, [statementFor, activeStatementRow, entriesByCustomer]);
 

@@ -76,15 +76,15 @@ const RATE_INC = round2(RATE * 1.15);
 // exercises every one of the six entry types, because each maps to its own
 // Type label and row ink and an unexercised arm is an unguarded one.
 const ledgerRows: StatementLedgerEntry[] = [
-  { id: "le-1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000001", invoice_number: null, method: "bank_transfer", reference: "TRF-88120", note: null, created_at: "2026-01-05T09:00:00Z" },
-  { id: "le-2", entry_type: "invoice_draw", amount_sar: -RATE_INC, doc_number: null, invoice_number: "026-000004", method: null, reference: null, note: null, created_at: "2026-01-12T08:00:00Z" },
-  { id: "le-3", entry_type: "invoice_draw", amount_sar: -RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-14T06:05:00Z" },
-  { id: "le-4", entry_type: "balance_applied", amount_sar: -800, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-20T10:00:00Z" },
-  { id: "le-5", entry_type: "draw_reversal", amount_sar: RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: "Invoice cancelled", created_at: "2026-02-25T09:30:00Z" },
-  { id: "le-6", entry_type: "topup", amount_sar: 5000, doc_number: "RCT-2026-000002", invoice_number: null, method: "bank_transfer", reference: "TRF-91007", note: null, created_at: "2026-03-02T11:00:00Z" },
-  { id: "le-7", entry_type: "refund", amount_sar: -1500, doc_number: "CN-2026-000001", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-03-20T13:00:00Z" },
-  { id: "le-8", entry_type: "correction", amount_sar: 250.25, doc_number: null, invoice_number: null, method: null, reference: null, note: "Bank fee reversed", created_at: "2026-03-25T15:00:00Z" },
-  { id: "le-9", entry_type: "correction", amount_sar: -100.1, doc_number: null, invoice_number: null, method: null, reference: null, note: "Duplicate keying", created_at: "2026-03-28T15:00:00Z" },
+  { id: "le-1", entry_type: "topup", amount_sar: 20000, doc_number: "RCT-2026-000001", invoice_number: null, method: "bank_transfer", reference: "TRF-88120", note: null, created_at: "2026-01-05T09:00:00Z", entry_date: "2026-01-05" },
+  { id: "le-2", entry_type: "invoice_draw", amount_sar: -RATE_INC, doc_number: null, invoice_number: "026-000004", method: null, reference: null, note: null, created_at: "2026-01-12T08:00:00Z", entry_date: "2026-01-12" },
+  { id: "le-3", entry_type: "invoice_draw", amount_sar: -RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-14T06:05:00Z", entry_date: "2026-02-14" },
+  { id: "le-4", entry_type: "balance_applied", amount_sar: -800, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: null, created_at: "2026-02-20T10:00:00Z", entry_date: "2026-02-20" },
+  { id: "le-5", entry_type: "draw_reversal", amount_sar: RATE_INC, doc_number: null, invoice_number: "026-000005", method: null, reference: null, note: "Invoice cancelled", created_at: "2026-02-25T09:30:00Z", entry_date: "2026-02-25" },
+  { id: "le-6", entry_type: "topup", amount_sar: 5000, doc_number: "RCT-2026-000002", invoice_number: null, method: "bank_transfer", reference: "TRF-91007", note: null, created_at: "2026-03-02T11:00:00Z", entry_date: "2026-03-02" },
+  { id: "le-7", entry_type: "refund", amount_sar: -1500, doc_number: "CN-2026-000001", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-03-20T13:00:00Z", entry_date: "2026-03-20" },
+  { id: "le-8", entry_type: "correction", amount_sar: 250.25, doc_number: null, invoice_number: null, method: null, reference: null, note: "Bank fee reversed", created_at: "2026-03-25T15:00:00Z", entry_date: "2026-03-25" },
+  { id: "le-9", entry_type: "correction", amount_sar: -100.1, doc_number: null, invoice_number: null, method: null, reference: null, note: "Duplicate keying", created_at: "2026-03-28T15:00:00Z", entry_date: "2026-03-28" },
 ];
 
 // What v_customer_ledger_balance would say over these rows: round(sum, 2) in
@@ -356,7 +356,7 @@ const vmExtra = buildStatementVm({
   ...basePrepaid,
   ledger: [
     ...ledgerRows,
-    { id: "le-99", entry_type: "topup", amount_sar: 7777.77, doc_number: "RCT-2026-000099", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-04-01T07:00:00Z" },
+    { id: "le-99", entry_type: "topup", amount_sar: 7777.77, doc_number: "RCT-2026-000099", invoice_number: null, method: "cash", reference: null, note: null, created_at: "2026-04-01T07:00:00Z", entry_date: "2026-04-01" },
   ],
 });
 const missExtra = missingFrom(vmExtra, htmlPrepaid);
@@ -1350,10 +1350,10 @@ console.log("\n=== 16. A settlement's two halves sit together ===");
     ledger: [
       { id: "ld-A", entry_type: "balance_applied", amount_sar: -400, doc_number: null,
         invoice_number: "026-000111", method: null, reference: null, note: null,
-        created_at: `${DAY}T10:00:00Z` },
+        created_at: `${DAY}T10:00:00Z`, entry_date: DAY },
       { id: "ld-B", entry_type: "balance_applied", amount_sar: -250, doc_number: null,
         invoice_number: "026-000222", method: null, reference: null, note: null,
-        created_at: `${DAY}T14:00:00Z` },
+        created_at: `${DAY}T14:00:00Z`, entry_date: DAY },
     ],
     invoicePayments: [
       { id: "ip-A", invoice_id: "iA", invoice_number: "026-000111", amount_sar: 100,
@@ -1440,11 +1440,11 @@ console.log("\n=== 17. Row kind matches the Type label it is inking ===");
     ledger: [
       { id: "ik-draw", entry_type: "invoice_draw", amount_sar: -400, doc_number: null,
         invoice_number: "026-000111", method: null, reference: null, note: null,
-        created_at: `${DAY}T10:00:00Z` },
+        created_at: `${DAY}T10:00:00Z`, entry_date: DAY },
       { id: "ik-appl", entry_type: "balance_applied", amount_sar: -250, doc_number: null,
         invoice_number: "026-000222", method: null, reference: null,
         note: "A note long enough that the statement's ten-rem Note column clips it",
-        created_at: `${DAY}T11:00:00Z` },
+        created_at: `${DAY}T11:00:00Z`, entry_date: DAY },
     ],
     invoicePayments: partialPayments,
   });

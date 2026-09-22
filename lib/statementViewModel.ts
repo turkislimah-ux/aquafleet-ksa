@@ -218,8 +218,11 @@ export type StatementLedgerEntry = {
   method: string | null;
   reference: string | null;
   note: string | null;
-  /** timestamptz. The row's date on the statement is its first 10 chars. */
+  /** timestamptz — the moment the row was written. ORDERS the row. */
   created_at: string;
+  /** The day the money moved (0208) — operator-picked on a top-up, this row's
+   *  own day on every other writer. DATES the row. */
+  entry_date: string;
 };
 
 // One special charge, as invoice_special_charges stores it. `charge_date` is
@@ -649,7 +652,14 @@ export function buildStatementVm(input: StatementVmInput): StatementVm {
     const events: PrepaidEvent[] = [
       ...ledger.map(
         (e): PrepaidEvent => ({
-          date: e.created_at.slice(0, 10),
+          // DATED BY `entry_date`, ORDERED BY `created_at` — the same split the
+          // invoice payments below already use, for the same reason: a top-up
+          // keyed in today for money that arrived last week belongs on last
+          // week's line, and then sorts after that day's other money rows
+          // because it is the last thing we learned about that day. For every
+          // writer but the top-up the two agree by construction, so nothing
+          // else on the statement moves.
+          date: e.entry_date,
           rank: 0,
           tie: moneyTie(e.created_at, e.id),
           src: "ledger",
