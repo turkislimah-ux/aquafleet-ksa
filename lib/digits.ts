@@ -68,16 +68,6 @@ export function toLatinDigits(value: string | null | undefined): string | null |
 }
 
 /**
- * True when the string carries at least one Arabic-Indic digit. Exists so a
- * caller can REPORT a value rather than silently rewrite it — used by the
- * data-audit script, never by a write path.
- */
-export function hasNonLatinDigits(value: string | null | undefined): boolean {
-  if (!value) return false;
-  return NON_LATIN_DIGIT.test(value);
-}
-
-/**
  * Fold an UNCONTROLLED identifier input in place, as the value arrives.
  *
  * Wire it to `onInput`, never `onKeyDown`. `input` is the one event that fires

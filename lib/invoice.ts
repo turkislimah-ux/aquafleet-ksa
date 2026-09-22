@@ -205,8 +205,9 @@
 //
 // The two rounding conventions still differ by up to a halala, as they always
 // did; the difference now has a defined home (covered's VAT) instead of
-// leaking into whether the invoice adds up. scripts/invoice-check.ts asserts
-// the identity on EVERY case, both modes — see reconciles().
+// leaking into whether the invoice adds up. scripts/invoice-flow-check.ts §B
+// (ASSEMBLY LAWS) asserts the identity on EVERY case, both modes — see its
+// reconciles().
 //
 // POSTPAID — completely unchanged (per Step 3 instruction, do not touch):
 // no balance/FIFO/coverage concept applies. coveredLines is always [],
@@ -327,14 +328,15 @@ export type InvoiceTableTotals = {
 // a document that has no business computing one — it re-derived a customer-wide
 // ledger from whichever slice of history a single invoice happened to see, and
 // so contradicted the statement, the Finance row and the next invoice in the
-// same breath. The invoice now prints a PAID-UP BALANCE instead
-// (lib/prepaid.ts's paidUpBalance), which is a property of the CUSTOMER at an
+// same breath. The invoice now prints a PAID-UP BALANCE instead — summed from
+// customer_ledger as of the freeze instant by loadPaidUpBalance()
+// (app/trips/invoiceActions.ts), which is a property of the CUSTOMER at an
 // instant, not of the document. The running balance has exactly one home: the
 // statement (Plan A) and the Finance row that mirrors it.
 //
-// Do not reintroduce a balance term here. scripts/invoice-check.ts asserts its
-// absence, and scripts/invoice-render-parity-check.ts asserts no renderer
-// prints one.
+// Do not reintroduce a balance term here. This type having exactly two fields
+// is the guard, and scripts/invoice-render-parity-check.ts asserts no renderer
+// prints one off a table foot.
 export type InvoiceTripTableTotals = {
   covered: number;
   unpaid: number;

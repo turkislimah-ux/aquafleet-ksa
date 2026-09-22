@@ -34,7 +34,6 @@ import type {
   InvoicePaymentMethod,
   InvoiceStatus,
   PaymentMode,
-  ProjectStatus,
   TripStage,
   WaterType,
 } from "@/lib/db-types";
@@ -86,16 +85,6 @@ export function waterTypeLabel(v: WaterType | null | undefined, lang: Lang): str
   switch (v) {
     case "potable": return t("labels.waterPotable", lang);
     case "non_potable": return t("labels.waterNonPotable", lang);
-    default: return "";
-  }
-}
-
-/** PROJECT_STATUS_LABELS. The Arabic already existed — Batch 8 added it. */
-export function projectStatusLabel(v: ProjectStatus | null | undefined, lang: Lang): string {
-  switch (v) {
-    case "active": return t("labels.projActive", lang);
-    case "paused": return t("labels.projPaused", lang);
-    case "ended": return t("labels.projEnded", lang);
     default: return "";
   }
 }

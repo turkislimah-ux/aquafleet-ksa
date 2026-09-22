@@ -8279,9 +8279,10 @@ export const dict = {
       // must not there, so one leaf would have been wrong on one side.
       fReturned: { en: "Returned", ar: "المبلغ المُعاد" },
       // `Method`, `Returned on` and the cash/bank_transfer pair moved to
-      // `archive.ret.*`: ReturnBalanceModal WRITES the same three columns this
-      // popup READS, so they are the balance-return surface's vocabulary, not
-      // the customer tab's.
+      // `archive.ret.*`: ReturnBalanceModal WRITES the refund this popup READS
+      // BACK (record_refund → customer_ledger, surfaced as
+      // ArchiveCustomerFundsRow), so they are the refund surface's vocabulary,
+      // not the customer tab's.
 
       // Name (Arabic) / Phone / Email are `archive.fNameAr` / `archive.fPhone`
       // / `archive.fEmail` — the terminated-person popup renders the same
@@ -8502,25 +8503,26 @@ export const dict = {
 
     // -----------------------------------------------------------------------
     // BALANCE RETURN — app/archive/ReturnBalanceModal.tsx, and the three
-    // columns of it that app/archive/ArchiveCustomerTab.tsx reads back.
+    // fields of it that app/archive/ArchiveCustomerTab.tsx reads back.
     //
     // ITS OWN SUB-NAMESPACE BECAUSE THE SURFACE IS SHARED, NOT THE FILE. The
-    // modal WRITES customer_balance_returns and the customer popup DISPLAYS the
-    // row it wrote, so `fMethod`, `fReturnedOn` and `method.*` are read from
-    // both files — the same test that promoted `fNameAr` / `fPhone` / `fEmail`
-    // to this root. They were in `archive.customer` while it had one reader.
+    // modal WRITES a refund through record_refund (a customer_ledger row) and
+    // the customer popup DISPLAYS what it wrote, so `fMethod`, `fReturnedOn`
+    // and `method.*` are read from both files — the same test that promoted
+    // `fNameAr` / `fPhone` / `fEmail` to this root. They were in
+    // `archive.customer` while it had one reader.
     //
     // THERE IS NO AMOUNT LEAF THAT TAKES INPUT, and there must never be one.
-    // The figure is read server-side by return_customer_balance() and frozen
-    // into the row (0139); the modal only SHOWS it. See that file's header.
+    // The modal only SHOWS the figure (Available) and record_refund re-checks
+    // the cap under the customer row lock. See that file's header.
     // -----------------------------------------------------------------------
     ret: {
       title: { en: "Return balance", ar: "إعادة الرصيد" },
       fMethod: { en: "Method", ar: "الطريقة" },
       fReturnedOn: { en: "Returned on", ar: "تاريخ الإعادة" },
-      // customer_balance_returns.returned_method — a fixed pair, keyed off the
-      // stored value in the popup and off the radio's own value in the modal.
-      // Never off the rendered label.
+      // The refund's method — a fixed pair, keyed off the stored ledger value
+      // in the popup and off the radio's own value in the modal. Never off the
+      // rendered label.
       method: {
         bank_transfer: { en: "Bank transfer", ar: "تحويل بنكي" },
         cash: { en: "Cash", ar: "نقدًا" },

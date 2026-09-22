@@ -1394,11 +1394,13 @@ export type ArchiveProjectResult = {
 // filter, but stay in the DB for history/restore.
 //
 // SINCE 0139 THIS GOES THROUGH archive_project_guarded, NOT archive_project.
-// The guard reads v_customer_amount_payable — the one definition of what the
-// customer owes — and refuses while the figure is negative. 0019's unguarded
-// archive_project() was the back door around that guard, and migration 0140
-// DROPPED it — archive_project_guarded is now the only archive path that
-// exists in the database. Do not add a second one.
+// The guard reads v_customer_available — Balance and Uninvoiced, the ledger's
+// own columns (0203 §14, which replaced the retired v_customer_amount_payable
+// read) — and refuses while Balance is non-zero OR Uninvoiced is above zero:
+// you cannot archive away a debt, and you cannot archive away money we still
+// hold for them. 0019's unguarded archive_project() was the back door around
+// that guard, and migration 0140 DROPPED it — archive_project_guarded is now
+// the only archive path that exists in the database. Do not add a second one.
 //
 // overrideReason is the MANAGER OVERRIDE, and an override is a WRITE-OFF: the
 // RPC records amount + reason + actor + timestamp in customer_write_offs, which

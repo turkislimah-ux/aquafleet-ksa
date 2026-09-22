@@ -8,10 +8,10 @@
 // the value could not simply be read across. The alternatives were to recompute
 // it there (a money rule copied twice is a money rule that can drift in one
 // place, which a69a06d's own message and .claude/skills/aquafleet-domain
-// both forbid) or to fetch v_customer_amount_payable (0139) — which is now
-// doubly wrong, because that view is no longer even the same number for a
-// prepaid customer (see THE VIEW below). So the rule lives here, in a leaf
-// module that imports nothing from either caller. Same shape as
+// both forbid) or to fetch v_customer_amount_payable (0139) — which is not an
+// option at all any more: 0207 dropped that view (see THE OLD VIEW below). So
+// the rule lives here, in a leaf module that imports nothing from either
+// caller. Same shape as
 // DeliveriesReportBand (b0c386c), which was extracted for the same reason:
 // ProjectsBoard and BreakdownReport both import it one way, so no sibling
 // cycle can form.
@@ -28,20 +28,20 @@
 // ALL, because a money function that accepts a pool argument reads as one that
 // spends it, and that reading is exactly the old behaviour we removed.
 //
-// THE PREPAID RUNNING BALANCE IS A DIFFERENT NUMBER AND STILL DEDUCTS AT
-// DELIVERY (Model A, untouched). It is derivedBalanceItems() over UNFILTERED
-// inputs — FinanceTab computes it separately and it drives the Running Balance
-// column, the over-balance banner, Settled Balance and the statement. The two
-// figures decoupled deliberately, and a prepaid customer can now hold pool
-// credit AND owe for delivered work at the same time. That is the model.
+// A PREPAID CUSTOMER'S OWN MONEY IS A DIFFERENT NUMBER, AND IT IS NEVER
+// COMPUTED APP-SIDE (0203). It is three view columns: Balance
+// (v_customer_ledger_balance), Uninvoiced (v_customer_uninvoiced) and
+// Available (v_customer_available, Balance − Uninvoiced, subtracted IN the
+// view). Delivering work moves Available, not Balance; Balance moves only when
+// a ledger row is written. Those figures and this one are decoupled
+// deliberately, and a prepaid customer can hold credit AND owe for delivered
+// work at the same time. That is the model.
 //
-// THE VIEW, v_customer_amount_payable (0139), NO LONGER MIRRORS THIS FUNCTION
-// FOR PREPAID, AND MUST NOT BE "RECONCILED" WITH IT. Its prepaid arm stays the
-// running balance because return_customer_balance() gates a real cash refund on
-// `amount_payable_sar > 0` and the archive guard reads the same row — flipping
-// the view to this rule would make a debtor's figure positive and refund them
-// their own debt. The divergence is load-bearing; see
-// .claude/skills/aquafleet-domain/SKILL.md.
+// THE OLD VIEW, v_customer_amount_payable (0139), IS GONE. It once mirrored
+// this function, then diverged from it for prepaid, and 0206 repointed the
+// whole receivables stack onto the ledger before 0207 dropped it. There is
+// nothing left to reconcile against, and nothing should be recreated to be
+// reconciled against; see .claude/skills/aquafleet-domain/SKILL.md.
 //
 // SIGN IS THE MEANING, not decoration. Negative = owed to us. Zero = settled.
 // The result is <= 0 by construction in BOTH modes now: with the credits side

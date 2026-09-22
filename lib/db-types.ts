@@ -337,24 +337,6 @@ export type Truck = {
   driver_before_maintenance: string | null;
 };
 
-export const TRUCK_TERMINATION_REASON_LABELS: Record<"sold" | "total_loss", string> = {
-  sold: "Sold",
-  total_loss: "Total loss",
-};
-
-export const DRIVER_STATUS_LABELS: Record<DriverStatus, string> = {
-  active: "Active",
-  on_leave: "On leave",
-  inactive: "Inactive",
-};
-
-export const TRUCK_STATUS_LABELS: Record<TruckStatus, string> = {
-  active: "Active",
-  idle: "Idle",
-  maintenance: "Maintenance",
-  out_of_service: "Out of service",
-};
-
 // Operation stations (migration 0022) — the truck/driver/staff BASE (where
 // they start from). Separate from water_stations (where a truck FILLS, see
 // migration 0014's "do NOT unify" note). `drivers.home_station`,
@@ -526,23 +508,8 @@ export type Trip = {
   invoice_id: string | null;
 };
 
-// customer_topups row (0025) — the RETIRED pre-ledger top-up table. Dummy
-// data; nothing app-side reads it any more (0206), and 0207 drops it.
-export type CustomerTopup = {
-  id: string;
-  customer_id: string;
-  amount_sar: number; // pre-VAT
-  topup_date: string;
-  note: string | null;
-  reference: string | null; // surfaced in the UI as "ETF Ref. number"
-  // Add Balance restructure (Batch B, migration 0040) — cash/bank_transfer
-  // choice + proof photo, same shape as invoices' payment_method/proof.
-  // Nullable: legacy rows predate this batch, no backfill.
-  method: "cash" | "bank_transfer" | null;
-  photo_path: string | null;
-  entered_by: string | null;
-  created_at: string;
-};
+// CustomerTopup (customer_topups, 0025) is GONE — the app stopped reading it
+// in 0206 and 0207 dropped the table. Top-ups are customer_ledger rows.
 
 // company_settings row (0025, email added 0029, description/telephone/phone
 // added 0041, legal_name_ar added 0042) — singleton seller identity, appears
@@ -583,24 +550,15 @@ export type CompanySettings = {
   bank_accounts: unknown;
 };
 
-// invoice_special_charges row (0025, widened 0032) — mutable while the
-// parent invoice is draft/review; frozen into invoices.special_charges_
-// snapshot at confirm. charge_date/quantity/price_sar/image_path (0032) are
-// all optional — pre-batch-B rows have none of them on file, app code falls
-// back to amount_sar/quantity=1 for display (see lib/invoice.ts). image_path
-// is an internal-only reference (a receipt photo, etc.) — never surfaced on
-// the customer-facing invoice/print/PDF.
-export type InvoiceSpecialCharge = {
-  id: string;
-  invoice_id: string;
-  label: string;
-  amount_sar: number; // pre-VAT, = price_sar * quantity when both are set
-  charge_date: string | null;
-  quantity: number;
-  price_sar: number | null;
-  image_path: string | null;
-  created_at: string;
-};
+// invoice_special_charges (0025, widened 0032) is a LIVE table with no row
+// type here: every reader selects the columns it needs and types them at the
+// call site. Its rules still hold — mutable while the parent invoice is
+// draft/review, frozen into invoices.special_charges_snapshot at confirm;
+// charge_date/quantity/price_sar/image_path (0032) are optional because
+// pre-batch-B rows have none of them on file and display falls back to
+// amount_sar/quantity=1 (see lib/invoice.ts); image_path is internal-only
+// (a receipt photo, etc.) and never reaches the customer-facing
+// invoice/print/PDF.
 
 // Finance Commit 5 (0027): Draft -> Review -> Confirmed -> Paid, + Void.
 // See lib/invoice.ts for the assembly logic and CLAUDE.md/finance-invoice-
