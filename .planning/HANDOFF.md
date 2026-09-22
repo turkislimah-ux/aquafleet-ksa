@@ -1,10 +1,10 @@
 # SESSION HANDOFF
 
 ## State
-- **main = f3d9d3a. DB at 0209** (prod + test). No branches. Gates green
+- **main = f598d59. DB at 0210** (prod + test). No branches. Gates green
   (637 DB).
-- **LEDGER IS THE ONLY MODEL.** 0207 dropped both pool views,
-  return_customer_balance, dummy tables, invoice trip-id arrays,
+- **LEDGER IS THE ONLY MODEL.** 0207 dropped the pool views,
+  return_customer_balance, the dummy tables, the invoice trip-id arrays and
   projects.payment_mode. prepaid.ts gone; money.ts = primitives.
 - **0204:** confirm moves NO money — freezes amount_payable = grand_total.
   record_refund = the ONE refund door, capped by Available.
@@ -15,6 +15,9 @@
 - **Statement run = AVAILABLE**. draw/applied/reversal move it 0; trip/charge
   deduct round2(gross) at delivery; invoice_payments add; LEGACY neither.
   DATED entry_date, ORDERED created_at.
+- **0209/0210:** anon = 0 in public; authenticated closed on the 8 number
+  generators + 6 trigger fns — definer callers only, a direct .rpc FAILS.
+  vat_rate NOT pinned — stays inlinable (0190).
 - **customers.payment_mode = the ONE authority**, written only by the
   project RPCs behind can_switch_payment_mode.
 - **confirm_invoice = 18 args**; trip linkage = DRAFT reservation (0030).
@@ -23,9 +26,6 @@
 - **29 legacy invoices** render from frozen columns — do NOT drop.
 - **0208:** customer_ledger.entry_date — operator-picked, any date incl.
   future; record_topup 8 args. Balance/Available NEVER date-filtered.
-- **0209:** anon = 0 in public — tables, sequences, functions, and the
-  postgres default ACL. A new grant or sequence re-opens it.
-- **StickyTabs** (ui.tsx): `top-14` IS the header's h-14 — move both.
 - **PARKED:** dummy wipe; snapshot-drop STEP 2; leaked-password off.
 
 ## Rules
